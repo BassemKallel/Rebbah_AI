@@ -15,6 +15,7 @@ Dockerfile*
 
 # VSCode
 .vscode/
+.env
 
 # Data/Models
 *.bin
