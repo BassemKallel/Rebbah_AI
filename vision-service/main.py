@@ -16,9 +16,13 @@ model_name = "openai/clip-vit-base-patch32"
 processor = CLIPProcessor.from_pretrained(model_name)
 model = CLIPModel.from_pretrained(model_name)
 
+from typing import Optional
+
 class ImageRequest(BaseModel):
     image_url: str
     limit: int = 5
+    product_id: Optional[str] = None
+    shop_id: Optional[str] = None
 
 # Database connection helper
 def get_db_connection():
@@ -53,8 +57,44 @@ async def predict_embedding(request: ImageRequest):
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
         embedding = image_features.squeeze().tolist()
 
+        status_msg = "success"
+
+        # 4. Optional: Save to database if product details are provided
+        if request.product_id and request.shop_id:
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                
+                # Check if table exists, if not, create it (basic setup logic for POC)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS products_vector (
+                        id SERIAL PRIMARY KEY,
+                        product_id VARCHAR(255) NOT NULL,
+                        shop_id VARCHAR(255) NOT NULL,
+                        embedding vector(512),
+                        UNIQUE(product_id, shop_id)
+                    );
+                """)
+                
+                # Upsert the embedding
+                cur.execute("""
+                    INSERT INTO products_vector (product_id, shop_id, embedding)
+                    VALUES (%s, %s, %s::vector)
+                    ON CONFLICT (product_id, shop_id) 
+                    DO UPDATE SET 
+                        embedding = EXCLUDED.embedding;
+                """, (request.product_id, request.shop_id, embedding))
+                
+                conn.commit()
+                cur.close()
+                conn.close()
+                status_msg = "success (saved to db)"
+                
+            except psycopg2.Error as db_e:
+                status_msg = f"success but failed to save to db: {str(db_e)}"
+
         return {
-            "status": "success",
+            "status": status_msg,
             "embedding": embedding,
             "dimensions": len(embedding)
         }
@@ -85,12 +125,11 @@ async def search_similar_products(request: ImageRequest):
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Assumes a table named 'products' with an 'embedding' vector column
         # Uses cosine distance (<=>) for similarity
         cur.execute(
             """
-            SELECT id, name, price, external_id, 1 - (embedding <=> %s::vector) AS similarity
-            FROM products
+            SELECT product_id, shop_id, 1 - (embedding <=> %s::vector) AS similarity
+            FROM products_vector
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
@@ -101,10 +140,8 @@ async def search_similar_products(request: ImageRequest):
         for row in cur.fetchall():
             results.append({
                 "product_id": row[0],
-                "name": row[1],
-                "price": float(row[2]) if row[2] is not None else None,
-                "external_id": row[3],
-                "similarity_score": float(row[4])
+                "shop_id": row[1],
+                "similarity_score": float(row[2])
             })
             
         cur.close()
