@@ -3,6 +3,21 @@ services:
   backend-orchestrator:
     build: ./backend-orchestrator
     container_name: backend-orchestrator
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend-orchestrator:/app
+    env_file:
+      - .env
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    depends_on:
+      - db
+      - redis
+      - vector-db
+      - nlu-service
+      - vision-service
   nlu-service:
     build: ./nlu-service
     container_name: nlu-service
