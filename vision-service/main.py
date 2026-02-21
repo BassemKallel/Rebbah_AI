@@ -40,7 +40,7 @@ def get_db_connection():
 def health_check():
     return {"status": "ok", "service": "vision-service"}
 
-@app.post("/predict")
+@app.post("/vectorize")
 async def predict_embedding(request: ImageRequest):
     try:
         # 1. Download image
