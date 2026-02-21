@@ -3,3 +3,6 @@ uvicorn
 torch
 transformers
 pillow
+requests
+psycopg2-binary
+pgvector
