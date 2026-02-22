@@ -21,6 +21,7 @@ Dockerfile*
 *.bin
 *.pt
 postgres_data/
+*.safetensors
 
 # OS
 .DS_Store
