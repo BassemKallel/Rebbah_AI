@@ -1,0 +1,7 @@
+# Fichier CODEOWNERS
+# Ce fichier définit les propriétaires du code selon les dossiers/fichiers.
+# Les propriétaires (Codeowners) seront automatiquement ajoutés comme "Reviewers" des Pull Requests.
+# Leur approbation sera obligatoire pour pouvoir faire un "Merge" si les règles de protection de branche sont actives sur GitHub.
+
+# Par défaut, ce compte est propriétaire de tout le dépôt
+*       @BassemKallel
