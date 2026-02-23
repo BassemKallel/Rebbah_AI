@@ -70,9 +70,19 @@ class MessengerWebhookPOC(APIView):
                     # Merge NLU entities with Vision entities
                     for ent in nlu_data.get("entities", []):
                         extracted_entities[ent["label"]] = ent["text"]
+                        
             except requests.RequestException as e:
                 is_error = True
                 print(f"NLU API Error: {e}")
+                
+            # Fallback for POC: if NLU missed the product but recognized intent
+            if "product" not in extracted_entities:
+                text_lower = text.lower()
+                common_products = ["pull", "t-shirt", "veste", "pantalon", "robe"]
+                for cp in common_products:
+                    if cp in text_lower:
+                        extracted_entities["product"] = cp
+                        break
 
         # 5. Save the User Message to PostgreSQL
         Message.objects.create(
