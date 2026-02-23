@@ -1,6 +1,6 @@
 from django.urls import path
+from .views import MessengerWebhookPOC
 
-# We will define our Messenger POC view here later
 urlpatterns = [
-    # path('messenger/poc', views.messenger_webhook_poc, name='messenger_poc'),
+    path('messenger/poc', MessengerWebhookPOC.as_view(), name='messenger_poc'),
 ]
