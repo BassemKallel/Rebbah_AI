@@ -137,7 +137,7 @@ def predict_intent(text: str) -> IntentPrediction:
             confidence = probabilities[0][predicted_class].item()
         
         # Map to intent label
-        intent_label = INTENT_LABELS.get(predicted_class, "unknown")
+        intent_label = INTENT_LABELS.get(predicted_class, f"unknown_class_{predicted_class}")
         
         return IntentPrediction(
             intent=intent_label,
@@ -243,17 +243,12 @@ async def predict(request: MessageRequest):
         # Get intent prediction
         intent = predict_intent(request.message)
         
-        # Determine if we should extract entities based on the intent
-        # Extract entities ONLY IF the intent is ORDER_PRODUCT or INFORM_INFO
-        allowed_intents_for_extraction = ["ORDER_PRODUCT", "INFORM_INFO"]
-        entities = []
-        
-        if intent.intent in allowed_intents_for_extraction:
-            entities = extract_entities(
-                request.message,
-                labels=request.labels,
-                threshold=request.threshold
-            )
+        # Always extract entities to capture products/colors/sizes
+        entities = extract_entities(
+            request.message,
+            labels=request.labels,
+            threshold=request.threshold
+        )
         
         # Return combined response
         return NLUResponse(
