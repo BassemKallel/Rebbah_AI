@@ -6,7 +6,11 @@ from rest_framework import status
 
 from apps.crm.models import Lead, Conversation, Message
 from .context_manager import ContextManager
-from .response_templates import TEMPLATES, MISSING_ENTITY_TEMPLATES, REQUIRED_ORDER_ENTITIES
+from .response_templates import (
+    TEMPLATES, MISSING_ENTITY_TEMPLATES, REQUIRED_ORDER_ENTITIES,
+    DISAMBIGUATION_TEMPLATE, OUT_OF_STOCK_TEMPLATE,
+    ORDER_CONFIRMED_TEMPLATE, ORDER_CONFIRMED_NO_REF_TEMPLATE
+)
 
 # Internal service URLs
 NLU_URL = "http://nlu-service:8001/predict"
@@ -33,7 +37,7 @@ class MessengerWebhookPOC(APIView):
         lead, _ = Lead.objects.get_or_create(platform_id=user_id)
         
         # Assuming one active conversation for simplicity (can be enhanced based on state OR timeframe)
-        conversation = Conversation.objects.filter(lead=lead, state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY"]).first()
+        conversation = Conversation.objects.filter(lead=lead, state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION"]).first()
         if not conversation:
             conversation = Conversation.objects.create(lead=lead, shop_id=shop_id, state="NEW_CONVERSATION")
 
@@ -123,83 +127,220 @@ class MessengerWebhookPOC(APIView):
                     products = resp.json()
                     
                     if prod_name.startswith("Article_From_Image_"):
-                        # Exact ID match
+                        # Exact ID match from Vision service
                         target_id = prod_name.split("Article_From_Image_")[1]
                         for p in products:
                             if p["id"] == target_id:
                                 matched_product = p
                                 break
                     else:
-                        # Keyword match
-                        for p in products:
-                            if p["name"].lower() in prod_name.lower() or prod_name.lower() in p["name"].lower():
-                                matched_product = p
-                                break
+                        # Keyword match — collect ALL matching products
+                        keyword_candidates = [
+                            p for p in products
+                            if p["name"].lower() in prod_name.lower()
+                            or prod_name.lower() in p["name"].lower()
+                        ]
+                        if len(keyword_candidates) == 1:
+                            matched_product = keyword_candidates[0]
+                        elif len(keyword_candidates) > 1:
+                            # Ambiguity: store candidates for disambiguation
+                            current_context["candidates"] = keyword_candidates
+                            current_context["pending_intent"] = extracted_intent
             except Exception as e:
                 print(f"Mock API Error: {e}")
 
-        # Simple logic based on Intent
+        # ── DISAMBIGUATION RESOLUTION (user is picking from a list) ──────────
+        if previous_state == "WAITING_DISAMBIGUATION":
+            candidates = current_context.get("candidates", [])
+            resolved = None
+            if text and candidates:
+                text_lower = text.lower()
+                # Try numeric selection: "1", "le 2", "numéro 3" …
+                for i, c in enumerate(candidates):
+                    if str(i + 1) in text:
+                        resolved = c
+                        break
+                # Try product name match
+                if not resolved:
+                    for c in candidates:
+                        if c["name"].lower() in text_lower or text_lower in c["name"].lower():
+                            resolved = c
+                            break
+                # Try color match against variations
+                if not resolved:
+                    for c in candidates:
+                        for v in c.get("variations", []):
+                            if v.get("color", "").lower() in text_lower:
+                                resolved = c
+                                break
+                        if resolved:
+                            break
+
+            if resolved:
+                matched_product = resolved
+                current_context["product"] = resolved["name"]
+                extracted_intent = current_context.pop("pending_intent", extracted_intent)
+                current_context.pop("candidates", None)
+            else:
+                # Still cannot resolve — re-ask with the same list
+                new_state = "WAITING_DISAMBIGUATION"
+                items_list = "\n".join([
+                    f"{i+1}. {c['name']} ({c['base_price']} TND)"
+                    for i, c in enumerate(candidates)
+                ])
+                bot_response_text = DISAMBIGUATION_TEMPLATE.replace("{count}", str(len(candidates))).replace("{list}", items_list)
+                conversation.state = new_state
+                conversation.context_data = current_context
+                conversation.missing_entities = []
+                conversation.save()
+                Message.objects.create(conversation=conversation, sender="BOT", text=bot_response_text)
+                context_manager.add_message(user_id, role="bot", text=bot_response_text)
+                return Response({"status": "success", "bot_response": {"text": bot_response_text, "internal_debug": {"intent_detected": extracted_intent, "new_state": new_state, "candidates_count": len(candidates)}}})
+
+        # ── NEW AMBIGUITY DETECTED THIS TURN ────────────────────────────────────
+        if current_context.get("candidates") and not matched_product:
+            new_state = "WAITING_DISAMBIGUATION"
+            candidates = current_context["candidates"]
+            items_list = "\n".join([
+                f"{i+1}. {c['name']} ({c['base_price']} TND)"
+                for i, c in enumerate(candidates)
+            ])
+            bot_response_text = DISAMBIGUATION_TEMPLATE.replace("{count}", str(len(candidates))).replace("{list}", items_list)
+            conversation.state = new_state
+            conversation.context_data = current_context
+            conversation.missing_entities = []
+            conversation.save()
+            Message.objects.create(conversation=conversation, sender="BOT", text=bot_response_text)
+            context_manager.add_message(user_id, role="bot", text=bot_response_text)
+            return Response({"status": "success", "bot_response": {"text": bot_response_text, "internal_debug": {"intent_detected": extracted_intent, "new_state": new_state, "candidates_count": len(candidates)}}})
+
+        # ── MAIN STATE MACHINE ───────────────────────────────────────────────────
         if extracted_intent == "ORDER_PRODUCT":
             for req in REQUIRED_ORDER_ENTITIES:
                 if req not in current_context:
                     missing_list.append(req)
-            
+
             if missing_list:
                 new_state = "WAITING_USER_REPLY"
                 first_missing = missing_list[0]
-                
-                # Replace product placeholder
                 display_name = matched_product["name"] if matched_product else "cet article"
-                bot_response_text = MISSING_ENTITY_TEMPLATES.get(first_missing, f"Pouvez-vous me dire {first_missing} ?").replace("{product}", display_name)
-                
-                # Inject valid sizes / colors if found in Mock API
+                bot_response_text = (
+                    MISSING_ENTITY_TEMPLATES
+                    .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
+                    .replace("{product}", display_name)
+                    .replace("{color}", current_context.get("color", ""))
+                )
+                # Inject available sizes / colors from Mock API
                 if matched_product and first_missing in ["size", "color"]:
                     variations = matched_product.get("variations", [])
                     if first_missing == "size":
                         avail = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                        bot_response_text += f"\nTailles dispo : {avail}"
+                        bot_response_text += f"\nTailles disponibles : {avail}" if avail else ""
                     elif first_missing == "color":
                         avail = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                        bot_response_text += f"\nCouleurs dispo : {avail}"
+                        bot_response_text += f"\nCouleurs disponibles : {avail}" if avail else ""
             else:
-                new_state = "COMPLETED"
-                display_name = matched_product["name"] if matched_product else current_context.get('product')
-                bot_response_text = f"Parfait ! Votre commande pour le {display_name} est en cours de préparation. 🎉"
-        
+                # All entities collected ── verify stock before confirming
+                chosen_color = current_context.get("color", "")
+                chosen_size = current_context.get("size", "")
+                display_name = matched_product["name"] if matched_product else current_context.get("product", "votre article")
+                stock_ok = True
+
+                if matched_product and chosen_color and chosen_size:
+                    valid_variation = next(
+                        (v for v in matched_product.get("variations", [])
+                         if v.get("color", "").lower() == chosen_color.lower()
+                         and v.get("size", "").lower() == chosen_size.lower()
+                         and v.get("stock_quantity", 0) > 0),
+                        None
+                    )
+                    if not valid_variation:
+                        stock_ok = False
+                        avail = ", ".join(list(set([
+                            f"{v['color']} / {v['size']}"
+                            for v in matched_product.get("variations", [])
+                            if v.get("stock_quantity", 0) > 0
+                        ])))
+                        bot_response_text = (
+                            OUT_OF_STOCK_TEMPLATE
+                            .replace("{product}", display_name)
+                            .replace("{color}", chosen_color)
+                            .replace("{size}", chosen_size)
+                        )
+                        if avail:
+                            bot_response_text += f"\nDisponible en : {avail}"
+                        # Reset so user re-chooses color & size
+                        current_context.pop("color", None)
+                        current_context.pop("size", None)
+                        missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                        new_state = "WAITING_USER_REPLY"
+
+                if stock_ok:
+                    new_state = "COMPLETED"
+                    order_ref = None
+                    try:
+                        order_payload = {
+                            "product_id": matched_product["id"] if matched_product else None,
+                            "color": chosen_color,
+                            "size": chosen_size,
+                            "quantity": int(current_context.get("quantity", 1)),
+                            "address": current_context.get("address"),
+                            "phone_number": current_context.get("phone_number")
+                        }
+                        order_resp = requests.post(
+                            "http://192.168.100.10:8003/api/v1/orders/",
+                            json=order_payload,
+                            headers={"X-Store-ID": shop_id},
+                            timeout=5
+                        )
+                        if order_resp.status_code in [200, 201]:
+                            order_ref = order_resp.json().get("id")
+                    except Exception as e:
+                        print(f"Order creation API error: {e}")
+
+                    if order_ref:
+                        bot_response_text = ORDER_CONFIRMED_TEMPLATE.replace("{product}", display_name).replace("{ref}", str(order_ref))
+                    else:
+                        bot_response_text = ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
+
         elif extracted_intent == "INFORM_INFO":
-            # This intent means the user is answering a question
+            # User is answering a previous question (color, size, address, etc.)
             if previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
                 for req in REQUIRED_ORDER_ENTITIES:
                     if req not in current_context:
                         missing_list.append(req)
-                
+
                 if missing_list:
                     new_state = "WAITING_USER_REPLY"
                     first_missing = missing_list[0]
-                    bot_response_text = MISSING_ENTITY_TEMPLATES.get(first_missing, f"Et pour la {first_missing} ?")
+                    bot_response_text = (
+                        MISSING_ENTITY_TEMPLATES
+                        .get(first_missing, f"Et pour la {first_missing} ?")
+                        .replace("{product}", current_context.get("product", "cet article"))
+                        .replace("{color}", current_context.get("color", ""))
+                    )
                 else:
                     new_state = "COMPLETED"
-                    bot_response_text = "Toutes les informations sont complètes. Votre commande est validée ! 🎉"
+                    display_name = matched_product["name"] if matched_product else current_context.get("product", "votre article")
+                    bot_response_text = ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
             else:
                 bot_response_text = TEMPLATES.get("INFORM_INFO")
-                
+
         elif extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY"]:
             bot_response_text = TEMPLATES.get(extracted_intent, "Je n'ai pas compris.")
             if matched_product:
                 price = matched_product.get("base_price", "0")
                 bot_response_text = bot_response_text.replace("{product}", matched_product["name"]).replace("{price}", str(price))
-                
                 variations = matched_product.get("variations", [])
                 sizes = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
                 bot_response_text = bot_response_text.replace("{sizes}", sizes or "rupture de stock")
-                
                 colors = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
                 bot_response_text = bot_response_text.replace("{colors}", colors or "rupture de couleur")
             else:
-                 try:
-                     bot_response_text = bot_response_text.replace("{product}", prod_name or "cet article").replace("{price}", "N/A")
-                 except Exception:
-                     pass
+                try:
+                    bot_response_text = bot_response_text.replace("{product}", prod_name or "cet article").replace("{price}", "N/A")
+                except Exception:
+                    pass
 
         # Update Conversation state
         conversation.state = new_state
