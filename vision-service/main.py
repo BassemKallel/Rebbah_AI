@@ -63,7 +63,12 @@ async def predict_embedding(request: ImageRequest):
         # 2. Extract embedding
         inputs = processor(images=image, return_tensors="pt")
         with torch.no_grad():
-            image_features = model.get_image_features(**inputs)
+            # Use vision_model directly for transformers 5.x compatibility
+            pixel_values = inputs.get("pixel_values")
+            vision_outputs = model.vision_model(pixel_values=pixel_values)
+            image_features = vision_outputs.pooler_output
+            # Project through the visual projection layer
+            image_features = model.visual_projection(image_features)
         
         # 3. Normalize & convert to list
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
@@ -78,6 +83,7 @@ async def predict_embedding(request: ImageRequest):
                 cur = conn.cursor()
                 
                 # Check if table exists, if not, create it (basic setup logic for POC)
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS products_vector (
                         id SERIAL PRIMARY KEY,
@@ -127,7 +133,10 @@ async def search_similar_products(request: ImageRequest):
         # 2. Extract embedding
         inputs = processor(images=image, return_tensors="pt")
         with torch.no_grad():
-            image_features = model.get_image_features(**inputs)
+            pixel_values = inputs.get("pixel_values")
+            vision_outputs = model.vision_model(pixel_values=pixel_values)
+            image_features = vision_outputs.pooler_output
+            image_features = model.visual_projection(image_features)
         
         # 3. Normalize & convert to list
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)

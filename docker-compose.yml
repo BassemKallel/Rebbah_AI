@@ -21,9 +21,13 @@ services:
   nlu-service:
     build: ./nlu-service
     container_name: nlu-service
+    ports:
+      - "8001:8001"
   vision-service:
     build: ./vision-service
     container_name: vision-service
+    ports:
+      - "8002:8002"
   sync-worker:
     build: ./sync-worker
     container_name: sync-worker
