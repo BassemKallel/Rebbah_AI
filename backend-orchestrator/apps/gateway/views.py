@@ -134,15 +134,51 @@ class MessengerWebhookPOC(APIView):
                 bot_response_text = TEMPLATES.get("INFORM_INFO")
                 
         else:
-            # For other intents, we just return the predefined template
-            # For ASK_PRICE, we would ideally call mock DB to get real price.
-            # We mock the price formatting here for POC
+            # Check price/stock using the Mock API if we have a product target
             bot_response_text = TEMPLATES.get(extracted_intent, TEMPLATES["UNKNOWN"])
-            # Naive formatting fallback
-            try:
-                bot_response_text = bot_response_text.replace("{product}", current_context.get("product", "cet article")).replace("{price}", "45")
-            except Exception:
-                pass
+            
+            # Extract product context (from NLU text or Vision image match)
+            prod_name = current_context.get("product")
+            if prod_name and extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY"]:
+                try:
+                    # Search the mock API
+                    # Using host.docker.internal to bridge outside to the host running django
+                    mock_api_url = "http://host.docker.internal:8003/api/v1/products/"
+                    headers = {"X-Store-ID": shop_id}
+                    resp = requests.get(mock_api_url, headers=headers, timeout=5)
+                    
+                    if resp.status_code == 200:
+                        products = resp.json()
+                        matched_product = None
+                        
+                        # Very simple name matching for POC
+                        for p in products:
+                            if p["name"].lower() in prod_name.lower() or prod_name.lower() in p["name"].lower():
+                                matched_product = p
+                                break
+                                
+                        if matched_product:
+                            price = matched_product.get("base_price", "0")
+                            bot_response_text = bot_response_text.replace("{product}", matched_product["name"]).replace("{price}", str(price))
+                            
+                            # Check variations stock
+                            variations = matched_product.get("variations", [])
+                            sizes = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                            bot_response_text = bot_response_text.replace("{sizes}", sizes or "rupture de stock")
+                            
+                            colors = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                            bot_response_text = bot_response_text.replace("{colors}", colors or "rupture de couleur")
+                            
+                        else:
+                            bot_response_text = f"Désolé, je ne trouve pas le produit {prod_name} dans notre catalogue."
+                except Exception as e:
+                    print(f"Mock API Error: {e}")
+                    bot_response_text = bot_response_text.replace("{product}", prod_name).replace("{price}", "Indisponible")
+            else:
+                 try:
+                     bot_response_text = bot_response_text.replace("{product}", prod_name or "cet article").replace("{price}", "N/A")
+                 except Exception:
+                     pass
 
         # Update Conversation state
         conversation.state = new_state
