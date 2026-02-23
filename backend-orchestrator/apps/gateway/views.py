@@ -152,8 +152,8 @@ class MessengerWebhookPOC(APIView):
             if prod_name and extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY"]:
                 try:
                     # Search the mock API
-                    # Using host.docker.internal to bridge outside to the host running django
-                    mock_api_url = "http://host.docker.internal:8003/api/v1/products/"
+                    # Using local network IP to bridge outside to the host running django Mock API
+                    mock_api_url = "http://172.20.32.1:8003/api/v1/products/"
                     headers = {"X-Store-ID": shop_id}
                     resp = requests.get(mock_api_url, headers=headers, timeout=5)
                     
