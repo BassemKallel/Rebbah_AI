@@ -153,7 +153,7 @@ class MessengerWebhookPOC(APIView):
                 try:
                     # Search the mock API
                     # Using local network IP to bridge outside to the host running django Mock API
-                    mock_api_url = "http://172.20.32.1:8003/api/v1/products/"
+                    mock_api_url = "http://192.168.100.10:8003/api/v1/products/"
                     headers = {"X-Store-ID": shop_id}
                     resp = requests.get(mock_api_url, headers=headers, timeout=5)
                     
