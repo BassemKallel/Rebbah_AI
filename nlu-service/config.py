@@ -22,13 +22,15 @@ INTENT_LABELS = {
     5: "ASK_LOCATION",
     6: "ASK_PRICE",
     7: "CANCEL_ORDER",
-    8: "COMPLAINT",
-    9: "CONFIRM_DENY",
-    10: "GREETING",
-    11: "INFORM_INFO",
-    12: "NOISE",
-    13: "ORDER_PRODUCT",
-    14: "TRACK_ORDER"
+    8: "CHECK_PACKAGE",
+    9: "COMPLAINT",
+    10: "CONFIRM_DENY",
+    11: "ECHANGE",
+    12: "GREETING",
+    13: "INFORM_INFO",
+    14: "NOISE",
+    15: "ORDER_PRODUCT",
+    16: "TRACK_ORDER"
 }
 
 # Entity labels for GLiNER
