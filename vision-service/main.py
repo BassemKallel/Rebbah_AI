@@ -14,13 +14,14 @@ from transformers import CLIPProcessor, CLIPModel
 processor = None
 model = None
 model_name = "openai/clip-vit-base-patch32"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global processor, model
-    print(f"Loading CLIP model: {model_name}")
+    print(f"Loading CLIP model: {model_name} on {device}")
     processor = CLIPProcessor.from_pretrained(model_name)
-    model = CLIPModel.from_pretrained(model_name, torch_dtype=torch.float32)
+    model = CLIPModel.from_pretrained(model_name, torch_dtype=torch.float32).to(device)
     model.eval()
     print("CLIP model loaded successfully!")
     yield
@@ -63,7 +64,7 @@ async def predict_embedding(request: ImageRequest):
         image = Image.open(io.BytesIO(response.content)).convert("RGB")
 
         # 2. Extract embedding
-        inputs = processor(images=image, return_tensors="pt")
+        inputs = processor(images=image, return_tensors="pt").to(device)
         with torch.no_grad():
             # Use vision_model directly for transformers 5.x compatibility
             pixel_values = inputs.get("pixel_values")
@@ -74,7 +75,7 @@ async def predict_embedding(request: ImageRequest):
         
         # 3. Normalize & convert to list
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-        embedding = image_features.squeeze().tolist()
+        embedding = image_features.squeeze().cpu().tolist()
 
         status_msg = "success"
 
@@ -136,7 +137,7 @@ async def search_similar_products(request: ImageRequest):
         image = Image.open(io.BytesIO(response.content)).convert("RGB")
 
         # 2. Extract embedding
-        inputs = processor(images=image, return_tensors="pt")
+        inputs = processor(images=image, return_tensors="pt").to(device)
         with torch.no_grad():
             pixel_values = inputs.get("pixel_values")
             vision_outputs = model.vision_model(pixel_values=pixel_values)
@@ -145,7 +146,7 @@ async def search_similar_products(request: ImageRequest):
         
         # 3. Normalize & convert to list
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-        embedding = image_features.squeeze().tolist()
+        embedding = image_features.squeeze().cpu().tolist()
 
         # 4. Search in pgvector database
         conn = get_db_connection()
