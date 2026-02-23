@@ -113,6 +113,8 @@ class MessengerWebhookPOC(APIView):
         # 6. Accumulate entities in Conversation context
         current_context = conversation.context_data
         current_context.update(extracted_entities)
+        # Toujours nettoyer les clés internes — jamais persistées en DB
+        current_context.pop("_vision_variation_id", None)
         conversation.context_data = current_context
 
         # 7. State Machine & Response Generation
@@ -137,10 +139,6 @@ class MessengerWebhookPOC(APIView):
                     if prod_name.startswith("Article_From_Image_"):
                         # Exact product_id match from Vision service
                         target_id = prod_name.split("Article_From_Image_")[1]
-                        # Nettoyer tout _vision_variation_id résiduel dans le contexte DB
-                        current_context.pop("_vision_variation_id", None)
-                        # Utiliser le variation_id local (request courante) ou celui éventuellement
-                        # stocké par erreur dans une requête précédente (rétrocompat)
                         effective_variation_id = vision_variation_id
                         for p in products:
                             if p["id"] == target_id:
