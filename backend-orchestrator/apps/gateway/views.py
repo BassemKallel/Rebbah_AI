@@ -50,6 +50,7 @@ class MessengerWebhookPOC(APIView):
 
         # 3. Vision API (if image provided)
         matched_image_url = None
+        vision_variation_id = None   # Variable locale, jamais persistée en DB
         if image_url:
             try:
                 vision_res = requests.post(
@@ -62,10 +63,9 @@ class MessengerWebhookPOC(APIView):
                         top_match = vision_data["results"][0]
                         # Identifie le produit parent
                         extracted_entities["product"] = f"Article_From_Image_{top_match['product_id']}"
-                        # Récupère l'image de la variation identifiée
+                        # Variables locales uniquement — jamais dans extracted_entities
                         matched_image_url = top_match.get("image_url")
-                        # Stocke le variation_id pour pré-remplir couleur/taille plus bas
-                        extracted_entities["_vision_variation_id"] = top_match.get("variation_id")
+                        vision_variation_id = top_match.get("variation_id")
             except requests.RequestException as e:
                 is_error = True
                 print(f"Vision API Error: {e}")
@@ -137,14 +137,18 @@ class MessengerWebhookPOC(APIView):
                     if prod_name.startswith("Article_From_Image_"):
                         # Exact product_id match from Vision service
                         target_id = prod_name.split("Article_From_Image_")[1]
-                        vision_variation_id = current_context.pop("_vision_variation_id", None)
+                        # Nettoyer tout _vision_variation_id résiduel dans le contexte DB
+                        current_context.pop("_vision_variation_id", None)
+                        # Utiliser le variation_id local (request courante) ou celui éventuellement
+                        # stocké par erreur dans une requête précédente (rétrocompat)
+                        effective_variation_id = vision_variation_id
                         for p in products:
                             if p["id"] == target_id:
                                 matched_product = p
                                 # Pré-remplir couleur ET taille depuis la variation identifiée
-                                if vision_variation_id:
+                                if effective_variation_id:
                                     for v in p.get("variations", []):
-                                        if v["id"] == vision_variation_id:
+                                        if v["id"] == effective_variation_id:
                                             current_context["color"] = v["color"]
                                             current_context["size"]  = v["size"]
                                             break
