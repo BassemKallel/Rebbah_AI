@@ -30,3 +30,27 @@ MISSING_ENTITY_TEMPLATES = {
 
 # Entities required to complete an ORDER_PRODUCT intent
 REQUIRED_ORDER_ENTITIES = ["product", "color", "size", "address", "phone_number"]
+
+# Multiple products found — ask user to pick one
+DISAMBIGUATION_TEMPLATE = (
+    "J'ai trouvé {count} articles correspondants :\n{list}\n\n"
+    "Lequel vous intéresse ? (tapez le numéro ou le nom) Ou envoyez-moi une photo 📸"
+)
+
+# Chosen variation is out of stock
+OUT_OF_STOCK_TEMPLATE = (
+    "Désolé, le {product} en {color} / taille {size} est actuellement en rupture de stock. 😔"
+)
+
+# Order confirmed with a reference number from the API
+ORDER_CONFIRMED_TEMPLATE = (
+    "🎉 Commande confirmée ! Votre {product} est en cours de préparation.\n"
+    "📦 Référence commande : #{ref}\n"
+    "Le livreur vous contactera dans 2 à 3 jours ouvrables."
+)
+
+# Order confirmed but Mock API did not return a reference
+ORDER_CONFIRMED_NO_REF_TEMPLATE = (
+    "🎉 Commande enregistrée ! Votre {product} est en cours de préparation.\n"
+    "Le livreur vous contactera dans 2 à 3 jours ouvrables. 🚚"
+)
