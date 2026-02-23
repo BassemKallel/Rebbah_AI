@@ -76,13 +76,17 @@ class MessengerWebhookPOC(APIView):
                 print(f"NLU API Error: {e}")
                 
             # Fallback for POC: if NLU missed the product but recognized intent
-            if "product" not in extracted_entities:
+            if "product" not in extracted_entities and not image_url:
                 text_lower = text.lower()
                 common_products = ["pull", "t-shirt", "veste", "pantalon", "robe"]
                 for cp in common_products:
                     if cp in text_lower:
                         extracted_entities["product"] = cp
                         break
+                        
+        # If user sent an image but NLU failed to get the intent, default to ORDER
+        if image_url and (extracted_intent == "UNKNOWN" or not text):
+            extracted_intent = "ORDER_PRODUCT"
 
         # 5. Save the User Message to PostgreSQL
         Message.objects.create(
@@ -104,10 +108,38 @@ class MessengerWebhookPOC(APIView):
         bot_response_text = TEMPLATES.get("UNKNOWN")
         missing_list = []
         new_state = previous_state
+        
+        prod_name = current_context.get("product")
+        matched_product = None
+        
+        # We fetch Mock API first if we have a product, because we might need its real name instead of the UUID
+        if prod_name:
+            try:
+                mock_api_url = "http://192.168.100.10:8003/api/v1/products/"
+                headers = {"X-Store-ID": shop_id}
+                resp = requests.get(mock_api_url, headers=headers, timeout=5)
+                
+                if resp.status_code == 200:
+                    products = resp.json()
+                    
+                    if prod_name.startswith("Article_From_Image_"):
+                        # Exact ID match
+                        target_id = prod_name.split("Article_From_Image_")[1]
+                        for p in products:
+                            if p["id"] == target_id:
+                                matched_product = p
+                                break
+                    else:
+                        # Keyword match
+                        for p in products:
+                            if p["name"].lower() in prod_name.lower() or prod_name.lower() in p["name"].lower():
+                                matched_product = p
+                                break
+            except Exception as e:
+                print(f"Mock API Error: {e}")
 
         # Simple logic based on Intent
         if extracted_intent == "ORDER_PRODUCT":
-            # Check what's missing
             for req in REQUIRED_ORDER_ENTITIES:
                 if req not in current_context:
                     missing_list.append(req)
@@ -115,17 +147,28 @@ class MessengerWebhookPOC(APIView):
             if missing_list:
                 new_state = "WAITING_USER_REPLY"
                 first_missing = missing_list[0]
-                # Format template with existing product if known
-                prod_name = current_context.get("product", "cet article")
-                bot_response_text = MISSING_ENTITY_TEMPLATES.get(first_missing, f"Pouvez-vous me donner votre {first_missing} ?").replace("{product}", prod_name)
+                
+                # Replace product placeholder
+                display_name = matched_product["name"] if matched_product else "cet article"
+                bot_response_text = MISSING_ENTITY_TEMPLATES.get(first_missing, f"Pouvez-vous me dire {first_missing} ?").replace("{product}", display_name)
+                
+                # Inject valid sizes / colors if found in Mock API
+                if matched_product and first_missing in ["size", "color"]:
+                    variations = matched_product.get("variations", [])
+                    if first_missing == "size":
+                        avail = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                        bot_response_text += f"\nTailles dispo : {avail}"
+                    elif first_missing == "color":
+                        avail = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                        bot_response_text += f"\nCouleurs dispo : {avail}"
             else:
                 new_state = "COMPLETED"
-                bot_response_text = f"Parfait ! Votre commande pour le {current_context.get('product')} est confirmée."
+                display_name = matched_product["name"] if matched_product else current_context.get('product')
+                bot_response_text = f"Parfait ! Votre commande pour le {display_name} est en cours de préparation. 🎉"
         
         elif extracted_intent == "INFORM_INFO":
             # This intent means the user is answering a question
             if previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
-                # We assume the new entities fill the gap. Let's re-check ORDER_PRODUCT requirements
                 for req in REQUIRED_ORDER_ENTITIES:
                     if req not in current_context:
                         missing_list.append(req)
@@ -133,57 +176,25 @@ class MessengerWebhookPOC(APIView):
                 if missing_list:
                     new_state = "WAITING_USER_REPLY"
                     first_missing = missing_list[0]
-                    # Safe replacement
-                    bot_response_text = MISSING_ENTITY_TEMPLATES.get(first_missing, f"Pouvez-vous me donner votre {first_missing} ?")
-                    for k, v in current_context.items():
-                        bot_response_text = bot_response_text.replace(f"{{{k}}}", str(v))
+                    bot_response_text = MISSING_ENTITY_TEMPLATES.get(first_missing, f"Et pour la {first_missing} ?")
                 else:
                     new_state = "COMPLETED"
                     bot_response_text = "Toutes les informations sont complètes. Votre commande est validée ! 🎉"
             else:
                 bot_response_text = TEMPLATES.get("INFORM_INFO")
                 
-        else:
-            # Check price/stock using the Mock API if we have a product target
-            bot_response_text = TEMPLATES.get(extracted_intent, TEMPLATES["UNKNOWN"])
-            
-            # Extract product context (from NLU text or Vision image match)
-            prod_name = current_context.get("product")
-            if prod_name and extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY"]:
-                try:
-                    # Search the mock API
-                    # Using local network IP to bridge outside to the host running django Mock API
-                    mock_api_url = "http://192.168.100.10:8003/api/v1/products/"
-                    headers = {"X-Store-ID": shop_id}
-                    resp = requests.get(mock_api_url, headers=headers, timeout=5)
-                    
-                    if resp.status_code == 200:
-                        products = resp.json()
-                        matched_product = None
-                        
-                        # Very simple name matching for POC
-                        for p in products:
-                            if p["name"].lower() in prod_name.lower() or prod_name.lower() in p["name"].lower():
-                                matched_product = p
-                                break
-                                
-                        if matched_product:
-                            price = matched_product.get("base_price", "0")
-                            bot_response_text = bot_response_text.replace("{product}", matched_product["name"]).replace("{price}", str(price))
-                            
-                            # Check variations stock
-                            variations = matched_product.get("variations", [])
-                            sizes = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                            bot_response_text = bot_response_text.replace("{sizes}", sizes or "rupture de stock")
-                            
-                            colors = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                            bot_response_text = bot_response_text.replace("{colors}", colors or "rupture de couleur")
-                            
-                        else:
-                            bot_response_text = f"Désolé, je ne trouve pas le produit {prod_name} dans notre catalogue."
-                except Exception as e:
-                    print(f"Mock API Error: {e}")
-                    bot_response_text = bot_response_text.replace("{product}", prod_name).replace("{price}", "Indisponible")
+        elif extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY"]:
+            bot_response_text = TEMPLATES.get(extracted_intent, "Je n'ai pas compris.")
+            if matched_product:
+                price = matched_product.get("base_price", "0")
+                bot_response_text = bot_response_text.replace("{product}", matched_product["name"]).replace("{price}", str(price))
+                
+                variations = matched_product.get("variations", [])
+                sizes = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                bot_response_text = bot_response_text.replace("{sizes}", sizes or "rupture de stock")
+                
+                colors = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                bot_response_text = bot_response_text.replace("{colors}", colors or "rupture de couleur")
             else:
                  try:
                      bot_response_text = bot_response_text.replace("{product}", prod_name or "cet article").replace("{price}", "N/A")
