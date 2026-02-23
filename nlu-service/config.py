@@ -10,7 +10,7 @@ MODELS_DIR = BASE_DIR / "models"
 
 # Model paths
 TUNBERT_MODEL_PATH = MODELS_DIR / "tunbert_intent" / "tunbert_v3"
-GLINER_MODEL_PATH = MODELS_DIR / "gliner_entity" / "gliner_finetuned (3)"
+GLINER_MODEL_PATH = MODELS_DIR / "gliner_entity" / "gliner_finetuned_v7"
 
 # Intent labels (from TunBERT model config.json)
 INTENT_LABELS = {
@@ -37,7 +37,7 @@ ENTITY_LABELS = [
     "color",
     "size",
     "address",
-    "brand",
+    "quantity",
     "client_name",
     "phone_number"
 ]

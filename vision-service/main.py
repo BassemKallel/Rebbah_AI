@@ -1,5 +1,6 @@
 import io
 import requests
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
@@ -9,12 +10,23 @@ from pgvector.psycopg2 import register_vector
 import os
 from transformers import CLIPProcessor, CLIPModel
 
-app = FastAPI(title="TikTak Vision Service")
-
-# Load model (using CLIP as a solid default for image embeddings / similarity)
+# Global model instances
+processor = None
+model = None
 model_name = "openai/clip-vit-base-patch32"
-processor = CLIPProcessor.from_pretrained(model_name)
-model = CLIPModel.from_pretrained(model_name)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global processor, model
+    print(f"Loading CLIP model: {model_name}")
+    processor = CLIPProcessor.from_pretrained(model_name)
+    model = CLIPModel.from_pretrained(model_name, torch_dtype=torch.float32)
+    model.eval()
+    print("CLIP model loaded successfully!")
+    yield
+    print("Shutting down vision service...")
+
+app = FastAPI(title="TikTak Vision Service", lifespan=lifespan)
 
 from typing import Optional
 
