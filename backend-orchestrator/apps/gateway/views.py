@@ -148,7 +148,8 @@ class MessengerWebhookPOC(APIView):
                                     for v in p.get("variations", []):
                                         if v["id"] == effective_variation_id:
                                             current_context["color"] = v["color"]
-                                            current_context["size"]  = v["size"]
+                                            # La taille n'est PAS déduite : elle dépend
+                                            # du client, pas de l'image envoyée
                                             break
                                 break
                     else:
