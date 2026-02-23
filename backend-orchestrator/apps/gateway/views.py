@@ -49,15 +49,23 @@ class MessengerWebhookPOC(APIView):
         is_error = False
 
         # 3. Vision API (if image provided)
+        matched_image_url = None
         if image_url:
             try:
-                vision_res = requests.post(VISION_URL, json={"image_url": image_url, "limit": 1})
+                vision_res = requests.post(
+                    VISION_URL,
+                    json={"image_url": image_url, "limit": 1, "shop_id": shop_id}
+                )
                 if vision_res.status_code == 200:
                     vision_data = vision_res.json()
                     if vision_data.get("results"):
                         top_match = vision_data["results"][0]
-                        # Simulate adding the detected product from Vision
+                        # Identifie le produit parent
                         extracted_entities["product"] = f"Article_From_Image_{top_match['product_id']}"
+                        # Récupère l'image de la variation identifiée
+                        matched_image_url = top_match.get("image_url")
+                        # Stocke le variation_id pour pré-remplir couleur/taille plus bas
+                        extracted_entities["_vision_variation_id"] = top_match.get("variation_id")
             except requests.RequestException as e:
                 is_error = True
                 print(f"Vision API Error: {e}")
@@ -127,11 +135,19 @@ class MessengerWebhookPOC(APIView):
                     products = resp.json()
                     
                     if prod_name.startswith("Article_From_Image_"):
-                        # Exact ID match from Vision service
+                        # Exact product_id match from Vision service
                         target_id = prod_name.split("Article_From_Image_")[1]
+                        vision_variation_id = current_context.pop("_vision_variation_id", None)
                         for p in products:
                             if p["id"] == target_id:
                                 matched_product = p
+                                # Pré-remplir couleur ET taille depuis la variation identifiée
+                                if vision_variation_id:
+                                    for v in p.get("variations", []):
+                                        if v["id"] == vision_variation_id:
+                                            current_context["color"] = v["color"]
+                                            current_context["size"]  = v["size"]
+                                            break
                                 break
                     else:
                         # Keyword match — collect ALL matching products
@@ -363,7 +379,7 @@ class MessengerWebhookPOC(APIView):
             context_manager.clear_context(user_id)
 
         # 11. Prepare HTTP Response
-        return Response({
+        response_payload = {
             "status": "success",
             "bot_response": {
                 "text": bot_response_text,
@@ -376,4 +392,9 @@ class MessengerWebhookPOC(APIView):
                     "missing_entities": missing_list
                 }
             }
-        })
+        }
+        # Inclure l'image identifiée par CLIP si disponible
+        if matched_image_url:
+            response_payload["bot_response"]["identified_image_url"] = matched_image_url
+
+        return Response(response_payload)
