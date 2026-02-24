@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('crm', '0002_order'),
+        ('crm', '0001_initial'),
     ]
 
     operations = [
@@ -73,8 +73,5 @@ class Migration(migrations.Migration):
             model_name='lead',
             name='variation_id',
             field=models.CharField(blank=True, help_text='UUID de la variation (couleur)', max_length=255, null=True),
-        ),
-        migrations.DeleteModel(
-            name='Order',
         ),
     ]
