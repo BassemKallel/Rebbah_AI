@@ -1,0 +1,90 @@
+{
+  "add_cross_attention": false,
+  "architectures": [
+    "BertForSequenceClassification"
+  ],
+  "attention_probs_dropout_prob": 0.1,
+  "auto_map": {
+    "AutoConfig": "config_tunbert.TunBertConfig",
+    "AutoModelForSequenceClassification": "modeling_tunbert.TunBERT"
+  },
+  "bos_token_id": null,
+  "classifier_dropout": null,
+  "custom_pipelines": {
+    "TunBERT-classifier": {
+      "default": {
+        "model": {
+          "pt": [
+            "not-lain/TunBERT",
+            "main"
+          ]
+        }
+      },
+      "impl": "tunBertClassificationPipeline.TBCP",
+      "pt": [
+        "AutoModelForSequenceClassification"
+      ],
+      "tf": [],
+      "type": "text"
+    }
+  },
+  "dtype": "float32",
+  "eos_token_id": null,
+  "gradient_checkpointing": false,
+  "hidden_act": "gelu",
+  "hidden_dropout_prob": 0.1,
+  "hidden_size": 768,
+  "id2label": {
+    "0": "ASK_ADVICE",
+    "1": "ASK_AVAILABILITY",
+    "2": "ASK_DELIVERY",
+    "3": "ASK_DETAILS",
+    "4": "ASK_DISCOUNT",
+    "5": "ASK_LOCATION",
+    "6": "ASK_PRICE",
+    "7": "CANCEL_ORDER",
+    "8": "CHECK_PACKAGE",
+    "9": "COMPLAINT",
+    "10": "CONFIRM_DENY",
+    "11": "ECHANGE",
+    "12": "GREETING",
+    "13": "INFORM_INFO",
+    "14": "NOISE",
+    "15": "ORDER_PRODUCT",
+    "16": "TRACK_ORDER"
+  },
+  "initializer_range": 0.02,
+  "intermediate_size": 3072,
+  "is_decoder": false,
+  "label2id": {
+    "ASK_ADVICE": 0,
+    "ASK_AVAILABILITY": 1,
+    "ASK_DELIVERY": 2,
+    "ASK_DETAILS": 3,
+    "ASK_DISCOUNT": 4,
+    "ASK_LOCATION": 5,
+    "ASK_PRICE": 6,
+    "CANCEL_ORDER": 7,
+    "CHECK_PACKAGE": 8,
+    "COMPLAINT": 9,
+    "CONFIRM_DENY": 10,
+    "ECHANGE": 11,
+    "GREETING": 12,
+    "INFORM_INFO": 13,
+    "NOISE": 14,
+    "ORDER_PRODUCT": 15,
+    "TRACK_ORDER": 16
+  },
+  "layer_norm_eps": 1e-12,
+  "max_position_embeddings": 512,
+  "model_type": "bert",
+  "num_attention_heads": 12,
+  "num_hidden_layers": 12,
+  "pad_token_id": 0,
+  "position_embedding_type": "absolute",
+  "tie_word_embeddings": true,
+  "transformers_version": "5.0.0",
+  "type_vocab_size": 2,
+  "use_cache": false,
+  "vocab_size": 30522
+}
