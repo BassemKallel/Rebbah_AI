@@ -1,338 +1,642 @@
 {
-  "info": {
-    "name": "TikTak-AI — Tests Complets",
-    "_postman_id": "tiktak-ai-tests-v1",
-    "description": "Collection de tests pour le pipeline TikTak-AI. Tous les endpoints utilisent form-data.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    {
-      "key": "BASE_URL",
-      "value": "http://localhost:8000",
-      "type": "string"
+    "info": {
+        "name": "TikTak-AI — Tests Complets",
+        "_postman_id": "tiktak-ai-tests-v1",
+        "description": "Collection de tests pour le pipeline TikTak-AI. Tous les endpoints utilisent form-data.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
-    {
-      "key": "SHOP_ID",
-      "value": "b632373b-398a-4e21-9b17-a99b511f8c47",
-      "type": "string"
-    }
-  ],
-  "item": [
-    {
-      "name": "🖼️ Vision — Image Haute Qualité (Pull Noir)",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21611111111", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "image_url", "value": "https://tiktakshopstorage.blob.core.windows.net/media/variations/pull_noir.webp", "type": "text" }
-          ]
+    "variable": [
+        {
+            "key": "BASE_URL",
+            "value": "http://localhost:8000",
+            "type": "string"
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
+        {
+            "key": "SHOP_ID",
+            "value": "b632373b-398a-4e21-9b17-a99b511f8c47",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "🖼️ Vision — Image Haute Qualité (Pull Noir)",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21611111111",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "image_url",
+                            "value": "https://tiktakshopstorage.blob.core.windows.net/media/variations/pull_noir.webp",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Test reconnaissance image : Pull Noir haute qualité (Azure Blob Storage). Résultat attendu : color=Noir pré-rempli, demande la taille."
+            }
         },
-        "description": "Test reconnaissance image : Pull Noir haute qualité (Azure Blob Storage). Résultat attendu : color=Noir pré-rempli, demande la taille."
-      }
-    },
-    {
-      "name": "🖼️ Vision — Image Haute Qualité (Pull Bleu Ciel)",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21622222222", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "image_url", "value": "https://tiktakshopstorage.blob.core.windows.net/media/variations/pull_bleu_ciel.webp", "type": "text" }
-          ]
+        {
+            "name": "🖼️ Vision — Image Haute Qualité (Pull Bleu Ciel)",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21622222222",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "image_url",
+                            "value": "https://tiktakshopstorage.blob.core.windows.net/media/variations/pull_bleu_ciel.webp",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Test reconnaissance image : Pull Bleu Ciel. Résultat attendu : color=Bleu Ciel pré-rempli."
+            }
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
+        {
+            "name": "🖼️ Vision — Image Qualité Réduite (URL externe)",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21633333333",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "image_url",
+                            "value": "https://images.unsplash.com/photo-1434389677669-e08b4cac3105?w=200&q=40",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Test avec image externe basse qualité (Unsplash). Vérifie la robustesse de CLIP."
+            }
         },
-        "description": "Test reconnaissance image : Pull Bleu Ciel. Résultat attendu : color=Bleu Ciel pré-rempli."
-      }
-    },
-    {
-      "name": "🖼️ Vision — Image Qualité Réduite (URL externe)",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21633333333", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "image_url", "value": "https://images.unsplash.com/photo-1434389677669-e08b4cac3105?w=200&q=40", "type": "text" }
-          ]
+        {
+            "name": "🖼️ Vision — Image + Texte simultanés",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21644444444",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "Je veux commander ça",
+                            "type": "text"
+                        },
+                        {
+                            "key": "image_url",
+                            "value": "https://tiktakshopstorage.blob.core.windows.net/media/variations/pull_noir.webp",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Image + texte en même temps. NLU détecte ORDER_PRODUCT, Vision détecte Pull Noir → color pré-rempli, demande taille directement."
+            }
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
+        {
+            "name": "💬 Texte — Prix Pull — Ambiguïté possible",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21655555555",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "Quel est le prix du pull ?",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Plusieurs pulls → WAITING_DISAMBIGUATION. 1 seul pull → prix direct."
+            }
         },
-        "description": "Test avec image externe basse qualité (Unsplash). Vérifie la robustesse de CLIP."
-      }
-    },
-    {
-      "name": "🖼️ Vision — Image + Texte simultanés",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21644444444", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "Je veux commander ça",  "type": "text" },
-            { "key": "image_url", "value": "https://tiktakshopstorage.blob.core.windows.net/media/variations/pull_noir.webp", "type": "text" }
-          ]
+        {
+            "name": "💬 Désambiguïsation — Choix par numéro (suite précédent)",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21655555555",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "le 1",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Résolution désambiguïsation par numéro."
+            }
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
+        {
+            "name": "💬 Désambiguïsation — Choix par couleur",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21666666666",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "le noir",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Résolution désambiguïsation par couleur."
+            }
         },
-        "description": "Image + texte en même temps. NLU détecte ORDER_PRODUCT, Vision détecte Pull Noir → color pré-rempli, demande taille directement."
-      }
-    },
-    {
-      "name": "💬 Texte — Prix Pull — Ambiguïté possible",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21655555555", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "Quel est le prix du pull ?", "type": "text" }
-          ]
+        {
+            "name": "🛒 Commande — Étape 1 : Intention ORDER",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21677777777",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "Je veux commander un pull noir",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Démarre le flux commande → demande la taille."
+            }
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
+        {
+            "name": "🛒 Commande — Étape 2 : Taille",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21677777777",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "M",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "INFORM_INFO : taille M → demande l'adresse."
+            }
         },
-        "description": "Plusieurs pulls → WAITING_DISAMBIGUATION. 1 seul pull → prix direct."
-      }
-    },
-    {
-      "name": "💬 Désambiguïsation — Choix par numéro (suite précédent)",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21655555555", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "le 1",                  "type": "text" }
-          ]
+        {
+            "name": "🛒 Commande — Étape 3 : Adresse",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21677777777",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "12 Rue de la liberté, Tunis",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "INFORM_INFO : adresse → demande le numéro de téléphone."
+            }
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
+        {
+            "name": "🛒 Commande — Étape 4 : Téléphone (Confirmation finale)",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21677777777",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "50123456",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "INFORM_INFO : téléphone → vérification stock → POST /api/v1/orders/ → confirmation avec référence."
+            }
         },
-        "description": "Résolution désambiguïsation par numéro."
-      }
-    },
-    {
-      "name": "💬 Désambiguïsation — Choix par couleur",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21666666666", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "le noir",               "type": "text" }
-          ]
+        {
+            "name": "❓ Bruit / Message incompréhensible",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21699999999",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "aaaaaa bbbbb",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Fallback UNKNOWN/NOISE."
+            }
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
+        {
+            "name": "👋 Salutation",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21600000001",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "Bonjour",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Test intent GREETING."
+            }
         },
-        "description": "Résolution désambiguïsation par couleur."
-      }
-    },
-    {
-      "name": "🛒 Commande — Étape 1 : Intention ORDER",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21677777777", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "Je veux commander un pull noir", "type": "text" }
-          ]
+        {
+            "name": "🚚 Question livraison",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21600000002",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "C'est combien la livraison ?",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Test intent ASK_DELIVERY."
+            }
         },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "Démarre le flux commande → demande la taille."
-      }
-    },
-    {
-      "name": "🛒 Commande — Étape 2 : Taille",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21677777777", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "M",                     "type": "text" }
-          ]
-        },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "INFORM_INFO : taille M → demande l'adresse."
-      }
-    },
-    {
-      "name": "🛒 Commande — Étape 3 : Adresse",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21677777777", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "12 Rue de la liberté, Tunis", "type": "text" }
-          ]
-        },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "INFORM_INFO : adresse → demande le numéro de téléphone."
-      }
-    },
-    {
-      "name": "🛒 Commande — Étape 4 : Téléphone (Confirmation finale)",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21677777777", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "50123456",              "type": "text" }
-          ]
-        },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "INFORM_INFO : téléphone → vérification stock → POST /api/v1/orders/ → confirmation avec référence."
-      }
-    },
-    {
-      "name": "❓ Bruit / Message incompréhensible",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21699999999", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "aaaaaa bbbbb",          "type": "text" }
-          ]
-        },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "Fallback UNKNOWN/NOISE."
-      }
-    },
-    {
-      "name": "👋 Salutation",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21600000001", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "Bonjour",               "type": "text" }
-          ]
-        },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "Test intent GREETING."
-      }
-    },
-    {
-      "name": "🚚 Question livraison",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21600000002", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "C'est combien la livraison ?", "type": "text" }
-          ]
-        },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "Test intent ASK_DELIVERY."
-      }
-    },
-    {
-      "name": "📦 Disponibilité produit",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            { "key": "user_id",   "value": "whatsapp:+21600000003", "type": "text" },
-            { "key": "shop_id",   "value": "{{SHOP_ID}}",           "type": "text" },
-            { "key": "text",      "value": "Est-ce que le pull noir est disponible ?", "type": "text" }
-          ]
-        },
-        "url": {
-          "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
-          "host": ["{{BASE_URL}}"],
-          "path": ["api", "v1", "gateway", "messenger", "poc"]
-        },
-        "description": "Test intent ASK_AVAILABILITY → tailles et couleurs depuis Mock API."
-      }
-    }
-  ]
+        {
+            "name": "📦 Disponibilité produit",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "user_id",
+                            "value": "whatsapp:+21600000003",
+                            "type": "text"
+                        },
+                        {
+                            "key": "shop_id",
+                            "value": "{{SHOP_ID}}",
+                            "type": "text"
+                        },
+                        {
+                            "key": "text",
+                            "value": "Est-ce que le pull noir est disponible ?",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{BASE_URL}}/api/v1/gateway/messenger/poc",
+                    "host": [
+                        "{{BASE_URL}}"
+                    ],
+                    "path": [
+                        "api",
+                        "v1",
+                        "gateway",
+                        "messenger",
+                        "poc"
+                    ]
+                },
+                "description": "Test intent ASK_AVAILABILITY → tailles et couleurs depuis Mock API."
+            }
+        }
+    ]
 }

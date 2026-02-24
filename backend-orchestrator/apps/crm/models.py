@@ -1,17 +1,72 @@
 from django.db import models
 from django.utils import timezone
+import time
 
 class Lead(models.Model):
     """
     Represents a potential customer identified via WhatsApp/Messenger.
+    Stores both lead info AND pending pre-order data waiting for agent confirmation.
     """
     platform_id = models.CharField(max_length=255, unique=True, help_text="e.g., whatsapp:+21612345678")
     name = models.CharField(max_length=255, blank=True, null=True)
+    
+    # ===== PRÉ-COMMANDE (En attente de confirmation agent) =====
+    shop_id = models.CharField(max_length=255, blank=True, null=True, help_text="Associated shop")
+    
+    # Product details
+    product_id = models.CharField(max_length=255, blank=True, null=True, help_text="UUID du produit Mock API")
+    variation_id = models.CharField(max_length=255, blank=True, null=True, help_text="UUID de la variation (couleur)")
+    color = models.CharField(max_length=100, blank=True, null=True)
+    size = models.CharField(max_length=50, blank=True, null=True)
+    quantity = models.IntegerField(default=1, help_text="Quantity in pre-order")
+    
+    # Delivery info
+    address = models.TextField(blank=True, null=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    
+    # Pre-order tracking
+    has_pending_order = models.BooleanField(default=False, help_text="True si pré-commande en attente")
+    pending_order_reference = models.CharField(
+        max_length=50, 
+        blank=True, 
+        null=True, 
+        unique=True,
+        help_text="e.g., PRE-1708960234567"
+    )
+    pending_order_created_at = models.DateTimeField(blank=True, null=True)
+    agent_confirmation_pending = models.BooleanField(default=False, help_text="Attente confirmation agent")
+    
+    # Timestamps
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ['-created_at']
+
     def __str__(self):
         return f"{self.name or 'Unknown'} ({self.platform_id})"
+    
+    def create_pending_order(self, shop_id, product_id, variation_id, color, size, address, phone_number, quantity=1):
+        """Helper to create a pending order"""
+        self.shop_id = shop_id
+        self.product_id = product_id
+        self.variation_id = variation_id
+        self.color = color
+        self.size = size
+        self.quantity = quantity
+        self.address = address
+        self.phone_number = phone_number
+        self.has_pending_order = True
+        self.agent_confirmation_pending = True
+        
+        # Generate reference if not exists
+        if not self.pending_order_reference:
+            timestamp = str(int(time.time() * 1000))
+            self.pending_order_reference = f"PRE-{timestamp}"
+        
+        self.pending_order_created_at = timezone.now()
+        self.save()
+
 
 class Conversation(models.Model):
     """
