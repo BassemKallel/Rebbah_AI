@@ -9,8 +9,33 @@ class MessageInline(admin.TabularInline):
 
 @admin.register(Lead)
 class LeadAdmin(admin.ModelAdmin):
-    list_display = ('name', 'platform_id', 'created_at')
-    search_fields = ('name', 'platform_id')
+    list_display = ('name', 'platform_id', 'pending_order_reference', 'color', 'size', 'agent_confirmation_pending', 'created_at')
+    list_filter = ('agent_confirmation_pending', 'has_pending_order', 'created_at')
+    search_fields = ('name', 'platform_id', 'pending_order_reference')
+    readonly_fields = ('pending_order_created_at', 'created_at', 'updated_at', 'pending_order_reference')
+    
+    fieldsets = (
+        ('Client Info', {
+            'fields': ('platform_id', 'name')
+        }),
+        ('Pré-Commande', {
+            'fields': (
+                'has_pending_order', 'agent_confirmation_pending', 
+                'pending_order_reference', 'pending_order_created_at',
+                'shop_id'
+            )
+        }),
+        ('Produit', {
+            'fields': ('product_id', 'variation_id', 'color', 'size', 'quantity')
+        }),
+        ('Livraison', {
+            'fields': ('address', 'phone_number')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
     ordering = ('-created_at',)
 
 @admin.register(Conversation)

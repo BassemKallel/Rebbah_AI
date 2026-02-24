@@ -306,29 +306,25 @@ class MessengerWebhookPOC(APIView):
 
                 if stock_ok:
                     new_state = "COMPLETED"
-                    order_ref = None
+                    pre_order_ref = None
                     try:
-                        order_payload = {
-                            "product_id": matched_product["id"] if matched_product else None,
-                            "color": chosen_color,
-                            "size": chosen_size,
-                            "quantity": int(current_context.get("quantity", 1)),
-                            "address": current_context.get("address"),
-                            "phone_number": current_context.get("phone_number")
-                        }
-                        order_resp = requests.post(
-                            "http://192.168.100.10:8003/api/v1/orders/",
-                            json=order_payload,
-                            headers={"X-Store-ID": shop_id},
-                            timeout=5
+                        # ✅ Créer une PRÉ-COMMANDE dans Lead (en attente confirmation agent)
+                        lead.create_pending_order(
+                            shop_id=shop_id,
+                            product_id=matched_product["id"] if matched_product else None,
+                            variation_id=vision_variation_id,
+                            color=chosen_color,
+                            size=chosen_size,
+                            address=current_context.get("address"),
+                            phone_number=current_context.get("phone_number"),
+                            quantity=int(current_context.get("quantity", 1))
                         )
-                        if order_resp.status_code in [200, 201]:
-                            order_ref = order_resp.json().get("id")
+                        pre_order_ref = lead.pending_order_reference
                     except Exception as e:
-                        print(f"Order creation API error: {e}")
+                        print(f"Pre-order creation error: {e}")
 
-                    if order_ref:
-                        bot_response_text = ORDER_CONFIRMED_TEMPLATE.replace("{product}", display_name).replace("{ref}", str(order_ref))
+                    if pre_order_ref:
+                        bot_response_text = ORDER_CONFIRMED_TEMPLATE.replace("{product}", display_name).replace("{ref}", str(pre_order_ref))
                     else:
                         bot_response_text = ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
 
