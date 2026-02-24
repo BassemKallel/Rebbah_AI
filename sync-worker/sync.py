@@ -8,7 +8,7 @@ MOCK_API_BASE_URL = os.getenv("MOCK_API_URL", "http://host.docker.internal:8003/
 VISION_SERVICE_URL = os.getenv("VISION_SERVICE_URL", "http://vision-service:8002/vectorize")
 
 # A test store ID (fallback if not provided in env)
-STORE_ID = os.getenv("STORE_ID", "123e4567-e89b-12d3-a456-426614174000")
+STORE_ID = os.getenv("STORE_ID", "b632373b-398a-4e21-9b17-a99b511f8c47")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -30,9 +30,11 @@ def fetch_products():
 def vectorize_image(image_url, product_id, shop_id, variation_id):
     """Send image URL to the vision service to extract and store embeddings."""
     payload = {
-        "image_url": image_url,
-        "product_id": str(product_id),
-        "shop_id": str(shop_id)
+        "image_url":       image_url,
+        "product_id":      str(product_id),
+        "variation_id":    str(variation_id),   # ID exact de la déclinaison (couleur/taille)
+        "shop_id":         str(shop_id),
+        "store_image_url": image_url             # On stocke aussi l'URL Azure pour la retourner
     }
     
     try:

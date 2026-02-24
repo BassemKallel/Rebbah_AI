@@ -14,13 +14,14 @@ from transformers import CLIPProcessor, CLIPModel
 processor = None
 model = None
 model_name = "openai/clip-vit-base-patch32"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global processor, model
-    print(f"Loading CLIP model: {model_name}")
+    print(f"Loading CLIP model: {model_name} on {device}")
     processor = CLIPProcessor.from_pretrained(model_name)
-    model = CLIPModel.from_pretrained(model_name, torch_dtype=torch.float32)
+    model = CLIPModel.from_pretrained(model_name, torch_dtype=torch.float32).to(device)
     model.eval()
     print("CLIP model loaded successfully!")
     yield
@@ -34,7 +35,9 @@ class ImageRequest(BaseModel):
     image_url: str
     limit: int = 5
     product_id: Optional[str] = None
+    variation_id: Optional[str] = None   # ID de la déclinaison exacte (couleur/taille)
     shop_id: Optional[str] = None
+    store_image_url: Optional[str] = None  # URL Azure Blob à stocker en DB
 
 # Database connection helper
 def get_db_connection():
@@ -61,7 +64,7 @@ async def predict_embedding(request: ImageRequest):
         image = Image.open(io.BytesIO(response.content)).convert("RGB")
 
         # 2. Extract embedding
-        inputs = processor(images=image, return_tensors="pt")
+        inputs = processor(images=image, return_tensors="pt").to(device)
         with torch.no_grad():
             # Use vision_model directly for transformers 5.x compatibility
             pixel_values = inputs.get("pixel_values")
@@ -72,7 +75,7 @@ async def predict_embedding(request: ImageRequest):
         
         # 3. Normalize & convert to list
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-        embedding = image_features.squeeze().tolist()
+        embedding = image_features.squeeze().cpu().tolist()
 
         status_msg = "success"
 
@@ -87,21 +90,24 @@ async def predict_embedding(request: ImageRequest):
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS products_vector (
                         id SERIAL PRIMARY KEY,
-                        product_id VARCHAR(255) NOT NULL,
-                        shop_id VARCHAR(255) NOT NULL,
-                        embedding vector(512),
-                        UNIQUE(product_id, shop_id)
+                        product_id   VARCHAR(255) NOT NULL,
+                        variation_id VARCHAR(255) NOT NULL,
+                        shop_id      VARCHAR(255) NOT NULL,
+                        image_url    TEXT,
+                        embedding    vector(512),
+                        UNIQUE(variation_id, shop_id)
                     );
                 """)
-                
-                # Upsert the embedding
+
+                # Upsert the embedding — one row per variation
                 cur.execute("""
-                    INSERT INTO products_vector (product_id, shop_id, embedding)
-                    VALUES (%s, %s, %s::vector)
-                    ON CONFLICT (product_id, shop_id) 
-                    DO UPDATE SET 
-                        embedding = EXCLUDED.embedding;
-                """, (request.product_id, request.shop_id, embedding))
+                    INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding)
+                    VALUES (%s, %s, %s, %s, %s::vector)
+                    ON CONFLICT (variation_id, shop_id)
+                    DO UPDATE SET
+                        embedding  = EXCLUDED.embedding,
+                        image_url  = EXCLUDED.image_url;
+                """, (request.product_id, request.variation_id, request.shop_id, request.store_image_url, embedding))
                 
                 conn.commit()
                 cur.close()
@@ -131,7 +137,7 @@ async def search_similar_products(request: ImageRequest):
         image = Image.open(io.BytesIO(response.content)).convert("RGB")
 
         # 2. Extract embedding
-        inputs = processor(images=image, return_tensors="pt")
+        inputs = processor(images=image, return_tensors="pt").to(device)
         with torch.no_grad():
             pixel_values = inputs.get("pixel_values")
             vision_outputs = model.vision_model(pixel_values=pixel_values)
@@ -140,29 +146,46 @@ async def search_similar_products(request: ImageRequest):
         
         # 3. Normalize & convert to list
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-        embedding = image_features.squeeze().tolist()
+        embedding = image_features.squeeze().cpu().tolist()
 
         # 4. Search in pgvector database
         conn = get_db_connection()
         cur = conn.cursor()
         
         # Uses cosine distance (<=>) for similarity
-        cur.execute(
-            """
-            SELECT product_id, shop_id, 1 - (embedding <=> %s::vector) AS similarity
-            FROM products_vector
-            ORDER BY embedding <=> %s::vector
-            LIMIT %s
-            """,
-            (embedding, embedding, request.limit)
-        )
-        
+        # Filter by shop_id if provided (multi-tenant isolation)
+        if request.shop_id:
+            cur.execute(
+                """
+                SELECT product_id, variation_id, shop_id, image_url,
+                       1 - (embedding <=> %s::vector) AS similarity
+                FROM products_vector
+                WHERE shop_id = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (embedding, request.shop_id, embedding, request.limit)
+            )
+        else:
+            cur.execute(
+                """
+                SELECT product_id, variation_id, shop_id, image_url,
+                       1 - (embedding <=> %s::vector) AS similarity
+                FROM products_vector
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (embedding, embedding, request.limit)
+            )
+
         results = []
         for row in cur.fetchall():
             results.append({
-                "product_id": row[0],
-                "shop_id": row[1],
-                "similarity_score": float(row[2])
+                "product_id":    row[0],
+                "variation_id":  row[1],
+                "shop_id":       row[2],
+                "image_url":     row[3],
+                "similarity_score": float(row[4])
             })
             
         cur.close()
