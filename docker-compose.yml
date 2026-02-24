@@ -28,6 +28,13 @@ services:
     container_name: vision-service
     ports:
       - "8002:8002"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
   sync-worker:
     build: ./sync-worker
     container_name: sync-worker
