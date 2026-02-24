@@ -1,5 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
 torch
 transformers
 gliner
+pydantic
+python-multipart
+sentencepiece
