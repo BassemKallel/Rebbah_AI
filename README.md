@@ -1,66 +1,201 @@
 # 🛒 TikTak-AI
 
-TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client basée sur l'intelligence artificielle. Le projet se compose de plusieurs microservices visant à comprendre les intentions des utilisateurs (NLU) et à analyser des contenus visuels.
+TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client basée sur l'intelligence artificielle. Elle expose un webhook Messenger/WhatsApp qui orchestre NLU (TunBERT + GLiNER), Vision (CLIP), Hot Memory (Redis), Cold Memory (PostgreSQL) et une Mock API produits.
 
 ## 🏗️ Architecture du Projet
 
-Le backend est structuré autour d'une architecture orientée microservices, orchestrée par Docker :
+```
+Messenger/WhatsApp
+       │
+       ▼
+backend-orchestrator :8000   (Django — API Gateway + State Machine)
+       │
+       ├──► nlu-service :8001       (FastAPI — TunBERT intent + GLiNER NER)
+       ├──► vision-service :8002    (FastAPI — CLIP embeddings + pgvector)
+       ├──► Redis :6379             (Hot Memory — contexte conversation)
+       ├──► PostgreSQL :5432        (Cold Memory — leads, conversations, messages)
+       ├──► pgvector DB :5433       (Vector DB — embeddings produits)
+       └──► Mock API :8003          (Django externe — catalogue produits + commandes)
+```
 
-- **`backend-orchestrator/`** : Le cœur du système (Django). Il gère la logique métier principale, l'API Gateway, l'authentification multilocataire (multi-tenant) et la base de données PostgreSQL.
-- **`nlu-service/`** : Un microservice FastAPI dédié à la compréhension du langage naturel (NLU). Il utilise un modèle TunBERT affiné pour la classification des intentions clients et un modèle GLiNER pour l'extraction d'entités nommées (NER), spécifiquement adaptés au contexte tunisien (français/arabe/arabizi).
-- **`vision-service/`** : Un service chargé du traitement, de l'analyse des images et de la génération d'embeddings vectoriels (stockés dans pgvector) pour la recherche visuelle de produits.
+### Services
+| Service | Port | Description |
+|---|---|---|
+| `backend-orchestrator` | 8000 | Cœur du système, Django, state machine conversation |
+| `nlu-service` | 8001 | TunBERT (classification intention) + GLiNER (extraction entités) |
+| `vision-service` | 8002 | CLIP (similarité image) + pgvector |
+| `postgres-db` | 5432 | Base principale (leads, conversations, messages) |
+| `vector-db` | 5433 | pgvector — embeddings images produits |
+| `tiktak-redis` | 6379 | Contexte conversation court terme |
+| **Mock API** | 8003 | API externe Django — catalogue produits + création commandes |
 
 ## 🚀 Fonctionnalités Clés
 
-- **Compréhension du Langage Naturel (NLU)** : Détection précise des intentions d'achat ou de support client, même dans des dialectes locaux.
-- **Extraction d'Entités (NER)** : Identification des produits, tailles, couleurs et adresses dans les requêtes textuelles.
-- **Recherche Visuelle** : Analyse des images de produits et recherche par similarité vectorielle.
-- **Architecture Multi-Tenant** : Isolation des données pour prendre en charge plusieurs boutiques ou clients de manière sécurisée.
-- **Infrastructure Scalable** : Services conteneurisés prêts pour le déploiement cloud (ex: Azure).
+- **Compréhension du Langage Naturel (NLU)** : Détection d'intentions en français/arabe/arabizi tunisien.
+- **Extraction d'Entités (NER)** : Produits, tailles, couleurs, adresses, numéros de téléphone.
+- **Recherche Visuelle** : L'utilisateur envoie une photo → le bot identifie la variation exacte (couleur) et pré-remplit la commande.
+- **Gestion des ambiguïtés** : Plusieurs produits correspondants → le bot liste et demande lequel.
+- **Flux commande complet** : Vérification stock → collecte taille/adresse/téléphone → POST commande → référence de commande.
+- **Architecture Multi-Tenant** : Chaque boutique identifiée par `shop_id` (UUID).
 
 ## 💻 Installation et Démarrage Local
 
 ### Prérequis
-- Docker et Docker Compose
-- Python 3.10+ (pour le développement local hors conteneurs)
+- Docker Desktop avec Docker Compose
+- GPU NVIDIA + pilotes CUDA (optionnel, pour accélérer la vision)
 - Git
 
-### Étapes de lancement
+### 1. Cloner le dépôt
 
-1. **Cloner le dépôt :**
-   ```bash
-   git clone https://github.com/BassemKallel/tiktak-ai.git
-   cd tiktak-ai
-   ```
+```bash
+git clone https://github.com/BassemKallel/tiktak-ai.git
+cd tiktak-ai
+```
 
-2. **Démarrer les services avec Docker Compose :**
-   ```bash
-   docker-compose up --build
-   ```
+### 2. Démarrer la Mock API (service externe)
 
-   Cela va construire et démarrer :
-   - La base de données PostgreSQL (avec l'extension pgvector)
-   - Redis (pour le cache ou les files d'attente)
-   - Le `nlu-service` (accessible généralement sur le port 8001)
-   - Le `vision-service`
-   - Le `backend-orchestrator` (Django)
+La Mock API est un projet Django séparé qui expose le catalogue produits et l'API de création de commandes. Elle **doit être accessible depuis les conteneurs Docker** donc lancée sur `0.0.0.0` (pas `127.0.0.1`).
 
-3. **Vérifier l'état :**
-   Rendez-vous sur les URLs fournies par chaque service (par exemple `http://localhost:8001/docs` pour le NLU).
+```bash
+# Dans le répertoire du projet Mock API
+cd /chemin/vers/mock-api
+python manage.py runserver 0.0.0.0:8003
+```
+
+> L'adresse à configurer dans `backend-orchestrator/core/settings.py` (ou `views.py`) pour atteindre la Mock API depuis les conteneurs est l'IP locale de la machine hôte, par exemple `http://192.168.100.10:8003`.
+
+Endpoints utilisés :
+| Méthode | URL | Header | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/products/` | `X-Store-ID: <shop_id>` | Liste tous les produits |
+| `GET` | `/api/v1/products/<id>/` | `X-Store-ID: <shop_id>` | Détail d'un produit |
+| `POST` | `/api/v1/orders/` | `X-Store-ID: <shop_id>` | Créer une commande |
+
+Voir [API_MOCK_DOCS.json](API_MOCK_DOCS.json) pour la documentation complète (importable dans Postman).
+
+### 3. Build et démarrage des services Docker
+
+**Premier lancement (build + démarrage) :**
+```bash
+docker-compose up --build
+```
+
+**Démarrage sans rebuild (si aucun changement de code) :**
+```bash
+docker-compose up
+```
+
+**En arrière-plan (mode détaché) :**
+```bash
+docker-compose up --build -d
+```
+
+**Rebuild d'un seul service (ex: après modification de `views.py`) :**
+```bash
+docker-compose build backend-orchestrator
+docker-compose up -d --no-deps backend-orchestrator
+```
+
+**Arrêter tous les services :**
+```bash
+docker-compose down
+```
+
+**Arrêter ET supprimer les volumes (reset complet BDD) :**
+```bash
+docker-compose down -v
+```
+
+**Voir les logs d'un service en temps réel :**
+```bash
+docker-compose logs -f backend-orchestrator
+docker-compose logs -f vision-service
+```
+
+**Services démarrés dans l'ordre :** `postgres-db` → `vector-db` → `tiktak-redis` → `nlu-service` → `vision-service` → `backend-orchestrator`
+
+> **GPU (optionnel)** : Si vous avez un GPU NVIDIA, il sera détecté automatiquement par `vision-service`. Vérifiez que le driver NVIDIA et CUDA 11.8+ sont installés sur l'hôte.
+
+### 4. Appliquer les migrations Django
+
+```bash
+docker exec -it backend-orchestrator python manage.py migrate
+```
+
+### 5. Synchroniser les produits vers le Vector DB (sync-worker)
+
+Le sync-worker récupère les produits depuis la Mock API, génère les embeddings CLIP et les stocke dans pgvector. À lancer après chaque ajout/modification de produits.
+
+```bash
+# Avec Docker
+docker-compose run --rm sync-worker
+
+# Ou directement (si environnement Python local configuré)
+cd sync-worker
+pip install -r requirements.txt
+python sync.py
+```
+
+> Si c'est le premier lancement ou si le schéma a changé, supprimez d'abord l'ancienne table :
+> ```sql
+> -- Se connecter au vector-db (port 5433, user: tiktak_vector, db: tiktak_vectors)
+> DROP TABLE IF EXISTS products_vector;
+> ```
+> Puis relancer le sync-worker.
+
+### 6. Vérification des services
+
+| Service | URL de santé |
+|---|---|
+| backend-orchestrator | `http://localhost:8000/api/v1/gateway/messenger/poc` |
+| nlu-service | `http://localhost:8001/docs` |
+| vision-service | `http://localhost:8002/docs` |
+
+### 7. Tester avec Postman
+
+Importer [TikTak_AI_Tests.postman_collection.json](TikTak_AI_Tests.postman_collection.json) dans Postman.
+
+Configurer les variables d'environnement :
+| Variable | Valeur |
+|---|---|
+| `BASE_URL` | `http://localhost:8000` |
+| `SHOP_ID` | UUID de votre boutique (ex: `b632373b-398a-4e21-9b17-a99b511f8c47`) |
+
+**Endpoint principal :**
+```
+POST http://localhost:8000/api/v1/gateway/messenger/poc
+Content-Type: multipart/form-data
+
+user_id  = whatsapp:+216XXXXXXXX
+shop_id  = <UUID boutique>
+text     = "Je veux commander un pull noir"     (optionnel)
+image_url= "https://..."                         (optionnel)
+```
+
+## 🔄 État de la Conversation (State Machine)
+
+| État | Description |
+|---|---|
+| `NEW_CONVERSATION` | Nouveau fil |
+| `WAITING_USER_REPLY` | En attente d'une info manquante (taille, adresse, téléphone) |
+| `WAITING_DISAMBIGUATION` | Plusieurs produits trouvés → demande à l'utilisateur de choisir |
+| `COMPLETED` | Commande passée ou conversation terminée |
 
 ## 🤝 Contribuer
 
-Nous utilisons un processus de développement rigoureux basé sur les Pull Requests.
-**Les push directs sur les branches `main` et `dev` sont strictement interdits.**
+**Les push directs sur `main` et `dev` sont strictement interdits.**
 
-👉 Veuillez lire le **[Guide de Contribution complet (CONTRIBUTING.md)](CONTRIBUTING.md)** avant de commencer à travailler.
+👉 Lire **[CONTRIBUTING.md](CONTRIBUTING.md)** avant de commencer.
 
-1. Créez une branche à partir de `dev` (ex: `feat/nouvelle-fonctionnalite`).
-2. Faites vos modifications et vos commits.
-3. Poussez votre branche sur GitHub.
-4. Ouvrez une Pull Request vers la branche `dev`.
-5. Attendez la relecture et la validation (*Approve*) par un Codeowner.
+1. Créer une branche depuis `dev` (ex: `feat/nouvelle-fonctionnalite`).
+2. Faire ses commits.
+3. Pousser la branche et ouvrir une Pull Request vers `dev`.
+4. Attendre l'approbation d'un Codeowner.
 
 ## 📄 Licence et Propriété
 
-Ce projet est la propriété de Bassem Kallel et de l'équipe TikTak-AI dans le cadre de leur PFE.
+Ce projet est la propriété de l'équipe TikTak-AI dans le cadre de leur PFE.
+
+**Auteurs :**
+- Bassem Kallel
+- Aziz Belgaied
