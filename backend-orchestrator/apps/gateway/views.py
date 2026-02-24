@@ -26,9 +26,19 @@ class MessengerWebhookPOC(APIView):
     def post(self, request):
         user_id = request.data.get("user_id")
         shop_id = request.data.get("shop_id", "default_shop")
+
+        # Accepte à la fois JSON imbriqué ET form-data plat
+        # JSON : {"message": {"text": "...", "image_url": "..."}}
+        # form-data : text=..., image_url=...
         message_data = request.data.get("message", {})
-        text = message_data.get("text", "")
-        image_url = message_data.get("image_url")
+        if isinstance(message_data, str):
+            import json as _json
+            try:
+                message_data = _json.loads(message_data)
+            except Exception:
+                message_data = {}
+        text      = message_data.get("text", "")      or request.data.get("text", "")
+        image_url = message_data.get("image_url")      or request.data.get("image_url")
 
         if not user_id:
             return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
