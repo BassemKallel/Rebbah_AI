@@ -20,22 +20,35 @@ from config import (
     INTENT_CONFIDENCE_THRESHOLD,
     ENTITY_CONFIDENCE_THRESHOLD,
 )
+from anonymization import anonymize_message
 from schemas import MessageRequest, NLUResponse, IntentPrediction, Entity, HealthResponse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Intents that require entity extraction
+INTENTS_REQUIRING_ENTITIES = {
+    "ORDER_PRODUCT",
+    "ASK_AVAILABILITY",
+    "ASK_PRICE",
+    "INFORM_INFO"
+}
+
 # Global model instances
 tunbert_model = None
 tunbert_tokenizer = None
 gliner_model = None
 device = None
+models_loaded = False
 
 
 def load_models():
-    """Load TunBERT and GLiNER models at startup"""
-    global tunbert_model, tunbert_tokenizer, gliner_model, device
+    """Load TunBERT and GLiNER models on first request (lazy loading)"""
+    global tunbert_model, tunbert_tokenizer, gliner_model, device, models_loaded
+    
+    if models_loaded:
+        return  # Already loaded, skip
     
     try:
         # Determine device
@@ -59,6 +72,7 @@ def load_models():
         gliner_model.eval()
         logger.info("GLiNER model loaded successfully")
         
+        models_loaded = True
         logger.info("All models loaded successfully!")
         
     except Exception as e:
@@ -83,9 +97,10 @@ def unload_models():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan - load models on startup, cleanup on shutdown"""
-    load_models()
+    """Manage application lifespan - models loaded on first request (lazy loading)"""
+    logger.info("NLU Service starting... Models will be loaded on first request")
     yield
+    logger.info("Unloading models...")
     unload_models()
 
 
@@ -112,15 +127,18 @@ def predict_intent(text: str) -> IntentPrediction:
     Predict intent using TunBERT model
     
     Args:
-        text: Input message
+        text: Input message (will be anonymized before TunBERT)
         
     Returns:
         IntentPrediction with intent label and confidence
     """
     try:
-        # Tokenize input
+        # Anonymize text before TunBERT (model was trained with __phone__ and __address__ tokens)
+        anonymized_text = anonymize_message(text)
+        
+        # Tokenize anonymized input
         inputs = tunbert_tokenizer(
-            text,
+            anonymized_text,
             return_tensors="pt",
             truncation=True,
             max_length=128,
@@ -151,21 +169,28 @@ def predict_intent(text: str) -> IntentPrediction:
 
 def extract_entities(text: str, labels: Optional[list] = None, threshold: float = ENTITY_CONFIDENCE_THRESHOLD) -> list[Entity]:
     """
-    Extract entities using GLiNER model
+    Extract entities using GLiNER model.
+    
+    NOTE: GLiNER was trained on anonymized data (__phone__, __address__ tokens).
+    To maintain extraction accuracy:
+    1. Anonymize the text before GLiNER
+    2. GLiNER extracts from anonymized text
+    3. Map results back to original text where needed
     
     Args:
-        text: Input message
+        text: Input message (original, non-anonymized)
         labels: Entity labels to extract (uses default if None)
         threshold: Confidence threshold for entity extraction
         
     Returns:
-        List of extracted entities
+        List of extracted entities with original (non-anonymized) values
     """
     try:
         # Use provided labels or default
         entity_labels = labels if labels else ENTITY_LABELS
         
-        # Predict entities
+        # GLiNER was trained on REAL data (real addresses like "Mourouj", "Manzah", real phone numbers)
+        # So we pass the ORIGINAL text directly — no anonymization needed here
         entities_raw = gliner_model.predict_entities(
             text,
             entity_labels,
@@ -227,7 +252,7 @@ async def predict(request: MessageRequest):
     
     Performs:
     1. Intent classification using TunBERT
-    2. Entity extraction using GLiNER
+    2. Entity extraction using GLiNER (only for intents that require it)
     
     Args:
         request: MessageRequest with message text and optional parameters
@@ -236,21 +261,23 @@ async def predict(request: MessageRequest):
         NLUResponse with intent and entities
     """
     try:
-        # Validate models are loaded
-        if tunbert_model is None or gliner_model is None:
-            raise HTTPException(status_code=503, detail="Models not loaded")
+        # Lazy load models on first request
+        load_models()
         
-        # Get intent prediction
+        # Get intent prediction (with anonymized text for TunBERT)
         intent = predict_intent(request.message)
         
-        # Always extract entities to capture products/colors/sizes
-        entities = extract_entities(
-            request.message,
-            labels=request.labels,
-            threshold=request.threshold
-        )
+        # Extract entities only for intents that require them
+        # GLiNER receives the ORIGINAL message (not anonymized) to extract real phone/address values
+        entities = []
+        if intent.intent in INTENTS_REQUIRING_ENTITIES:
+            entities = extract_entities(
+                request.message,  # Original message, NOT anonymized
+                labels=request.labels,
+                threshold=request.threshold
+            )
         
-        # Return combined response
+        # Return combined response with original message
         return NLUResponse(
             intent=intent,
             entities=entities,
