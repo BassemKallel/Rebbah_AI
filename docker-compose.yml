@@ -73,7 +73,19 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --save 60 1 --loglevel warning
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    ports:
+      - "8004:5540"
+    depends_on:
+      - redis
+    volumes:
+      - redisinsight_data:/data
+
 volumes:
   postgres_data:
   vector_data:
   redis_data:
+  redisinsight_data:

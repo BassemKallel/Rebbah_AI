@@ -1,5 +1,6 @@
 import json
 import requests
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -12,9 +13,13 @@ from .response_templates import (
     ORDER_CONFIRMED_TEMPLATE, ORDER_CONFIRMED_NO_REF_TEMPLATE
 )
 
-# Internal service URLs
-NLU_URL = "http://nlu-service:8001/predict"
-VISION_URL = "http://vision-service:8002/search-similar"
+# Service URLs — built from settings (env vars)
+NLU_URL         = settings.NLU_SERVICE_URL.rstrip('/') + settings.NLU_PREDICT_PATH
+VISION_URL      = settings.VISION_SERVICE_URL.rstrip('/') + settings.VISION_SEARCH_PATH
+VISION_URL_FILE = settings.VISION_SERVICE_URL.rstrip('/') + '/search-similar-upload'
+MOCK_API_PRODUCTS_URL = settings.MOCK_API_BASE_URL.rstrip('/') + settings.MOCK_API_PRODUCTS_PATH
+MOCK_API_SHOP_HEADER  = settings.MOCK_API_SHOP_ID_HEADER
+REQUEST_TIMEOUT       = settings.EXTERNAL_REQUEST_TIMEOUT
 
 # Initialize Hot Memory
 context_manager = ContextManager()
@@ -58,15 +63,25 @@ class MessengerWebhookPOC(APIView):
         extracted_entities = {}
         is_error = False
 
-        # 3. Vision API (if image provided)
+        # 3. Vision API (if image provided — URL ou fichier uploadé)
         matched_image_url = None
         vision_variation_id = None   # Variable locale, jamais persistée en DB
-        if image_url:
+        image_file = request.FILES.get("image")
+        if image_file or image_url:
             try:
-                vision_res = requests.post(
-                    VISION_URL,
-                    json={"image_url": image_url, "limit": 1, "shop_id": shop_id}
-                )
+                if image_file:
+                    vision_res = requests.post(
+                        VISION_URL_FILE,
+                        files={"image": (image_file.name, image_file.read(), image_file.content_type)},
+                        data={"shop_id": shop_id, "limit": 1},
+                        timeout=REQUEST_TIMEOUT
+                    )
+                else:
+                    vision_res = requests.post(
+                        VISION_URL,
+                        json={"image_url": image_url, "limit": 1, "shop_id": shop_id},
+                        timeout=REQUEST_TIMEOUT
+                    )
                 if vision_res.status_code == 200:
                     vision_data = vision_res.json()
                     if vision_data.get("results"):
@@ -83,7 +98,7 @@ class MessengerWebhookPOC(APIView):
         # 4. NLU API (if text provided)
         if text:
             try:
-                nlu_res = requests.post(NLU_URL, json={"message": text})
+                nlu_res = requests.post(NLU_URL, json={"message": text}, timeout=REQUEST_TIMEOUT)
                 if nlu_res.status_code == 200:
                     nlu_data = nlu_res.json()
                     intent_obj = nlu_data.get("intent", {})
@@ -139,9 +154,9 @@ class MessengerWebhookPOC(APIView):
         # We fetch Mock API first if we have a product, because we might need its real name instead of the UUID
         if prod_name:
             try:
-                mock_api_url = "http://192.168.100.10:8003/api/v1/products/"
-                headers = {"X-Store-ID": shop_id}
-                resp = requests.get(mock_api_url, headers=headers, timeout=5)
+                mock_api_url = MOCK_API_PRODUCTS_URL
+                headers = {MOCK_API_SHOP_HEADER: shop_id}
+                resp = requests.get(mock_api_url, headers=headers, timeout=REQUEST_TIMEOUT)
                 
                 if resp.status_code == 200:
                     products = resp.json()

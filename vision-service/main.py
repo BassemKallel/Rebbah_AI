@@ -1,7 +1,7 @@
 import io
 import requests
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from PIL import Image
 import torch
@@ -200,5 +200,77 @@ async def search_similar_products(request: ImageRequest):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+def _embed_image(image: Image.Image) -> list:
+    """Shared helper: compute CLIP embedding for a PIL image."""
+    inputs = processor(images=image, return_tensors="pt").to(device)
+    with torch.no_grad():
+        pixel_values = inputs.get("pixel_values")
+        vision_outputs = model.vision_model(pixel_values=pixel_values)
+        image_features = vision_outputs.pooler_output
+        image_features = model.visual_projection(image_features)
+    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+    return image_features.squeeze().cpu().tolist()
+
+
+@app.post("/search-similar-upload")
+async def search_similar_upload(
+    image: UploadFile = File(...),
+    shop_id: str = Form(None),
+    limit: int = Form(5),
+):
+    """Same as /search-similar but accepts a raw image file (multipart/form-data)."""
+    try:
+        contents = await image.read()
+        pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
+        embedding = _embed_image(pil_image)
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        if shop_id:
+            cur.execute(
+                """
+                SELECT product_id, variation_id, shop_id, image_url,
+                       1 - (embedding <=> %s::vector) AS similarity
+                FROM products_vector
+                WHERE shop_id = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (embedding, shop_id, embedding, limit)
+            )
+        else:
+            cur.execute(
+                """
+                SELECT product_id, variation_id, shop_id, image_url,
+                       1 - (embedding <=> %s::vector) AS similarity
+                FROM products_vector
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (embedding, embedding, limit)
+            )
+
+        results = []
+        for row in cur.fetchall():
+            results.append({
+                "product_id":       row[0],
+                "variation_id":     row[1],
+                "shop_id":          row[2],
+                "image_url":        row[3],
+                "similarity_score": float(row[4])
+            })
+
+        cur.close()
+        conn.close()
+
+        return {"status": "success", "results": results}
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
