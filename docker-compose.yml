@@ -18,11 +18,21 @@ services:
       - vector-db
       - nlu-service
       - vision-service
+    deploy:
+      resources:
+        limits:
+          memory: 512m
   nlu-service:
     build: ./nlu-service
     container_name: nlu-service
     ports:
       - "8001:8001"
+    volumes:
+      - ./nlu-service:/app
+    deploy:
+      resources:
+        limits:
+          memory: 2g
   vision-service:
     build: ./vision-service
     container_name: vision-service
@@ -30,6 +40,8 @@ services:
       - "8002:8002"
     deploy:
       resources:
+        limits:
+          memory: 4g
         reservations:
           devices:
             - driver: nvidia
@@ -38,6 +50,10 @@ services:
   sync-worker:
     build: ./sync-worker
     container_name: sync-worker
+    deploy:
+      resources:
+        limits:
+          memory: 256m
   db:
     image: postgres:15
     container_name: postgres-db
@@ -52,6 +68,10 @@ services:
       - ./database-init/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   vector-db:
     image: ankane/pgvector:v0.5.1
@@ -64,6 +84,10 @@ services:
       - vector_data:/var/lib/postgresql/data
     ports:
       - "${VECTOR_DB_PORT}:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   redis:
     image: redis:7-alpine
@@ -73,19 +97,12 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --save 60 1 --loglevel warning
-
-  redisinsight:
-    image: redis/redisinsight:latest
-    container_name: redisinsight
-    ports:
-      - "8004:5540"
-    depends_on:
-      - redis
-    volumes:
-      - redisinsight_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256m
 
 volumes:
   postgres_data:
   vector_data:
   redis_data:
-  redisinsight_data:
