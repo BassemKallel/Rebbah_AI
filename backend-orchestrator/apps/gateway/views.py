@@ -42,26 +42,7 @@ INTENT_ENTITY_FILTER = {
     "CONFIRM_DENY": set(),
     "TRACK_ORDER": {"phone_number"},
     "ASK_ADVICE": {"product"},
-    "ASK_ADVICE": {"product"},
     "ECHANGE": {"product"},
-}
-
-# Tunisian dialect color standardizer
-COLOR_SYNONYMS = {
-    "a7mer": "rouge", "ahmer": "rouge", "rouj": "rouge", "roj": "rouge",
-    "ak7el": "noir", "akhel": "noir", "k7al": "noir", "noire": "noir",
-    "abyedh": "blanc", "abiedh": "blanc", "abyad": "blanc", "bidha": "blanc", "blan": "blanc", "blonc": "blanc", "blanche": "blanc",
-    "azre9": "bleu", "azreq": "bleu", "zre9": "bleu", "bleue": "bleu",
-    "asfer": "jaune", "sfer": "jaune", "jaun": "jaune",
-    "akhdher": "vert", "akhder": "vert", "ver": "vert", "verte": "vert",
-    "foushni": "fuchsia", "fuchia": "fuchsia", "fuschia": "fuchsia",
-    "kaki": "kaki",
-    "maron": "marron", "maro": "marron", 
-    "bej": "beige", "bige": "beige",
-    "gri": "gris", "gris": "gris", "grise": "gris",
-    "rouz": "rose", "roz": "rose",
-    "mauv": "mauve", "mov": "mauve",
-    "bordo": "bordeaux", "bordou": "bordeaux"
 }
 
 # Initialize Hot Memory
@@ -73,9 +54,7 @@ class MessengerWebhookPOC(APIView):
     """
     def post(self, request):
         user_id = request.data.get("user_id")
-        shop_id = request.data.get("shop_id", "b632373b-398a-4e21-9b17-a99b511f8c47")
-        if shop_id == "default_shop":
-            shop_id = "b632373b-398a-4e21-9b17-a99b511f8c47"
+        shop_id = request.data.get("shop_id", "default_shop")
 
         # Accepte à la fois JSON imbriqué ET form-data plat
         # JSON : {"message": {"text": "...", "image_url": "..."}}
@@ -166,28 +145,18 @@ class MessengerWebhookPOC(APIView):
                     if (extracted_intent == "INFORM_INFO"
                             and conversation.missing_entities
                             and conversation.state == "WAITING_USER_REPLY"):
-                        # allow users to change color/size even if not the currently "missing" entity
-                        relevant_entities = set(conversation.missing_entities).union({"color", "size"})
+                        relevant_entities = set(conversation.missing_entities)
                     else:
                         relevant_entities = INTENT_ENTITY_FILTER.get(extracted_intent, set())
                     _valid_sizes = {"S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE", "XS", "XXL", "XXXL"}
-                    _other_entities_texts = {e["text"].strip().lower() for e in nlu_raw_entities if e["label"] != "address"}
-                    
                     for ent in nlu_raw_entities:
                         if ent["label"] in relevant_entities:
-                            # Reject address entities that are too short, match a size, or match another entity (like color)
+                            # Reject address entities that are too short or look like a size
                             if ent["label"] == "address":
                                 ent_val = ent["text"].strip()
-                                if len(ent_val) < 3 or ent_val.upper() in _valid_sizes or ent_val.lower() in _other_entities_texts:
+                                if len(ent_val) < 3 or ent_val.upper() in _valid_sizes:
                                     continue
-                                extracted_entities[ent["label"]] = ent["text"]
-                            elif ent["label"] == "color":
-                                raw_val = ent["text"].lower().strip()
-                                norm_val = COLOR_SYNONYMS.get(raw_val, ent["text"].strip())
-                                ent["text"] = norm_val # Update in place for downstream Strategy 1
-                                extracted_entities["color"] = norm_val
-                            else:
-                                extracted_entities[ent["label"]] = ent["text"]
+                            extracted_entities[ent["label"]] = ent["text"]
                         
             except requests.RequestException as e:
                 is_error = True
@@ -223,7 +192,8 @@ class MessengerWebhookPOC(APIView):
         # with a new GLiNER/fallback detection from a later message in the same flow
         if "product" in current_context:
             extracted_entities.pop("product", None)
-        # (We allow color and size to be updated dynamically)
+        if "color" in current_context:
+            extracted_entities.pop("color", None)
         current_context.update(extracted_entities)
         # Toujours nettoyer les clés internes — jamais persistées en DB
         current_context.pop("_vision_variation_id", None)
@@ -263,22 +233,11 @@ class MessengerWebhookPOC(APIView):
                 for missing_field in conversation.missing_entities:
                     if missing_field not in extracted_entities:
                         if missing_field == "size":
-                            # Valid sizes: S, M, L, XL, 2XL, 3XL, etc. Look for them anywhere in the text as standalone words
+                            # Valid sizes: S, M, L, XL, 2XL, 3XL, etc.
                             valid_sizes = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE"]
-                            
-                            # Check if the EXACT string is a size
                             if text_clean in valid_sizes:
                                 extracted_entities[missing_field] = text_clean
                                 current_context[missing_field] = text_clean
-                                contextual_match = True
-                                break
-                            
-                            # Or check if any size token is isolated inside the text
-                            words = text_clean.split()
-                            found_size = next((w for w in words if w in valid_sizes), None)
-                            if found_size:
-                                extracted_entities[missing_field] = found_size
-                                current_context[missing_field] = found_size
                                 contextual_match = True
                                 break
                         
@@ -304,27 +263,19 @@ class MessengerWebhookPOC(APIView):
                                 break
                         
                         elif missing_field in ["address", "color"]:
-                            # For address: require at least 3 chars, not a size abbreviation, and ensure 
-                            # we don't accidentally swallow text already claimed by NLU for another entity (like color)
+                            # For address: require at least 3 chars and not a size abbreviation
+                            # For color: accept any non-empty text
                             val = text.strip()
                             if missing_field == "address":
                                 valid_sizes = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE"]
-                                
-                                # If GLiNER detected a color in this message, remove those words from the address consideration
-                                check_val = val.lower()
-                                if "color" in extracted_entities:
-                                    color_words = extracted_entities["color"].lower().split()
-                                    for cw in color_words:
-                                        check_val = check_val.replace(cw, "").strip()
-                                
-                                if check_val and len(check_val) >= 3 and check_val.upper() not in valid_sizes:
+                                if val and len(val) >= 3 and val.upper() not in valid_sizes:
                                     extracted_entities[missing_field] = val
                                     current_context[missing_field] = val
                                     contextual_match = True
                                     break
                             elif val:
-                                extracted_entities[missing_field] = COLOR_SYNONYMS.get(val.lower(), val) if missing_field == "color" else val
-                                current_context[missing_field] = COLOR_SYNONYMS.get(val.lower(), val) if missing_field == "color" else val
+                                extracted_entities[missing_field] = val
+                                current_context[missing_field] = val
                                 contextual_match = True
                                 break
         
@@ -343,7 +294,7 @@ class MessengerWebhookPOC(APIView):
         if prod_name:
             try:
                 mock_api_url = MOCK_API_PRODUCTS_URL
-                headers = {MOCK_API_SHOP_HEADER: shop_id, "ngrok-skip-browser-warning": "1"}
+                headers = {MOCK_API_SHOP_HEADER: shop_id}
                 resp = requests.get(mock_api_url, headers=headers, timeout=REQUEST_TIMEOUT)
                 
                 if resp.status_code == 200:
@@ -353,23 +304,23 @@ class MessengerWebhookPOC(APIView):
                         # Exact product_id match from Vision service
                         target_id = prod_name.split("Article_From_Image_")[1]
                         effective_variation_id = vision_variation_id
-                        print(f"[MOCK API DEBUG] target_id={target_id} effective_variation_id={effective_variation_id}", flush=True)
+                        print(f"[MOCK API DEBUG] target_id={target_id} effective_variation_id={effective_variation_id}")
+                        print(f"[MOCK API DEBUG] available product ids={[p.get('id') for p in products]}")
+                        print(f"[MOCK API DEBUG] available variation ids={[v.get('id') for p in products for v in p.get('variations', [])]}")
                         for p in products:
                             p_id = str(p.get("id", "")).lower()
                             t_id = str(target_id).lower()
                             
                             if p_id == t_id:
-                                print(f"[MOCK API DEBUG] Matched product! p_id={p_id}", flush=True)
                                 matched_product = p
                                 # Pré-remplir couleur ET taille depuis la variation identifiée
                                 if effective_variation_id:
                                     eff_id = str(effective_variation_id).lower()
                                     for v in p.get("variations", []):
-                                        print(f"[MOCK API DEBUG] Checking variation {v.get('id')} vs {eff_id}", flush=True)
                                         if str(v.get("id", "")).lower() == eff_id:
-                                            print(f"[MOCK API DEBUG] Matched variation! v={v}", flush=True)
-                                            if v.get("color") and "color" not in extracted_entities:
-                                                current_context["color"] = v["color"]
+                                            current_context["color"] = v["color"]
+                                            if "color" not in extracted_entities:
+                                                extracted_entities["color"] = v["color"]
                                             break
                                 break
                             else:
@@ -377,8 +328,9 @@ class MessengerWebhookPOC(APIView):
                                 for v in p.get("variations", []):
                                     if str(v.get("id", "")).lower() == t_id:
                                         matched_product = p
-                                        if v.get("color") and "color" not in extracted_entities:
-                                            current_context["color"] = v["color"]
+                                        current_context["color"] = v["color"]
+                                        if "color" not in extracted_entities:
+                                            extracted_entities["color"] = v["color"]
                                         break
                                 if matched_product:
                                     break
@@ -470,7 +422,7 @@ class MessengerWebhookPOC(APIView):
             return Response({"status": "success", "bot_response": {"text": bot_response_text, "internal_debug": {"intent_detected": extracted_intent, "new_state": new_state, "candidates_count": len(candidates)}}})
 
         # ── MAIN STATE MACHINE ───────────────────────────────────────────────────
-        if extracted_intent == "ORDER_PRODUCT" or (image_url and previous_state == "NEW_CONVERSATION"):
+        if extracted_intent == "ORDER_PRODUCT":
             for req in REQUIRED_ORDER_ENTITIES:
                 if req not in current_context:
                     missing_list.append(req)
@@ -487,38 +439,31 @@ class MessengerWebhookPOC(APIView):
                     _ec = current_context["color"]
                     _es = current_context["size"]
                     _dn = matched_product["name"]
-                    
-                    # Prevent stock check from resetting context if current target is NOT the matched product 
-                    # (this happens when user is searching for something completely different while context holds an old product)
-                    # For safety, we only apply this logic if the intent is ORDER_PRODUCT or it's an image.
-                    if extracted_intent in ["ORDER_PRODUCT", "UNKNOWN"] or image_url:
-                        _valid = next(
-                            (v for v in matched_product.get("variations", [])
-                             if v.get("color", "").lower() == _ec.lower()
-                             and v.get("size", "").lower() == _es.lower()
-                             and v.get("stock_quantity", 0) > 0),
-                            None
+                    _valid = next(
+                        (v for v in matched_product.get("variations", [])
+                         if v.get("color", "").lower() == _ec.lower()
+                         and v.get("size", "").lower() == _es.lower()
+                         and v.get("stock_quantity", 0) > 0),
+                        None
+                    )
+                    if not _valid:
+                        early_stock_failed = True
+                        _avail = ", ".join(list(set([
+                            f"{v['color']} / {v['size']}"
+                            for v in matched_product.get("variations", [])
+                            if v.get("stock_quantity", 0) > 0
+                        ])))
+                        bot_response_text = (
+                            OUT_OF_STOCK_TEMPLATE
+                            .replace("{product}", _dn)
+                            .replace("{color}", _ec)
+                            .replace("{size}", _es)
                         )
-                        if not _valid:
-                            early_stock_failed = True
-                            _avail = ", ".join(list(set([
-                                f"{v['color']} / {v['size']}"
-                                for v in matched_product.get("variations", [])
-                                if v.get("stock_quantity", 0) > 0
-                            ])))
-                            bot_response_text = (
-                                OUT_OF_STOCK_TEMPLATE
-                                .replace("{product}", _dn)
-                                .replace("{color}", _ec)
-                                .replace("{size}", _es)
-                            )
-                            if _avail:
-                                bot_response_text += f"\nDisponible en : {_avail}"
-                            current_context.pop("color", None)
-                            current_context.pop("size", None)
-                            
-                            # Keep missing list completely refreshed so bot asks again
-                            missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                        if _avail:
+                            bot_response_text += f"\nDisponible en : {_avail}"
+                        current_context.pop("color", None)
+                        current_context.pop("size", None)
+                        missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
 
                 if not early_stock_failed:
                     first_missing = missing_list[0]
