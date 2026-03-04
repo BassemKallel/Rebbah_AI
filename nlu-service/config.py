@@ -1,53 +1,52 @@
 """
-Configuration settings for NLU Service
+Configuration for the NLU Service.
+Defines model paths, labels, and thresholds used by main.py.
 """
-import os
 from pathlib import Path
 
-# Base paths
+# ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
-MODELS_DIR = BASE_DIR / "models"
 
-# Model paths
-TUNBERT_MODEL_PATH = MODELS_DIR / "tunbert_intent" / "tunbert_v3"
-GLINER_MODEL_PATH = MODELS_DIR / "gliner_entity" / "gliner_finetuned_v7"
+TUNBERT_MODEL_PATH = BASE_DIR / "models" / "tunbert_intent" / "tunbert_v3"
+GLINER_MODEL_PATH  = BASE_DIR / "models" / "gliner_entity"  / "gliner_finetuned_v7"
 
-# Intent labels (from TunBERT model config.json)
+# ── Intent label mapping (index → label) ───────────────────────────────────
+# MUST match the model's own id2label in models/tunbert_intent/tunbert_v3/config.json
 INTENT_LABELS = {
-    0: "ASK_ADVICE",
-    1: "ASK_AVAILABILITY",
-    2: "ASK_DELIVERY",
-    3: "ASK_DETAILS",
-    4: "ASK_DISCOUNT",
-    5: "ASK_LOCATION",
-    6: "ASK_PRICE",
-    7: "CANCEL_ORDER",
-    8: "CHECK_PACKAGE",
-    9: "COMPLAINT",
+    0:  "ASK_ADVICE",
+    1:  "ASK_AVAILABILITY",
+    2:  "ASK_DELIVERY",
+    3:  "ASK_DETAILS",
+    4:  "ASK_DISCOUNT",
+    5:  "ASK_LOCATION",
+    6:  "ASK_PRICE",
+    7:  "CANCEL_ORDER",
+    8:  "CHECK_PACKAGE",
+    9:  "COMPLAINT",
     10: "CONFIRM_DENY",
     11: "ECHANGE",
     12: "GREETING",
     13: "INFORM_INFO",
     14: "NOISE",
     15: "ORDER_PRODUCT",
-    16: "TRACK_ORDER"
+    16: "TRACK_ORDER",
 }
 
-# Entity labels for GLiNER
+# ── Entity labels (GLiNER) ─────────────────────────────────────────────────
 ENTITY_LABELS = [
     "product",
     "color",
     "size",
     "address",
+    "phone_number",
     "quantity",
     "client_name",
-    "phone_number"
 ]
 
-# Confidence thresholds
+# ── Thresholds ─────────────────────────────────────────────────────────────
 INTENT_CONFIDENCE_THRESHOLD = 0.5
 ENTITY_CONFIDENCE_THRESHOLD = 0.6
 
-# API settings
-API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "8001"))
+# ── API server settings ────────────────────────────────────────────────────
+API_HOST = "0.0.0.0"
+API_PORT = 8001
