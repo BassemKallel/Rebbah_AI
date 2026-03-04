@@ -50,6 +50,15 @@ services:
   sync-worker:
     build: ./sync-worker
     container_name: sync-worker
+    env_file:
+      - .env
+    environment:
+      TIKTAK_API_BASE_URL: ${TIKTAK_API_BASE_URL}
+      TIKTAK_API_TOKEN:    ${TIKTAK_API_TOKEN}
+      COMPANY_SLUG:        ${COMPANY_SLUG}
+      VISION_SERVICE_URL:  http://vision-service:8002/vectorize
+    depends_on:
+      - vision-service
     deploy:
       resources:
         limits:

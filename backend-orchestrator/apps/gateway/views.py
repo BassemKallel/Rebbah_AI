@@ -1,10 +1,14 @@
 import json
 import re
+import logging
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+
+logger = logging.getLogger(__name__)
 
 from apps.crm.models import Lead, Conversation, Message
 from .context_manager import ContextManager
@@ -19,8 +23,7 @@ from .response_templates import (
 NLU_URL         = settings.NLU_SERVICE_URL.rstrip('/') + settings.NLU_PREDICT_PATH
 VISION_URL      = settings.VISION_SERVICE_URL.rstrip('/') + settings.VISION_SEARCH_PATH
 VISION_URL_FILE = settings.VISION_SERVICE_URL.rstrip('/') + '/search-similar-upload'
-MOCK_API_PRODUCTS_URL = settings.MOCK_API_BASE_URL.rstrip('/') + settings.MOCK_API_PRODUCTS_PATH
-MOCK_API_SHOP_HEADER  = settings.MOCK_API_SHOP_ID_HEADER
+TIKTAK_API_PRODUCTS_URL = settings.TIKTAK_API_BASE_URL.rstrip('/') + settings.TIKTAK_API_PRODUCTS_PATH
 REQUEST_TIMEOUT       = settings.EXTERNAL_REQUEST_TIMEOUT
 
 # Map intent → relevant entity labels (filter GLiNER results)
@@ -44,6 +47,67 @@ INTENT_ENTITY_FILTER = {
     "ASK_ADVICE": {"product"},
     "ECHANGE": {"product"},
 }
+
+def normalize_tiktak_products(results: list) -> list:
+    """
+    Convertit la réponse brute de l'API TikTak réelle en format interne standard.
+
+    Format interne :
+    {
+        "id":         <int>,
+        "name":       <str>,
+        "base_price": <str>,
+        "variations": [
+            {
+                "id":             <int>,
+                "color":          <str>,   # extrait de _attributs où is_color==True
+                "size":           <str>,   # extrait de _attributs où is_color==False
+                "image":          <str>,   # renommé depuis "photo"
+                "stock_quantity": <int>,   # renommé depuis "stock"
+            }
+        ]
+    }
+    """
+    normalized = []
+    for p in results:
+        if p.get("parent") is not None:
+            continue
+
+        variations = []
+        for decl in p.get("declinaisons", []):
+            color = ""
+            size  = ""
+            for attr in decl.get("_attributs", []):
+                if attr.get("is_color"):
+                    color = attr.get("value", "")
+                else:
+                    size = attr.get("value", "")
+            variations.append({
+                "id":             decl["id"],
+                "color":          color,
+                "size":           size,
+                "image":          decl.get("photo", ""),
+                "stock_quantity": decl.get("stock", 0),
+            })
+
+        if not variations:
+            variations.append({
+                "id":             p["id"],
+                "color":          "",
+                "size":           "",
+                "image":          p.get("photo", ""),
+                "stock_quantity": p.get("stock", 0),
+            })
+
+        normalized.append({
+            "id":         p["id"],
+            "name":       p["name"],
+            "base_price": str(p.get("price", "0")),
+            "variations": variations,
+        })
+
+    return normalized
+
 
 # Initialize Hot Memory
 context_manager = ContextManager()
@@ -149,15 +213,30 @@ class MessengerWebhookPOC(APIView):
                     else:
                         relevant_entities = INTENT_ENTITY_FILTER.get(extracted_intent, set())
                     _valid_sizes = {"S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE", "XS", "XXL", "XXXL"}
+                    # Build a set of texts that GLiNER labeled as phone_number (for deduplication below)
+                    _phone_texts = {e["text"].strip() for e in nlu_raw_entities if e["label"] == "phone_number"}
                     for ent in nlu_raw_entities:
                         if ent["label"] in relevant_entities:
-                            # Reject address entities that are too short or look like a size
+                            # Reject address entities that are too short, look like a size,
+                            # or are the same text GLiNER also classified as phone_number
                             if ent["label"] == "address":
                                 ent_val = ent["text"].strip()
-                                if len(ent_val) < 3 or ent_val.upper() in _valid_sizes:
+                                if (len(ent_val) < 3
+                                        or ent_val.upper() in _valid_sizes
+                                        or ent_val in _phone_texts):
                                     continue
                             extracted_entities[ent["label"]] = ent["text"]
-                        
+
+                    # Color correction bypass: even if "color" was not in relevant_entities
+                    # (e.g. bot was asking for size), if GLiNER detected a color AND a color
+                    # is already set in context, treat it as an explicit correction.
+                    if "color" in conversation.context_data:
+                        for ent in nlu_raw_entities:
+                            if ent["label"] == "color":
+                                extracted_entities["color"] = ent["text"]
+                                logger.debug(f"[COLOR CORRECTION] Override {conversation.context_data['color']} → {ent['text']}")
+                                break
+
             except requests.RequestException as e:
                 is_error = True
                 print(f"NLU API Error: {e}")
@@ -189,11 +268,31 @@ class MessengerWebhookPOC(APIView):
         # 6. Accumulate entities in Conversation context
         current_context = conversation.context_data
         # Protect already-identified entities: once product or color is known, don't overwrite
-        # with a new GLiNER/fallback detection from a later message in the same flow
+        # with a new GLiNER/fallback detection from a later message in the same flow.
+        #
+        # EXCEPTION 1 — Image priority: if the new product comes from the vision service
+        # (Article_From_Image_xxx), it overrides any previously text-detected product.
+        # The color is also reset since it's a different article.
+        #
+        # EXCEPTION 2 — Color correction: if the ONLY entity detected in this message is "color",
+        # treat it as an explicit correction (e.g. user says "Non, Bleu" or "Plutôt Noir")
+        # and allow the color to be updated.
+        new_product = extracted_entities.get("product", "")
+        is_image_product = new_product.startswith("Article_From_Image_")
         if "product" in current_context:
-            extracted_entities.pop("product", None)
+            if is_image_product:
+                # Image overrides text — also clear the old color since it's a new article
+                current_context.pop("color", None)
+                extracted_entities.pop("color", None)  # color will come from vision variation
+                logger.info(f"[VISION PRIORITY] Overriding text product '{current_context['product']}' with image product '{new_product}'")
+            else:
+                extracted_entities.pop("product", None)
         if "color" in current_context:
-            extracted_entities.pop("color", None)
+            is_explicit_color_correction = (
+                list(extracted_entities.keys()) == ["color"]
+            )
+            if not is_explicit_color_correction:
+                extracted_entities.pop("color", None)
         current_context.update(extracted_entities)
         # Toujours nettoyer les clés internes — jamais persistées en DB
         current_context.pop("_vision_variation_id", None)
@@ -263,17 +362,27 @@ class MessengerWebhookPOC(APIView):
                                 break
                         
                         elif missing_field in ["address", "color"]:
-                            # For address: require at least 3 chars and not a size abbreviation
-                            # For color: accept any non-empty text
+                            # For address: require at least 3 chars, not a size abbreviation,
+                            # and not already captured under another label by GLiNER
+                            # (e.g. "Noir" is color, "50152515" is phone_number — don't re-map as address)
                             val = text.strip()
+                            already_labelled = val in extracted_entities.values()
+                            # Also check the raw GLiNER output: if the text was classified
+                            # as a specific non-address entity, never re-map it as address
+                            gliner_labels = {e["label"] for e in nlu_raw_entities if e["text"].strip() == val}
+                            gliner_says_not_address = bool(gliner_labels) and gliner_labels != {"address"}
                             if missing_field == "address":
                                 valid_sizes = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE"]
-                                if val and len(val) >= 3 and val.upper() not in valid_sizes:
+                                if (val
+                                        and len(val) >= 3
+                                        and val.upper() not in valid_sizes
+                                        and not already_labelled
+                                        and not gliner_says_not_address):
                                     extracted_entities[missing_field] = val
                                     current_context[missing_field] = val
                                     contextual_match = True
                                     break
-                            elif val:
+                            elif val and not already_labelled and not gliner_says_not_address:
                                 extracted_entities[missing_field] = val
                                 current_context[missing_field] = val
                                 contextual_match = True
@@ -290,23 +399,51 @@ class MessengerWebhookPOC(APIView):
         prod_name = current_context.get("product")
         matched_product = None
         
-        # We fetch Mock API first if we have a product, because we might need its real name instead of the UUID
+        # We fetch TikTak API first if we have a product, because we might need its real name instead of the UUID
         if prod_name:
             try:
-                mock_api_url = MOCK_API_PRODUCTS_URL
-                headers = {MOCK_API_SHOP_HEADER: shop_id}
-                resp = requests.get(mock_api_url, headers=headers, timeout=REQUEST_TIMEOUT)
-                
-                if resp.status_code == 200:
-                    products = resp.json()
+                # Cache Redis — TTL configurable via PRODUCTS_CACHE_TTL (défaut 10 min)
+                cache_key = f"tiktak_products:{shop_id}"
+                products = cache.get(cache_key)
+
+                if products is None:
+                    logger.info(f"[TIKTAK API] cache miss shop_id={shop_id}")
+                    api_headers = {"Authorization": f"Bearer {settings.TIKTAK_API_TOKEN}"}
+                    all_results = []
+                    next_url = TIKTAK_API_PRODUCTS_URL
+                    params = {"company": shop_id}
+                    page_count = 0
+
+                    while next_url and page_count < 10:
+                        if page_count == 0:
+                            resp = requests.get(next_url, headers=api_headers, params=params, timeout=REQUEST_TIMEOUT)
+                        else:
+                            resp = requests.get(next_url, headers=api_headers, timeout=REQUEST_TIMEOUT)
+
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            all_results.extend(data.get("results", []))
+                            next_url = data.get("next")
+                            page_count += 1
+                        else:
+                            logger.error(f"[TIKTAK API] error {resp.status_code}")
+                            break
+
+                    products = normalize_tiktak_products(all_results)
+                    cache.set(cache_key, products, settings.PRODUCTS_CACHE_TTL)
+                    logger.info(f"[TIKTAK API] {len(products)} produits cachés")
+                else:
+                    logger.debug(f"[TIKTAK API] cache hit shop_id={shop_id}")
+
+                if products is not None and len(products) > 0:
                     
                     if prod_name.startswith("Article_From_Image_"):
                         # Exact product_id match from Vision service
                         target_id = prod_name.split("Article_From_Image_")[1]
                         effective_variation_id = vision_variation_id
-                        print(f"[MOCK API DEBUG] target_id={target_id} effective_variation_id={effective_variation_id}")
-                        print(f"[MOCK API DEBUG] available product ids={[p.get('id') for p in products]}")
-                        print(f"[MOCK API DEBUG] available variation ids={[v.get('id') for p in products for v in p.get('variations', [])]}")
+                        logger.debug(f"[TIKTAK API] target_id={target_id} effective_variation_id={effective_variation_id}")
+                        logger.debug(f"[TIKTAK API] available product ids={[p.get('id') for p in products]}")
+                        logger.debug(f"[TIKTAK API] available variation ids={[v.get('id') for p in products for v in p.get('variations', [])]}")
                         for p in products:
                             p_id = str(p.get("id", "")).lower()
                             t_id = str(target_id).lower()
@@ -348,8 +485,8 @@ class MessengerWebhookPOC(APIView):
                             current_context["candidates"] = keyword_candidates
                             current_context["pending_intent"] = extracted_intent
             except Exception as e:
-                print(f"Mock API Error: {e}")
-                print(f"[MOCK API] URL={mock_api_url} shop_id={shop_id} status={resp.status_code if 'resp' in dir() else 'N/A'}")
+                logger.error(f"[TIKTAK API] Error: {e}")
+                logger.error(f"[TIKTAK API] URL={TIKTAK_API_PRODUCTS_URL} shop_id={shop_id}")
 
         # Update user_message with any new entities extracted via Contextual Mapping or Vision/Mock API
         user_message.extracted_entities = extracted_entities
@@ -665,7 +802,15 @@ class MessengerWebhookPOC(APIView):
                         else:
                             bot_response_text = ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
             else:
-                bot_response_text = TEMPLATES.get("INFORM_INFO")
+                # INFORM_INFO hors d'un flow actif (ex: NEW_CONVERSATION)
+                # Si l'utilisateur a donné des infos (taille, adresse...) mais pas de produit,
+                # on lui demande quel article il souhaite commander.
+                if "product" not in current_context:
+                    bot_response_text = "Merci pour ces informations ! Quel article souhaitez-vous commander ?"
+                    new_state = "WAITING_USER_REPLY"
+                    missing_list = ["product"]
+                else:
+                    bot_response_text = TEMPLATES.get("INFORM_INFO")
 
         elif extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY"]:
             # If we're in the middle of an ORDER_PRODUCT flow, answer the question but stay WAITING_USER_REPLY
