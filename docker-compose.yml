@@ -1,10 +1,18 @@
 version: '3.8'
 services:
+  api-gateway:
+    image: nginx:alpine
+    container_name: api-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend-orchestrator
+
   backend-orchestrator:
     build: ./backend-orchestrator
     container_name: backend-orchestrator
-    ports:
-      - "8000:8000"
     volumes:
       - ./backend-orchestrator:/app
     env_file:
@@ -25,8 +33,6 @@ services:
   nlu-service:
     build: ./nlu-service
     container_name: nlu-service
-    ports:
-      - "8001:8001"
     volumes:
       - ./nlu-service:/app
     deploy:
@@ -36,8 +42,6 @@ services:
   vision-service:
     build: ./vision-service
     container_name: vision-service
-    ports:
-      - "8002:8002"
     deploy:
       resources:
         limits:
