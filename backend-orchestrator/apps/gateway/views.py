@@ -1,20 +1,113 @@
 import json
+import re
+import logging
 import requests
+from django.conf import settings
+from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
+logger = logging.getLogger(__name__)
+
 from apps.crm.models import Lead, Conversation, Message
 from .context_manager import ContextManager
+from .anonymization import anonymize_message
 from .response_templates import (
     TEMPLATES, MISSING_ENTITY_TEMPLATES, REQUIRED_ORDER_ENTITIES,
     DISAMBIGUATION_TEMPLATE, OUT_OF_STOCK_TEMPLATE,
     ORDER_CONFIRMED_TEMPLATE, ORDER_CONFIRMED_NO_REF_TEMPLATE
 )
 
-# Internal service URLs
-NLU_URL = "http://nlu-service:8001/predict"
-VISION_URL = "http://vision-service:8002/search-similar"
+# Service URLs — built from settings (env vars)
+NLU_URL         = settings.NLU_SERVICE_URL.rstrip('/') + settings.NLU_PREDICT_PATH
+VISION_URL      = settings.VISION_SERVICE_URL.rstrip('/') + settings.VISION_SEARCH_PATH
+VISION_URL_FILE = settings.VISION_SERVICE_URL.rstrip('/') + '/search-similar-upload'
+TIKTAK_API_PRODUCTS_URL = settings.TIKTAK_API_BASE_URL.rstrip('/') + settings.TIKTAK_API_PRODUCTS_PATH
+REQUEST_TIMEOUT       = settings.EXTERNAL_REQUEST_TIMEOUT
+
+# Map intent → relevant entity labels (filter GLiNER results)
+INTENT_ENTITY_FILTER = {
+    "ORDER_PRODUCT": {"product", "color", "size", "address", "phone_number", "quantity"},
+    "ASK_PRICE": {"product"},
+    "ASK_AVAILABILITY": {"product", "color", "size"},
+    "INFORM_INFO": {"address", "phone_number", "color", "size"},
+    "ASK_DELIVERY": set(),
+    "GREETING": set(),
+    "UNKNOWN": set(),
+    "NOISE": set(),
+    "ASK_DETAILS": {"product"},
+    "ASK_DISCOUNT": set(),
+    "ASK_LOCATION": set(),
+    "CANCEL_ORDER": set(),
+    "CHECK_PACKAGE": set(),
+    "COMPLAINT": set(),
+    "CONFIRM_DENY": set(),
+    "TRACK_ORDER": {"phone_number"},
+    "ASK_ADVICE": {"product"},
+    "ECHANGE": {"product"},
+}
+
+def normalize_tiktak_products(results: list) -> list:
+    """
+    Convertit la réponse brute de l'API TikTak réelle en format interne standard.
+
+    Format interne :
+    {
+        "id":         <int>,
+        "name":       <str>,
+        "base_price": <str>,
+        "variations": [
+            {
+                "id":             <int>,
+                "color":          <str>,   # extrait de _attributs où is_color==True
+                "size":           <str>,   # extrait de _attributs où is_color==False
+                "image":          <str>,   # renommé depuis "photo"
+                "stock_quantity": <int>,   # renommé depuis "stock"
+            }
+        ]
+    }
+    """
+    normalized = []
+    for p in results:
+        if p.get("parent") is not None:
+            continue
+
+        variations = []
+        for decl in p.get("declinaisons", []):
+            color = ""
+            size  = ""
+            for attr in decl.get("_attributs", []):
+                if attr.get("is_color"):
+                    color = attr.get("value", "")
+                else:
+                    size = attr.get("value", "")
+            variations.append({
+                "id":             decl["id"],
+                "color":          color,
+                "size":           size,
+                "image":          decl.get("photo", ""),
+                "stock_quantity": decl.get("stock", 0),
+            })
+
+        if not variations:
+            variations.append({
+                "id":             p["id"],
+                "color":          "",
+                "size":           "",
+                "image":          p.get("photo", ""),
+                "stock_quantity": p.get("stock", 0),
+            })
+
+        normalized.append({
+            "id":         p["id"],
+            "name":       p["name"],
+            "base_price": str(p.get("price", "0")),
+            "variations": variations,
+        })
+
+    return normalized
+
 
 # Initialize Hot Memory
 context_manager = ContextManager()
@@ -57,25 +150,38 @@ class MessengerWebhookPOC(APIView):
         extracted_intent = "UNKNOWN"
         extracted_entities = {}
         is_error = False
+        nlu_raw_entities = []  # Save raw NLU entities for contextual mapping later
 
-        # 3. Vision API (if image provided)
+        # 3. Vision API (if image provided — URL ou fichier uploadé)
         matched_image_url = None
         vision_variation_id = None   # Variable locale, jamais persistée en DB
-        if image_url:
+        image_file = request.FILES.get("image")
+        if image_file or image_url:
             try:
-                vision_res = requests.post(
-                    VISION_URL,
-                    json={"image_url": image_url, "limit": 1, "shop_id": shop_id}
-                )
+                if image_file:
+                    vision_res = requests.post(
+                        VISION_URL_FILE,
+                        files={"image": (image_file.name, image_file.read(), image_file.content_type)},
+                        data={"shop_id": shop_id, "limit": 1},
+                        timeout=REQUEST_TIMEOUT
+                    )
+                else:
+                    vision_res = requests.post(
+                        VISION_URL,
+                        json={"image_url": image_url, "limit": 1, "shop_id": shop_id},
+                        timeout=REQUEST_TIMEOUT
+                    )
                 if vision_res.status_code == 200:
                     vision_data = vision_res.json()
                     if vision_data.get("results"):
                         top_match = vision_data["results"][0]
+                        print(f"[VISION DEBUG] top_match={top_match}")
                         # Identifie le produit parent
                         extracted_entities["product"] = f"Article_From_Image_{top_match['product_id']}"
                         # Variables locales uniquement — jamais dans extracted_entities
                         matched_image_url = top_match.get("image_url")
                         vision_variation_id = top_match.get("variation_id")
+                        print(f"[VISION DEBUG] product_id={top_match['product_id']} variation_id={vision_variation_id}")
             except requests.RequestException as e:
                 is_error = True
                 print(f"Vision API Error: {e}")
@@ -83,22 +189,61 @@ class MessengerWebhookPOC(APIView):
         # 4. NLU API (if text provided)
         if text:
             try:
-                nlu_res = requests.post(NLU_URL, json={"message": text})
+                # Send original text to NLU
+                # NLU will:
+                # 1. Anonymize for TunBERT (intent classification)
+                # 2. Use original text for GLiNER (entity extraction)
+                nlu_res = requests.post(NLU_URL, json={"message": text}, timeout=REQUEST_TIMEOUT)
                 if nlu_res.status_code == 200:
                     nlu_data = nlu_res.json()
                     intent_obj = nlu_data.get("intent", {})
                     extracted_intent = intent_obj.get("intent", "UNKNOWN")
                     
-                    # Merge NLU entities with Vision entities
-                    for ent in nlu_data.get("entities", []):
-                        extracted_entities[ent["label"]] = ent["text"]
-                        
+                    # Save raw NLU entities for contextual mapping
+                    nlu_raw_entities = nlu_data.get("entities", [])
+                    
+                    # Filter entities based on intent (ignore irrelevant entities from GLiNER)
+                    # For INFORM_INFO during an active order flow: only accept the entities
+                    # that the bot is currently waiting for — prevents premature capture of
+                    # address/phone while the bot is still asking for color or size.
+                    if (extracted_intent == "INFORM_INFO"
+                            and conversation.missing_entities
+                            and conversation.state == "WAITING_USER_REPLY"):
+                        relevant_entities = set(conversation.missing_entities)
+                    else:
+                        relevant_entities = INTENT_ENTITY_FILTER.get(extracted_intent, set())
+                    _valid_sizes = {"S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE", "XS", "XXL", "XXXL"}
+                    # Build a set of texts that GLiNER labeled as phone_number (for deduplication below)
+                    _phone_texts = {e["text"].strip() for e in nlu_raw_entities if e["label"] == "phone_number"}
+                    for ent in nlu_raw_entities:
+                        if ent["label"] in relevant_entities:
+                            # Reject address entities that are too short, look like a size,
+                            # or are the same text GLiNER also classified as phone_number
+                            if ent["label"] == "address":
+                                ent_val = ent["text"].strip()
+                                if (len(ent_val) < 3
+                                        or ent_val.upper() in _valid_sizes
+                                        or ent_val in _phone_texts):
+                                    continue
+                            extracted_entities[ent["label"]] = ent["text"]
+
+                    # Color correction bypass: even if "color" was not in relevant_entities
+                    # (e.g. bot was asking for size), if GLiNER detected a color AND a color
+                    # is already set in context, treat it as an explicit correction.
+                    if "color" in conversation.context_data:
+                        for ent in nlu_raw_entities:
+                            if ent["label"] == "color":
+                                extracted_entities["color"] = ent["text"]
+                                logger.debug(f"[COLOR CORRECTION] Override {conversation.context_data['color']} → {ent['text']}")
+                                break
+
             except requests.RequestException as e:
                 is_error = True
                 print(f"NLU API Error: {e}")
                 
             # Fallback for POC: if NLU missed the product but recognized intent
-            if "product" not in extracted_entities and not image_url:
+            # Only run if product not yet identified in accumulated context
+            if "product" not in extracted_entities and not image_url and "product" not in conversation.context_data:
                 text_lower = text.lower()
                 common_products = ["pull", "t-shirt", "veste", "pantalon", "robe"]
                 for cp in common_products:
@@ -106,12 +251,12 @@ class MessengerWebhookPOC(APIView):
                         extracted_entities["product"] = cp
                         break
                         
-        # If user sent an image but NLU failed to get the intent, default to ORDER
-        if image_url and (extracted_intent == "UNKNOWN" or not text):
+        # If user sent an image (URL or file upload) but NLU failed to get the intent, default to ORDER
+        if (image_url or image_file) and (extracted_intent == "UNKNOWN" or not text):
             extracted_intent = "ORDER_PRODUCT"
 
         # 5. Save the User Message to PostgreSQL
-        Message.objects.create(
+        user_message = Message.objects.create(
             conversation=conversation,
             sender="USER",
             text=text if text else f"[Image: {image_url}]",
@@ -122,6 +267,32 @@ class MessengerWebhookPOC(APIView):
 
         # 6. Accumulate entities in Conversation context
         current_context = conversation.context_data
+        # Protect already-identified entities: once product or color is known, don't overwrite
+        # with a new GLiNER/fallback detection from a later message in the same flow.
+        #
+        # EXCEPTION 1 — Image priority: if the new product comes from the vision service
+        # (Article_From_Image_xxx), it overrides any previously text-detected product.
+        # The color is also reset since it's a different article.
+        #
+        # EXCEPTION 2 — Color correction: if the ONLY entity detected in this message is "color",
+        # treat it as an explicit correction (e.g. user says "Non, Bleu" or "Plutôt Noir")
+        # and allow the color to be updated.
+        new_product = extracted_entities.get("product", "")
+        is_image_product = new_product.startswith("Article_From_Image_")
+        if "product" in current_context:
+            if is_image_product:
+                # Image overrides text — also clear the old color since it's a new article
+                current_context.pop("color", None)
+                extracted_entities.pop("color", None)  # color will come from vision variation
+                logger.info(f"[VISION PRIORITY] Overriding text product '{current_context['product']}' with image product '{new_product}'")
+            else:
+                extracted_entities.pop("product", None)
+        if "color" in current_context:
+            is_explicit_color_correction = (
+                list(extracted_entities.keys()) == ["color"]
+            )
+            if not is_explicit_color_correction:
+                extracted_entities.pop("color", None)
         current_context.update(extracted_entities)
         # Toujours nettoyer les clés internes — jamais persistées en DB
         current_context.pop("_vision_variation_id", None)
@@ -129,6 +300,98 @@ class MessengerWebhookPOC(APIView):
 
         # 7. State Machine & Response Generation
         previous_state = conversation.state
+        
+        # ── CONTEXTUAL MAPPING ──────────────────────────────────────
+        # If we're WAITING_USER_REPLY, try to extract the expected entity
+        # Smart matching: Try to match detected entity types to missing order fields
+        contextual_match = False  # Flag to track if we matched expected pattern
+        
+        # Only run contextual mapping for intents that represent a user answer
+        # Skip for side-question intents (ASK_PRICE, ASK_AVAILABILITY, ASK_DELIVERY, etc.)
+        _contextual_mapping_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT", "UNKNOWN"}
+        
+        if (previous_state == "WAITING_USER_REPLY"
+                and conversation.missing_entities
+                and extracted_intent in _contextual_mapping_intents):
+            first_missing = conversation.missing_entities[0] if conversation.missing_entities else None
+            text_clean = text.strip().upper()
+            
+            # Strategy 1: Look for GLiNER-detected entities matching missing fields
+            for ent in nlu_raw_entities:
+                ent_label = ent["label"]
+                if ent_label not in extracted_entities and ent_label in conversation.missing_entities:
+                    # Found a detected entity that matches a missing field!
+                    extracted_entities[ent_label] = ent["text"]
+                    current_context[ent_label] = ent["text"]
+                    contextual_match = True
+                    break
+            
+            # Strategy 2: Validate user input against expected patterns for missing fields
+            # Try each missing field to see if input matches its pattern
+            if not contextual_match:
+                for missing_field in conversation.missing_entities:
+                    if missing_field not in extracted_entities:
+                        if missing_field == "size":
+                            # Valid sizes: S, M, L, XL, 2XL, 3XL, etc.
+                            valid_sizes = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE"]
+                            if text_clean in valid_sizes:
+                                extracted_entities[missing_field] = text_clean
+                                current_context[missing_field] = text_clean
+                                contextual_match = True
+                                break
+                        
+                        elif missing_field == "quantity":
+                            # Valid quantity: integers 1-999
+                            try:
+                                qty = int(text_clean)
+                                if 1 <= qty <= 999:
+                                    extracted_entities[missing_field] = str(qty)
+                                    current_context[missing_field] = str(qty)
+                                    contextual_match = True
+                                    break
+                            except ValueError:
+                                pass
+                        
+                        elif missing_field == "phone_number":
+                            # Accept if it looks like a phone (digits + Tunisia prefixes)
+                            phone_pattern = r'^(\+216|00216|216)?[\s.-]?[0-9\s.-]{7,}$'
+                            if re.match(phone_pattern, text_clean):
+                                extracted_entities[missing_field] = text
+                                current_context[missing_field] = text
+                                contextual_match = True
+                                break
+                        
+                        elif missing_field in ["address", "color"]:
+                            # For address: require at least 3 chars, not a size abbreviation,
+                            # and not already captured under another label by GLiNER
+                            # (e.g. "Noir" is color, "50152515" is phone_number — don't re-map as address)
+                            val = text.strip()
+                            already_labelled = val in extracted_entities.values()
+                            # Also check the raw GLiNER output: if the text was classified
+                            # as a specific non-address entity, never re-map it as address
+                            gliner_labels = {e["label"] for e in nlu_raw_entities if e["text"].strip() == val}
+                            gliner_says_not_address = bool(gliner_labels) and gliner_labels != {"address"}
+                            if missing_field == "address":
+                                valid_sizes = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE"]
+                                if (val
+                                        and len(val) >= 3
+                                        and val.upper() not in valid_sizes
+                                        and not already_labelled
+                                        and not gliner_says_not_address):
+                                    extracted_entities[missing_field] = val
+                                    current_context[missing_field] = val
+                                    contextual_match = True
+                                    break
+                            elif val and not already_labelled and not gliner_says_not_address:
+                                extracted_entities[missing_field] = val
+                                current_context[missing_field] = val
+                                contextual_match = True
+                                break
+        
+        # If we matched an expected value through contextual mapping, override NOISE → INFORM_INFO
+        if contextual_match and extracted_intent == "NOISE":
+            extracted_intent = "INFORM_INFO"
+        
         bot_response_text = TEMPLATES.get("UNKNOWN")
         missing_list = []
         new_state = previous_state
@@ -136,32 +399,78 @@ class MessengerWebhookPOC(APIView):
         prod_name = current_context.get("product")
         matched_product = None
         
-        # We fetch Mock API first if we have a product, because we might need its real name instead of the UUID
+        # We fetch TikTak API first if we have a product, because we might need its real name instead of the UUID
         if prod_name:
             try:
-                mock_api_url = "http://192.168.100.10:8003/api/v1/products/"
-                headers = {"X-Store-ID": shop_id}
-                resp = requests.get(mock_api_url, headers=headers, timeout=5)
-                
-                if resp.status_code == 200:
-                    products = resp.json()
+                # Cache Redis — TTL configurable via PRODUCTS_CACHE_TTL (défaut 10 min)
+                cache_key = f"tiktak_products:{shop_id}"
+                products = cache.get(cache_key)
+
+                if products is None:
+                    logger.info(f"[TIKTAK API] cache miss shop_id={shop_id}")
+                    api_headers = {"Authorization": f"Bearer {settings.TIKTAK_API_TOKEN}"}
+                    all_results = []
+                    next_url = TIKTAK_API_PRODUCTS_URL
+                    params = {"company": shop_id}
+                    page_count = 0
+
+                    while next_url and page_count < 10:
+                        if page_count == 0:
+                            resp = requests.get(next_url, headers=api_headers, params=params, timeout=REQUEST_TIMEOUT)
+                        else:
+                            resp = requests.get(next_url, headers=api_headers, timeout=REQUEST_TIMEOUT)
+
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            all_results.extend(data.get("results", []))
+                            next_url = data.get("next")
+                            page_count += 1
+                        else:
+                            logger.error(f"[TIKTAK API] error {resp.status_code}")
+                            break
+
+                    products = normalize_tiktak_products(all_results)
+                    cache.set(cache_key, products, settings.PRODUCTS_CACHE_TTL)
+                    logger.info(f"[TIKTAK API] {len(products)} produits cachés")
+                else:
+                    logger.debug(f"[TIKTAK API] cache hit shop_id={shop_id}")
+
+                if products is not None and len(products) > 0:
                     
                     if prod_name.startswith("Article_From_Image_"):
                         # Exact product_id match from Vision service
                         target_id = prod_name.split("Article_From_Image_")[1]
                         effective_variation_id = vision_variation_id
+                        logger.debug(f"[TIKTAK API] target_id={target_id} effective_variation_id={effective_variation_id}")
+                        logger.debug(f"[TIKTAK API] available product ids={[p.get('id') for p in products]}")
+                        logger.debug(f"[TIKTAK API] available variation ids={[v.get('id') for p in products for v in p.get('variations', [])]}")
                         for p in products:
-                            if p["id"] == target_id:
+                            p_id = str(p.get("id", "")).lower()
+                            t_id = str(target_id).lower()
+                            
+                            if p_id == t_id:
                                 matched_product = p
                                 # Pré-remplir couleur ET taille depuis la variation identifiée
                                 if effective_variation_id:
+                                    eff_id = str(effective_variation_id).lower()
                                     for v in p.get("variations", []):
-                                        if v["id"] == effective_variation_id:
+                                        if str(v.get("id", "")).lower() == eff_id:
                                             current_context["color"] = v["color"]
-                                            # La taille n'est PAS déduite : elle dépend
-                                            # du client, pas de l'image envoyée
+                                            if "color" not in extracted_entities:
+                                                extracted_entities["color"] = v["color"]
                                             break
                                 break
+                            else:
+                                # Fallback robust match in case target_id is actually a variation_id
+                                for v in p.get("variations", []):
+                                    if str(v.get("id", "")).lower() == t_id:
+                                        matched_product = p
+                                        current_context["color"] = v["color"]
+                                        if "color" not in extracted_entities:
+                                            extracted_entities["color"] = v["color"]
+                                        break
+                                if matched_product:
+                                    break
                     else:
                         # Keyword match — collect ALL matching products
                         keyword_candidates = [
@@ -176,7 +485,13 @@ class MessengerWebhookPOC(APIView):
                             current_context["candidates"] = keyword_candidates
                             current_context["pending_intent"] = extracted_intent
             except Exception as e:
-                print(f"Mock API Error: {e}")
+                logger.error(f"[TIKTAK API] Error: {e}")
+                logger.error(f"[TIKTAK API] URL={TIKTAK_API_PRODUCTS_URL} shop_id={shop_id}")
+
+        # Update user_message with any new entities extracted via Contextual Mapping or Vision/Mock API
+        user_message.extracted_entities = extracted_entities
+        user_message.extracted_intent = extracted_intent
+        user_message.save(update_fields=["extracted_entities", "extracted_intent"])
 
         # ── DISAMBIGUATION RESOLUTION (user is picking from a list) ──────────
         if previous_state == "WAITING_DISAMBIGUATION":
@@ -251,23 +566,60 @@ class MessengerWebhookPOC(APIView):
 
             if missing_list:
                 new_state = "WAITING_USER_REPLY"
-                first_missing = missing_list[0]
-                display_name = matched_product["name"] if matched_product else "cet article"
-                bot_response_text = (
-                    MISSING_ENTITY_TEMPLATES
-                    .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
-                    .replace("{product}", display_name)
-                    .replace("{color}", current_context.get("color", ""))
-                )
-                # Inject available sizes / colors from Mock API
-                if matched_product and first_missing in ["size", "color"]:
-                    variations = matched_product.get("variations", [])
-                    if first_missing == "size":
-                        avail = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                        bot_response_text += f"\nTailles disponibles : {avail}" if avail else ""
-                    elif first_missing == "color":
-                        avail = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                        bot_response_text += f"\nCouleurs disponibles : {avail}" if avail else ""
+
+                # Early stock check: as soon as product+color+size are all known,
+                # verify stock immediately before asking for address/phone
+                early_stock_failed = False
+                if (matched_product
+                        and current_context.get("color")
+                        and current_context.get("size")):
+                    _ec = current_context["color"]
+                    _es = current_context["size"]
+                    _dn = matched_product["name"]
+                    _valid = next(
+                        (v for v in matched_product.get("variations", [])
+                         if v.get("color", "").lower() == _ec.lower()
+                         and v.get("size", "").lower() == _es.lower()
+                         and v.get("stock_quantity", 0) > 0),
+                        None
+                    )
+                    if not _valid:
+                        early_stock_failed = True
+                        _avail = ", ".join(list(set([
+                            f"{v['color']} / {v['size']}"
+                            for v in matched_product.get("variations", [])
+                            if v.get("stock_quantity", 0) > 0
+                        ])))
+                        bot_response_text = (
+                            OUT_OF_STOCK_TEMPLATE
+                            .replace("{product}", _dn)
+                            .replace("{color}", _ec)
+                            .replace("{size}", _es)
+                        )
+                        if _avail:
+                            bot_response_text += f"\nDisponible en : {_avail}"
+                        current_context.pop("color", None)
+                        current_context.pop("size", None)
+                        missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+
+                if not early_stock_failed:
+                    first_missing = missing_list[0]
+                    display_name = matched_product["name"] if matched_product else "cet article"
+                    bot_response_text = (
+                        MISSING_ENTITY_TEMPLATES
+                        .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
+                        .replace("{product}", display_name)
+                        .replace("{color}", current_context.get("color", ""))
+                    )
+                    # Inject available sizes / colors from Mock API
+                    if matched_product and first_missing in ["size", "color"]:
+                        variations = matched_product.get("variations", [])
+                        if first_missing == "size":
+                            avail = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                            bot_response_text += f"\nTailles disponibles : {avail}" if avail else ""
+                        elif first_missing == "color":
+                            avail = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                            bot_response_text += f"\nCouleurs disponibles : {avail}" if avail else ""
             else:
                 # All entities collected ── verify stock before confirming
                 chosen_color = current_context.get("color", "")
@@ -306,29 +658,25 @@ class MessengerWebhookPOC(APIView):
 
                 if stock_ok:
                     new_state = "COMPLETED"
-                    order_ref = None
+                    pre_order_ref = None
                     try:
-                        order_payload = {
-                            "product_id": matched_product["id"] if matched_product else None,
-                            "color": chosen_color,
-                            "size": chosen_size,
-                            "quantity": int(current_context.get("quantity", 1)),
-                            "address": current_context.get("address"),
-                            "phone_number": current_context.get("phone_number")
-                        }
-                        order_resp = requests.post(
-                            "http://192.168.100.10:8003/api/v1/orders/",
-                            json=order_payload,
-                            headers={"X-Store-ID": shop_id},
-                            timeout=5
+                        # ✅ Créer une PRÉ-COMMANDE dans Lead (en attente confirmation agent)
+                        lead.create_pending_order(
+                            shop_id=shop_id,
+                            product_id=matched_product["id"] if matched_product else None,
+                            variation_id=vision_variation_id,
+                            color=chosen_color,
+                            size=chosen_size,
+                            address=current_context.get("address"),
+                            phone_number=current_context.get("phone_number"),
+                            quantity=int(current_context.get("quantity", 1))
                         )
-                        if order_resp.status_code in [200, 201]:
-                            order_ref = order_resp.json().get("id")
+                        pre_order_ref = lead.pending_order_reference
                     except Exception as e:
-                        print(f"Order creation API error: {e}")
+                        print(f"Pre-order creation error: {e}")
 
-                    if order_ref:
-                        bot_response_text = ORDER_CONFIRMED_TEMPLATE.replace("{product}", display_name).replace("{ref}", str(order_ref))
+                    if pre_order_ref:
+                        bot_response_text = ORDER_CONFIRMED_TEMPLATE.replace("{product}", display_name).replace("{ref}", str(pre_order_ref))
                     else:
                         bot_response_text = ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
 
@@ -341,39 +689,209 @@ class MessengerWebhookPOC(APIView):
 
                 if missing_list:
                     new_state = "WAITING_USER_REPLY"
+
+                    # Early stock check: as soon as product+color+size are all known,
+                    # verify stock immediately before asking for address/phone
+                    early_stock_failed = False
+                    if (matched_product
+                            and current_context.get("color")
+                            and current_context.get("size")):
+                        _ec = current_context["color"]
+                        _es = current_context["size"]
+                        _dn = matched_product["name"]
+                        _valid = next(
+                            (v for v in matched_product.get("variations", [])
+                             if v.get("color", "").lower() == _ec.lower()
+                             and v.get("size", "").lower() == _es.lower()
+                             and v.get("stock_quantity", 0) > 0),
+                            None
+                        )
+                        if not _valid:
+                            early_stock_failed = True
+                            _avail = ", ".join(list(set([
+                                f"{v['color']} / {v['size']}"
+                                for v in matched_product.get("variations", [])
+                                if v.get("stock_quantity", 0) > 0
+                            ])))
+                            bot_response_text = (
+                                OUT_OF_STOCK_TEMPLATE
+                                .replace("{product}", _dn)
+                                .replace("{color}", _ec)
+                                .replace("{size}", _es)
+                            )
+                            if _avail:
+                                bot_response_text += f"\nDisponible en : {_avail}"
+                            current_context.pop("color", None)
+                            current_context.pop("size", None)
+                            missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+
+                    if not early_stock_failed:
+                        first_missing = missing_list[0]
+                        bot_response_text = (
+                            MISSING_ENTITY_TEMPLATES
+                            .get(first_missing, f"Et pour la {first_missing} ?")
+                            .replace("{product}", current_context.get("product", "cet article"))
+                            .replace("{color}", current_context.get("color", ""))
+                        )
+                else:
+                    # All entities collected — same stock check as ORDER_PRODUCT flow
+                    chosen_color = current_context.get("color", "")
+                    chosen_size  = current_context.get("size", "")
+                    display_name = matched_product["name"] if matched_product else current_context.get("product", "votre article")
+                    stock_ok = True
+
+                    # Fail-safe: if product was identified by image but matched_product is None
+                    # (Mock API unreachable or shop_id invalid), block the order
+                    if not matched_product and current_context.get("product", "").startswith("Article_From_Image_"):
+                        stock_ok = False
+                        bot_response_text = "Désolé, impossible de vérifier le stock pour le moment. Veuillez réessayer."
+                        new_state = "WAITING_USER_REPLY"
+                        missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+
+                    elif matched_product and chosen_color and chosen_size:
+                        print(f"[STOCK CHECK] color='{chosen_color}' size='{chosen_size}'")
+                        print(f"[STOCK CHECK] variations={[(v.get('color'), v.get('size'), v.get('stock_quantity')) for v in matched_product.get('variations', [])]}")
+                        valid_variation = next(
+                            (v for v in matched_product.get("variations", [])
+                             if v.get("color", "").lower() == chosen_color.lower()
+                             and v.get("size", "").lower() == chosen_size.lower()
+                             and v.get("stock_quantity", 0) > 0),
+                            None
+                        )
+                        if not valid_variation:
+                            stock_ok = False
+                            avail = ", ".join(list(set([
+                                f"{v['color']} / {v['size']}"
+                                for v in matched_product.get("variations", [])
+                                if v.get("stock_quantity", 0) > 0
+                            ])))
+                            bot_response_text = (
+                                OUT_OF_STOCK_TEMPLATE
+                                .replace("{product}", display_name)
+                                .replace("{color}", chosen_color)
+                                .replace("{size}", chosen_size)
+                            )
+                            if avail:
+                                bot_response_text += f"\nDisponible en : {avail}"
+                            # Reset color & size so user can re-choose
+                            current_context.pop("color", None)
+                            current_context.pop("size", None)
+                            missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                            new_state = "WAITING_USER_REPLY"
+
+                    if stock_ok:
+                        new_state = "COMPLETED"
+                        pre_order_ref = None
+                        try:
+                            lead.create_pending_order(
+                                shop_id=shop_id,
+                                product_id=matched_product["id"] if matched_product else None,
+                                variation_id=vision_variation_id,
+                                color=chosen_color,
+                                size=chosen_size,
+                                address=current_context.get("address"),
+                                phone_number=current_context.get("phone_number"),
+                                quantity=int(current_context.get("quantity", 1))
+                            )
+                            pre_order_ref = lead.pending_order_reference
+                        except Exception as e:
+                            print(f"Pre-order creation error (INFORM_INFO): {e}")
+
+                        if pre_order_ref:
+                            bot_response_text = ORDER_CONFIRMED_TEMPLATE.replace("{product}", display_name).replace("{ref}", str(pre_order_ref))
+                        else:
+                            bot_response_text = ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
+            else:
+                # INFORM_INFO hors d'un flow actif (ex: NEW_CONVERSATION)
+                # Si l'utilisateur a donné des infos (taille, adresse...) mais pas de produit,
+                # on lui demande quel article il souhaite commander.
+                if "product" not in current_context:
+                    bot_response_text = "Merci pour ces informations ! Quel article souhaitez-vous commander ?"
+                    new_state = "WAITING_USER_REPLY"
+                    missing_list = ["product"]
+                else:
+                    bot_response_text = TEMPLATES.get("INFORM_INFO")
+
+        elif extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY"]:
+            # If we're in the middle of an ORDER_PRODUCT flow, answer the question but stay WAITING_USER_REPLY
+            if previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
+                # Answer the secondary question but continue order flow
+                if extracted_intent == "ASK_PRICE" and matched_product:
+                    price = matched_product.get("base_price", "0")
+                    product_name = matched_product["name"]
+                    bot_response_text = f"Le {product_name} est au prix de {price} TND. "
+                elif extracted_intent == "ASK_AVAILABILITY" and matched_product:
+                    variations = matched_product.get("variations", [])
+                    sizes = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                    colors = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                    bot_response_text = f"Oui, le {matched_product['name']} est en stock. "
+                    bot_response_text += f"Tailles disponibles : {sizes or 'aucune'}. Couleurs disponibles : {colors or 'aucune'}. "
+                else:
+                    bot_response_text = TEMPLATES.get(extracted_intent, "Je n'ai pas compris.")
+                
+                # Now continue asking for missing entities
+                for req in REQUIRED_ORDER_ENTITIES:
+                    if req not in current_context:
+                        missing_list.append(req)
+                
+                if missing_list:
+                    new_state = "WAITING_USER_REPLY"
                     first_missing = missing_list[0]
-                    bot_response_text = (
+                    bot_response_text += (
                         MISSING_ENTITY_TEMPLATES
-                        .get(first_missing, f"Et pour la {first_missing} ?")
+                        .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
+                        .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
+                        .replace("{color}", current_context.get("color", ""))
+                    )
+            else:
+                # Standalone question outside order context
+                if not matched_product:
+                    # No product in context → ask which product the user is referring to
+                    if extracted_intent == "ASK_AVAILABILITY":
+                        bot_response_text = "Sur quel article souhaitez-vous vérifier la disponibilité ?"
+                    elif extracted_intent == "ASK_PRICE":
+                        bot_response_text = "Sur quel article souhaitez-vous connaître le prix ?"
+                    else:
+                        bot_response_text = TEMPLATES.get(extracted_intent, "Je n'ai pas compris.")
+                else:
+                    bot_response_text = TEMPLATES.get(extracted_intent, "Je n'ai pas compris.")
+                    price = matched_product.get("base_price", "0")
+                    bot_response_text = bot_response_text.replace("{product}", matched_product["name"]).replace("{price}", str(price))
+                    variations = matched_product.get("variations", [])
+                    sizes = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                    bot_response_text = bot_response_text.replace("{sizes}", sizes or "rupture de stock")
+                    colors = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
+                    bot_response_text = bot_response_text.replace("{colors}", colors or "rupture de couleur")
+
+        else:
+            # Handle all other intents (GREETING, ASK_DELIVERY, UNKNOWN, NOISE, etc.)
+            # Special case: NOISE during order flow should NOT clear missing_entities
+            if extracted_intent == "NOISE" and previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
+                # Don't change state, keep context, just ask for clarification
+                new_state = "WAITING_USER_REPLY"
+                missing_list = conversation.missing_entities  # Keep existing missing entities
+                first_missing = missing_list[0] if missing_list else None
+                
+                # Respond asking to clarify
+                bot_response_text = "Parlez plus clairement s'il vous plaît. "
+                if first_missing:
+                    bot_response_text += (
+                        MISSING_ENTITY_TEMPLATES
+                        .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
                         .replace("{product}", current_context.get("product", "cet article"))
                         .replace("{color}", current_context.get("color", ""))
                     )
-                else:
-                    new_state = "COMPLETED"
-                    display_name = matched_product["name"] if matched_product else current_context.get("product", "votre article")
-                    bot_response_text = ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
             else:
-                bot_response_text = TEMPLATES.get("INFORM_INFO")
+                # No special handling needed
+                bot_response_text = TEMPLATES.get(extracted_intent, TEMPLATES.get("UNKNOWN"))
 
-        elif extracted_intent in ["ASK_PRICE", "ASK_AVAILABILITY"]:
-            bot_response_text = TEMPLATES.get(extracted_intent, "Je n'ai pas compris.")
-            if matched_product:
-                price = matched_product.get("base_price", "0")
-                bot_response_text = bot_response_text.replace("{product}", matched_product["name"]).replace("{price}", str(price))
-                variations = matched_product.get("variations", [])
-                sizes = ", ".join(list(set([v["size"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                bot_response_text = bot_response_text.replace("{sizes}", sizes or "rupture de stock")
-                colors = ", ".join(list(set([v["color"] for v in variations if v.get("stock_quantity", 0) > 0])))
-                bot_response_text = bot_response_text.replace("{colors}", colors or "rupture de couleur")
-            else:
-                try:
-                    bot_response_text = bot_response_text.replace("{product}", prod_name or "cet article").replace("{price}", "N/A")
-                except Exception:
-                    pass
+        # Safety net: clean up any unresolved {placeholder} that may remain in the response
+        bot_response_text = re.sub(r'\{[a-z_]+\}', '', bot_response_text).strip()
 
         # Update Conversation state
         conversation.state = new_state
         conversation.missing_entities = missing_list
+        conversation.context_data = current_context
         conversation.save()
 
         # 8. Save Bot Message to PostgreSQL
