@@ -53,7 +53,7 @@ cp .env.example .env
 ```
 👉 Ouvrez `.env` et assurez-vous d'avoir inséré un `TIKTAK_API_TOKEN` valide.
 
-### 2. Build et démarrage des services Docker
+### 3. Build et démarrage des services Docker
 
 **Premier lancement (build + démarrage) :**
 ```bash
@@ -70,7 +70,7 @@ docker-compose up
 docker-compose up --build -d
 ```
 
-**Rebuild d'un seul service (ex: `backend-orchestrator`) :**
+**Rebuild d'un seul service (ex: après modification de `views.py`) :**
 ```bash
 docker-compose build backend-orchestrator
 docker-compose up -d --no-deps backend-orchestrator
