@@ -8,22 +8,25 @@ TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client b
 Messenger/WhatsApp
        │
        ▼
-backend-orchestrator :8000   (Django — API Gateway Clean Architecture)
+api-gateway :80              (Nginx — Reverse Proxy)
        │
-       ├──► nlu-service :8001       (FastAPI — TunBERT intent + GLiNER NER)
-       ├──► vision-service :8002    (FastAPI — CLIP embeddings + pgvector)
-       ├──► Redis :6379             (Hot Memory + Cache Produits)
-       ├──► PostgreSQL :5432        (Cold Memory — leads, conversations, messages)
-       ├──► pgvector DB :5433       (Vector DB — embeddings images)
-       └──► TikTak API externes     (Catalogue en ligne + Commandes)
+       └──► backend-orchestrator     (Django — API Gateway Clean Architecture)
+              │
+              ├──► nlu-service       (FastAPI — TunBERT intent + GLiNER NER)
+              ├──► vision-service    (FastAPI — CLIP embeddings + pgvector)
+              ├──► Redis :6379       (Hot Memory + Cache Produits)
+              ├──► PostgreSQL :5432  (Cold Memory — leads, conversations, pré-commandes)
+              ├──► pgvector DB :5433 (Vector DB — embeddings images)
+              └──► TikTak API        (Catalogue en ligne + Commandes)
 ```
 
 ### Services
-| Service | Port | Description |
+| Service | Port externe | Description |
 |---|---|---|
-| `backend-orchestrator` | 8000 | Cœur du système. Séparé en 3 couches : AI Service, TikTak Service, Dialog Manager. |
-| `nlu-service` | 8001 | TunBERT (classification intention) + GLiNER (extraction entités) |
-| `vision-service` | 8002 | CLIP (similarité image) + pgvector |
+| `api-gateway` | 80 | Point d'entrée unique. Redirige vers `backend-orchestrator`. |
+| `backend-orchestrator` | interne | Cœur du système. Séparé en 3 couches : AI Service, TikTak Service, Dialog Manager. |
+| `nlu-service` | interne | TunBERT (classification intention) + GLiNER (extraction entités) |
+| `vision-service` | interne | CLIP (similarité image) + pgvector |
 | `postgres-db` | 5432 | Base principale (leads, conversations, pré-commandes) |
 | `vector-db` | 5433 | pgvector — embeddings images liés au `backend-orchestrator` |
 | `tiktak-redis` | 6379 | Contexte conversation court terme + Cache du catalogue (10 min) |
@@ -125,11 +128,12 @@ python sync.py
 
 ### 6. Vérification des services
 
-| Service | URL de santé |
+| Service | URL de santé (via Gateway) |
 |---|---|
-| backend-orchestrator | `http://localhost:8000/api/v1/gateway/messenger/poc` |
-| nlu-service | `http://localhost:8001/docs` |
-| vision-service | `http://localhost:8002/docs` |
+| backend-orchestrator | `http://localhost/api/v1/gateway/messenger/poc` |
+| Django Admin | `http://localhost/admin/` |
+| nlu-service | *Privé (interne uniquement)* |
+| vision-service | *Privé (interne uniquement)* |
 
 ### 7. Tester avec Postman
 
@@ -138,12 +142,12 @@ Importer [TikTak_AI_Tests.postman_collection.json](TikTak_AI_Tests.postman_colle
 Configurer les variables d'environnement :
 | Variable | Valeur |
 |---|---|
-| `BASE_URL` | `http://localhost:8000` |
+| `BASE_URL` | `http://localhost` |
 | `SHOP_ID` | UUID de votre boutique (ex: `b632373b-398a-4e21-9b17-a99b511f8c47`) |
 
 **Endpoint principal :**
 ```
-POST http://localhost:8000/api/v1/gateway/messenger/poc
+POST http://localhost/api/v1/gateway/messenger/poc
 Content-Type: multipart/form-data
 
 user_id  = whatsapp:+216XXXXXXXX
