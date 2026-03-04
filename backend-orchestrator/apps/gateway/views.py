@@ -15,7 +15,7 @@ from rest_framework import status
 
 from apps.crm.models import Lead, Conversation, Message
 from .context_manager import ContextManager
-from .response_templates import DISAMBIGUATION_TEMPLATE, REQUIRED_ORDER_ENTITIES
+from .response_templates import DISAMBIGUATION_TEMPLATE, REQUIRED_ORDER_ENTITIES, FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class MessengerWebhookPOC(APIView):
             if ("product" not in extracted_entities
                     and not image_url
                     and "product" not in conversation.context_data):
-                for cp in ["pull", "t-shirt", "veste", "pantalon", "robe"]:
+                for cp in FALLBACK_PRODUCTS:
                     if cp in text.lower():
                         extracted_entities["product"] = cp
                         break
