@@ -54,3 +54,7 @@ ORDER_CONFIRMED_NO_REF_TEMPLATE = (
     "🎉 Commande enregistrée ! Votre {product} est en cours de préparation.\n"
     "Le livreur vous contactera dans 2 à 3 jours ouvrables. 🚚"
 )
+
+# Fallback generic product names used if NLU fails to extract the product entity
+FALLBACK_PRODUCTS = ["pull", "t-shirt", "veste", "pantalon", "robe"]
+
