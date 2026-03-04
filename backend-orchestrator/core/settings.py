@@ -91,10 +91,11 @@ NLU_PREDICT_PATH   = os.getenv('NLU_PREDICT_PATH',   '/predict')
 VISION_SERVICE_URL   = os.getenv('VISION_SERVICE_URL',   'http://vision-service:8002')
 VISION_SEARCH_PATH   = os.getenv('VISION_SEARCH_PATH',   '/search-similar')
 
-# Mock API (External product catalog)
-MOCK_API_BASE_URL           = os.getenv('MOCK_API_BASE_URL',           'http://192.168.100.10:8003')
-MOCK_API_PRODUCTS_PATH      = os.getenv('MOCK_API_PRODUCTS_PATH',      '/api/v1/products/')
-MOCK_API_SHOP_ID_HEADER     = os.getenv('MOCK_API_SHOP_ID_HEADER',     'X-Store-ID')
+# TikTak Real API (External product catalog)
+TIKTAK_API_BASE_URL      = os.getenv('TIKTAK_API_BASE_URL',     'https://api.tiktakpro.com')
+TIKTAK_API_PRODUCTS_PATH = os.getenv('TIKTAK_API_PRODUCTS_PATH', '/api/v1/products-read/')
+TIKTAK_API_TOKEN         = os.getenv('TIKTAK_API_TOKEN',         '')
+PRODUCTS_CACHE_TTL       = int(os.getenv('PRODUCTS_CACHE_TTL',   '600'))  # 10 min
 
 # Request timeouts (seconds)
 EXTERNAL_REQUEST_TIMEOUT = int(os.getenv('EXTERNAL_REQUEST_TIMEOUT', '5'))
