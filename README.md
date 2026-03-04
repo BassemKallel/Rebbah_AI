@@ -1,6 +1,6 @@
 # 🛒 TikTak-AI
 
-TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client basée sur l'intelligence artificielle. Elle expose un webhook Messenger/WhatsApp qui orchestre NLU (TunBERT + GLiNER), Vision (CLIP), Hot Memory (Redis), Cold Memory (PostgreSQL) et une Mock API produits.
+TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client basée sur l'intelligence artificielle. Elle expose un webhook Messenger/WhatsApp qui orchestre NLU (TunBERT + GLiNER), Vision (CLIP), Hot Memory (Redis), Cold Memory (PostgreSQL) et l'API TikTak (catalogue et commandes).
 
 ## 🏗️ Architecture du Projet
 
@@ -8,72 +8,52 @@ TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client b
 Messenger/WhatsApp
        │
        ▼
-backend-orchestrator :8000   (Django — API Gateway + State Machine)
+backend-orchestrator :8000   (Django — API Gateway Clean Architecture)
        │
        ├──► nlu-service :8001       (FastAPI — TunBERT intent + GLiNER NER)
        ├──► vision-service :8002    (FastAPI — CLIP embeddings + pgvector)
-       ├──► Redis :6379             (Hot Memory — contexte conversation)
+       ├──► Redis :6379             (Hot Memory + Cache Produits)
        ├──► PostgreSQL :5432        (Cold Memory — leads, conversations, messages)
-       ├──► pgvector DB :5433       (Vector DB — embeddings produits)
-       └──► Mock API :8003          (Django externe — catalogue produits + commandes)
+       ├──► pgvector DB :5433       (Vector DB — embeddings images)
+       └──► TikTak API externes     (Catalogue en ligne + Commandes)
 ```
 
 ### Services
 | Service | Port | Description |
 |---|---|---|
-| `backend-orchestrator` | 8000 | Cœur du système, Django, state machine conversation |
+| `backend-orchestrator` | 8000 | Cœur du système. Séparé en 3 couches : AI Service, TikTak Service, Dialog Manager. |
 | `nlu-service` | 8001 | TunBERT (classification intention) + GLiNER (extraction entités) |
 | `vision-service` | 8002 | CLIP (similarité image) + pgvector |
-| `postgres-db` | 5432 | Base principale (leads, conversations, messages) |
-| `vector-db` | 5433 | pgvector — embeddings images produits |
-| `tiktak-redis` | 6379 | Contexte conversation court terme |
-| **Mock API** | 8003 | API externe Django — catalogue produits + création commandes |
+| `postgres-db` | 5432 | Base principale (leads, conversations, pré-commandes) |
+| `vector-db` | 5433 | pgvector — embeddings images liés au `backend-orchestrator` |
+| `tiktak-redis` | 6379 | Contexte conversation court terme + Cache du catalogue (10 min) |
 
 ## 🚀 Fonctionnalités Clés
 
-- **Compréhension du Langage Naturel (NLU)** : Détection d'intentions en français/arabe/arabizi tunisien.
-- **Extraction d'Entités (NER)** : Produits, tailles, couleurs, adresses, numéros de téléphone.
-- **Recherche Visuelle** : L'utilisateur envoie une photo → le bot identifie la variation exacte (couleur) et pré-remplit la commande.
-- **Gestion des ambiguïtés** : Plusieurs produits correspondants → le bot liste et demande lequel.
-- **Flux commande complet** : Vérification stock → collecte taille/adresse/téléphone → POST commande → référence de commande.
-- **Architecture Multi-Tenant** : Chaque boutique identifiée par `shop_id` (UUID).
+- **Clean Architecture** : Séparation stricte des préoccupations (appels externes, BDD, machine à états).
+- **Compréhension du Langage Naturel (NLU)** : Détection d'intentions en dialecte tunisien (arabizi, arabe, français).
+- **Extraction d'Entités (NER)** : Produits, tailles, couleurs, adresses, numéros avec système hybride de correction.
+- **Recherche Visuelle** : Priorité à l'image envoyée sur le texte de l'utilisateur pour pré-remplir le panier.
+- **Gestion des ambiguïtés** : Le bot gère le multi-choix si plusieurs produits correspondent.
+- **Flux commande intelligent** : Vérification immédiate du stock des déclinaisons via API distante.
 
 ## 💻 Installation et Démarrage Local
 
 ### Prérequis
 - Docker Desktop avec Docker Compose
 - GPU NVIDIA + pilotes CUDA (optionnel, pour accélérer la vision)
-- Git
+- Accès à l'API TikTak (Token JWT requis)
 
-### 1. Cloner le dépôt
+### 1. Cloner le dépôt et configurer l'environnement
 
 ```bash
 git clone https://github.com/BassemKallel/tiktak-ai.git
 cd tiktak-ai
+cp .env.example .env
 ```
+👉 Ouvrez `.env` et assurez-vous d'avoir inséré un `TIKTAK_API_TOKEN` valide.
 
-### 2. Démarrer la Mock API (service externe)
-
-La Mock API est un projet Django séparé qui expose le catalogue produits et l'API de création de commandes. Elle **doit être accessible depuis les conteneurs Docker** donc lancée sur `0.0.0.0` (pas `127.0.0.1`).
-
-```bash
-# Dans le répertoire du projet Mock API
-cd /chemin/vers/mock-api
-python manage.py runserver 0.0.0.0:8003
-```
-
-> L'adresse à configurer dans `backend-orchestrator/core/settings.py` (ou `views.py`) pour atteindre la Mock API depuis les conteneurs est l'IP locale de la machine hôte, par exemple `http://192.168.100.10:8003`.
-
-Endpoints utilisés :
-| Méthode | URL | Header | Description |
-|---|---|---|---|
-| `GET` | `/api/v1/products/` | `X-Store-ID: <shop_id>` | Liste tous les produits |
-| `GET` | `/api/v1/products/<id>/` | `X-Store-ID: <shop_id>` | Détail d'un produit |
-| `POST` | `/api/v1/orders/` | `X-Store-ID: <shop_id>` | Créer une commande |
-
-Voir [API_MOCK_DOCS.json](API_MOCK_DOCS.json) pour la documentation complète (importable dans Postman).
-
-### 3. Build et démarrage des services Docker
+### 2. Build et démarrage des services Docker
 
 **Premier lancement (build + démarrage) :**
 ```bash
@@ -90,7 +70,7 @@ docker-compose up
 docker-compose up --build -d
 ```
 
-**Rebuild d'un seul service (ex: après modification de `views.py`) :**
+**Rebuild d'un seul service (ex: `backend-orchestrator`) :**
 ```bash
 docker-compose build backend-orchestrator
 docker-compose up -d --no-deps backend-orchestrator
