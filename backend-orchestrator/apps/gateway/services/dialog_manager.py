@@ -214,15 +214,28 @@ def _check_stock(matched_product: dict, color: str, size: str) -> tuple:
     Check stock for a given color/size combination.
 
     Returns (stock_ok: bool, available_str: str).
+
+    - Si matched_product est None, on ne peut pas vérifier → on passe (True).
+    - Sinon, on filtre les variations selon les champs non-vides (color et/ou size).
+    - Un produit avec stock_quantity == 0 est détecté même si color est vide.
     """
-    if not (matched_product and color and size):
+    if not matched_product:
         return True, ""
+
+    # Filtre dynamique selon les champs fournis
+    def _matches(v: dict) -> bool:
+        color_match = (not color) or (v.get("color", "").lower() == color.lower())
+        size_match  = (not size)  or (v.get("size",  "").lower() == size.lower())
+        return color_match and size_match
+
+    # Si aucun critère, vérifier le stock global du produit
+    if not color and not size:
+        total_stock = sum(v.get("stock_quantity", 0) for v in matched_product.get("variations", []))
+        return (total_stock > 0), ""
 
     valid = next(
         (v for v in matched_product.get("variations", [])
-         if v.get("color", "").lower() == color.lower()
-         and v.get("size",  "").lower() == size.lower()
-         and v.get("stock_quantity", 0) > 0),
+         if _matches(v) and v.get("stock_quantity", 0) > 0),
         None,
     )
     if valid:
