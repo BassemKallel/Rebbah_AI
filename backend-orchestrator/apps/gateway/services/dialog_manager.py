@@ -94,9 +94,22 @@ def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
       vision service (Article_From_Image_xxx) — image always wins.
     - color: locked, EXCEPT when the ONLY entity in this message is "color"
       (explicit correction like "Non, Bleu").
+    - address: rejected if product/color/size are not yet known (either in
+      the existing context or in the current message entities).
+      Prevents free-text noise from being mistakenly captured as an address.
 
     Returns the updated current_context.
     """
+    # ── Address Guard ────────────────────────────────────────────────────────
+    # Merge current context with freshly extracted entities so that a full
+    # sentence like "t-shirt rouge M à Tunis" doesn't lose the address.
+    if "address" in extracted_entities:
+        context_plus_new = {**current_context, **extracted_entities}
+        prerequisite_entities = {"product", "color", "size"}
+        if not prerequisite_entities.issubset(context_plus_new.keys()):
+            extracted_entities.pop("address")
+            logger.info("[ADDRESS GUARD] Address rejected: product/color/size not yet collected")
+
     new_product      = extracted_entities.get("product", "")
     is_image_product = new_product.startswith("Article_From_Image_")
 
@@ -198,11 +211,19 @@ def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
                         current_context[missing_field]    = val
                         contextual_match = True
                         break
-                elif val and not already_labelled and not gliner_not_addr:
-                    extracted_entities[missing_field] = val
-                    current_context[missing_field]    = val
-                    contextual_match = True
-                    break
+                elif missing_field == "color":
+                    # Only accept color if GLiNER explicitly labeled it as such.
+                    # Prevents generic text (e.g. "nheb naadi commande") from being
+                    # captured as a color entity when the bot is waiting for one.
+                    color_match = next(
+                        (e["text"] for e in nlu_raw_entities if e["label"] == "color"),
+                        None
+                    )
+                    if color_match:
+                        extracted_entities[missing_field] = color_match
+                        current_context[missing_field]    = color_match
+                        contextual_match = True
+                        break
 
     return extracted_entities, contextual_match
 
@@ -214,15 +235,28 @@ def _check_stock(matched_product: dict, color: str, size: str) -> tuple:
     Check stock for a given color/size combination.
 
     Returns (stock_ok: bool, available_str: str).
+
+    - Si matched_product est None, on ne peut pas vérifier → on passe (True).
+    - Sinon, on filtre les variations selon les champs non-vides (color et/ou size).
+    - Un produit avec stock_quantity == 0 est détecté même si color est vide.
     """
-    if not (matched_product and color and size):
+    if not matched_product:
         return True, ""
+
+    # Filtre dynamique selon les champs fournis
+    def _matches(v: dict) -> bool:
+        color_match = (not color) or (v.get("color", "").lower() == color.lower())
+        size_match  = (not size)  or (v.get("size",  "").lower() == size.lower())
+        return color_match and size_match
+
+    # Si aucun critère, vérifier le stock global du produit
+    if not color and not size:
+        total_stock = sum(v.get("stock_quantity", 0) for v in matched_product.get("variations", []))
+        return (total_stock > 0), ""
 
     valid = next(
         (v for v in matched_product.get("variations", [])
-         if v.get("color", "").lower() == color.lower()
-         and v.get("size",  "").lower() == size.lower()
-         and v.get("stock_quantity", 0) > 0),
+         if _matches(v) and v.get("stock_quantity", 0) > 0),
         None,
     )
     if valid:
