@@ -17,6 +17,7 @@ from apps.crm.models import Lead, Conversation, Message
 from .context_manager import ContextManager
 from .response_templates import DISAMBIGUATION_TEMPLATE, REQUIRED_ORDER_ENTITIES, FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
+from .services.azure_storage import azure_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,13 @@ class MessengerWebhookPOC(APIView):
     def post(self, request):
         # ── 1. Parse Input ────────────────────────────────────────────────
         user_id  = request.data.get("user_id")
-        shop_id  = request.data.get("shop_id", "default_shop")
+        shop_id  = request.data.get("shop_id")
+
+        if not user_id or not shop_id:
+            return Response(
+                {"error": "user_id and shop_id are strictly required."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         message_data = request.data.get("message", {})
         if isinstance(message_data, str):
@@ -45,8 +52,12 @@ class MessengerWebhookPOC(APIView):
         image_url = message_data.get("image_url") or request.data.get("image_url")
         image_file = request.FILES.get("image")
 
-        if not user_id:
-            return Response({"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        # Upload image_file to Azure Blob Storage if provided
+        uploaded_url = None
+        if image_file:
+            uploaded_url = azure_storage_service.upload_image(image_file, prefix=shop_id)
+            if uploaded_url:
+                image_url = uploaded_url  # From now on, the rest of the flow uses the cloud URL
 
         # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
         lead, _ = Lead.objects.get_or_create(platform_id=user_id)
@@ -259,5 +270,7 @@ class MessengerWebhookPOC(APIView):
         }
         if matched_image_url:
             payload["bot_response"]["identified_image_url"] = matched_image_url
+        if uploaded_url:
+            payload["bot_response"]["uploaded_image_url"] = uploaded_url
 
         return Response(payload)
