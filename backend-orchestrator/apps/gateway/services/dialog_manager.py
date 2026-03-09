@@ -94,9 +94,22 @@ def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
       vision service (Article_From_Image_xxx) — image always wins.
     - color: locked, EXCEPT when the ONLY entity in this message is "color"
       (explicit correction like "Non, Bleu").
+    - address: rejected if product/color/size are not yet known (either in
+      the existing context or in the current message entities).
+      Prevents free-text noise from being mistakenly captured as an address.
 
     Returns the updated current_context.
     """
+    # ── Address Guard ────────────────────────────────────────────────────────
+    # Merge current context with freshly extracted entities so that a full
+    # sentence like "t-shirt rouge M à Tunis" doesn't lose the address.
+    if "address" in extracted_entities:
+        context_plus_new = {**current_context, **extracted_entities}
+        prerequisite_entities = {"product", "color", "size"}
+        if not prerequisite_entities.issubset(context_plus_new.keys()):
+            extracted_entities.pop("address")
+            logger.info("[ADDRESS GUARD] Address rejected: product/color/size not yet collected")
+
     new_product      = extracted_entities.get("product", "")
     is_image_product = new_product.startswith("Article_From_Image_")
 
@@ -198,11 +211,19 @@ def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
                         current_context[missing_field]    = val
                         contextual_match = True
                         break
-                elif val and not already_labelled and not gliner_not_addr:
-                    extracted_entities[missing_field] = val
-                    current_context[missing_field]    = val
-                    contextual_match = True
-                    break
+                elif missing_field == "color":
+                    # Only accept color if GLiNER explicitly labeled it as such.
+                    # Prevents generic text (e.g. "nheb naadi commande") from being
+                    # captured as a color entity when the bot is waiting for one.
+                    color_match = next(
+                        (e["text"] for e in nlu_raw_entities if e["label"] == "color"),
+                        None
+                    )
+                    if color_match:
+                        extracted_entities[missing_field] = color_match
+                        current_context[missing_field]    = color_match
+                        contextual_match = True
+                        break
 
     return extracted_entities, contextual_match
 
