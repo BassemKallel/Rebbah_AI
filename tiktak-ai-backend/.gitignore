@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Docker
+*.log
+docker-compose.override.yml
+Dockerfile*
+
+# VSCode
+.vscode/
+
+# Data/Models
+*.bin
+*.pt
+postgres_data/
+
+# OS
+.DS_Store
+Thumbs.db

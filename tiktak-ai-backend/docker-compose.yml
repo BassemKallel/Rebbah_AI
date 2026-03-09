@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  backend-orchestrator:
+    build: ./backend-orchestrator
+    container_name: backend-orchestrator
+  nlu-service:
+    build: ./nlu-service
+    container_name: nlu-service
+  vision-service:
+    build: ./vision-service
+    container_name: vision-service
+  sync-worker:
+    build: ./sync-worker
+    container_name: sync-worker
+  db:
+    image: postgres:15
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tiktak
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database-init/init.sql:/docker-entrypoint-initdb.d/init.sql
+volumes:
+  postgres_data:

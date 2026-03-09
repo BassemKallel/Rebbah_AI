@@ -1,7 +1,0 @@
-Django>=4.2.0
-djangorestframework
-django-cors-headers
-psycopg2-binary
-redis
-requests
-azure-storage-blob
