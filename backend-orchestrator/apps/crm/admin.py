@@ -1,7 +1,22 @@
 from django.contrib import admin
 from django.utils.html import format_html
 import json
-from .models import Lead, Conversation, Message
+from .models import Lead, Conversation, Message, BotConfiguration
+
+@admin.register(BotConfiguration)
+class BotConfigurationAdmin(admin.ModelAdmin):
+    list_display = ('shop_id', 'shop_name', 'language', 'response_delay', 'created_at')
+    list_filter = ('language', 'created_at')
+    search_fields = ('shop_id', 'shop_name')
+    fieldsets = (
+        ('General', {
+            'fields': ('shop_id', 'shop_name', 'language', 'response_delay')
+        }),
+        ('Custom Responses', {
+            'fields': ('custom_greeting', 'out_of_context_message', 'custom_intents')
+        }),
+    )
+
 
 class MessageInline(admin.TabularInline):
     model = Message
