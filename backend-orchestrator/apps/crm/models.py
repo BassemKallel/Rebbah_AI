@@ -133,18 +133,8 @@ class BotConfiguration(models.Model):
         default='FR',
         help_text="The language the bot should respond in."
     )
-    
-    custom_greeting = models.TextField(
-        blank=True, 
-        null=True,
-        help_text="Custom greeting message. Variables like {{shop_name}} are supported."
-    )
-    
-    out_of_context_message = models.TextField(
-        blank=True, 
-        null=True,
-        help_text="Message sent when the AI doesn't understand the user's intent. Variables like {{shop_name}} are supported."
-    )
+
+    ai_agent_name = models.CharField(max_length=255, default="Tiktak AI", help_text="Le nom donné au Ai agent" )
     
     custom_intents = models.JSONField(
         default=dict, 
@@ -152,10 +142,6 @@ class BotConfiguration(models.Model):
         help_text="Custom messages per intent (e.g. {\"ASK_PRICE\": \"Price is {{price}}\"}). Overrides defaults."
     )
     
-    response_delay = models.IntegerField(
-        default=0,
-        help_text="Delay in seconds before the bot replies (handled by the gateway/frontend)."
-    )
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
