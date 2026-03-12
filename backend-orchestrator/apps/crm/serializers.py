@@ -45,11 +45,20 @@ class BotConfigurationSerializer(serializers.ModelSerializer):
             if self.partial:
                 # If PATCH request, deep merge with existing intents
                 existing_intents = instance.custom_intents or {}
-                existing_intents.update(custom_intents)
+                for key, value in custom_intents.items():
+                    if value and str(value).strip():
+                        existing_intents[key] = value
+                    else:
+                        # If a value is empty/null in PATCH, we remove the override
+                        existing_intents.pop(key, None)
                 instance.custom_intents = existing_intents
             else:
-                # If PUT request, replace the dictionary entirely
-                instance.custom_intents = custom_intents
+                # If PUT request, replace with cleaned dictionary (no empty strings)
+                cleaned_intents = {
+                    key: val for key, val in custom_intents.items() 
+                    if val and str(val).strip()
+                }
+                instance.custom_intents = cleaned_intents
             instance.save()
             
         return instance
