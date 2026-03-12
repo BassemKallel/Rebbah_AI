@@ -1,7 +1,7 @@
 # Predefined templates based on the TunBERT intents
 TEMPLATES = {
     "FR": {
-        "GREETING": "Bonjour ! 👋 Bienvenue chez TikTak. Comment puis-je vous aider aujourd'hui ?",
+        "GREETING": "Bonjour ! 👋 Bienvenue chez {ai_agent_name}. Comment puis-je vous aider aujourd'hui ?",
         "ASK_PRICE": "Le {product} est au prix de {price} TND. Souhaitez-vous le commander ?",
         "ASK_AVAILABILITY": "Oui, le {product} est en stock. Nous avons les tailles {sizes} en {colors}.",
         "ORDER_PRODUCT": "Parfait. Pour finaliser votre commande de {product}, j'ai besoin de quelques informations supplémentaires.",
@@ -19,25 +19,25 @@ TEMPLATES = {
         "NOISE": "Pouvez-vous être plus clair(e) s'il vous plaît ?"
     },
     "AR": {
-        "GREETING": "Aslama ! 👋 Marhbe bik fi TikTak. Kifech najam n3awnek lyoum ?",
-        "ASK_PRICE": "El {product} b {price} TND. T7eb t3adi commande ?",
-        "ASK_AVAILABILITY": "Ey, el {product} dispo. 3anna mennou tailettes {sizes} w fi les couleurs {colors}.",
-        "ORDER_PRODUCT": "Bahi. bech nkamal el commande mte3ek l {product}, n7taj chwaya ma3loumet mnek.",
-       "ASK_DELIVERY": "El livraison to93ed entre 2 w 3 jours sur toute la Tunisie w b 7 TND.",
-        "ASK_DETAILS": "El {product} hetha tayara ! a3tini akthar details chnowa tfarekes (taille, matière, origine) ?",
-        "ASK_DISCOUNT": "Samahni l'aswem fixe, ama sa3at na3mlou livraison gratuite l commandes kbar !",
-        "ASK_LOCATION": "A7na boutique 100% en ligne l tawa.",
-        "CANCEL_ORDER": "Commande mte3ek t'annulet. Marhbe bik wa9t ma t7eb !",
-        "CHECK_PACKAGE": "Nchouflek m3a el livreur... taw youslek an 9arib.",
-        "COMPLAINT": "Samahna 3ala hetha. Taw njiblek conseiller humain ychouf m3ak.",
-        "CONFIRM_DENY": "Bahi, mriguel.",
-        "INFORM_INFO": "Aychak 3al ma3louma. 9ayedneha !",
-        "TRACK_ORDER": "Bech ntab3ou l commande mte3ek, a3tini num téléphounek wala numéro l commande.",
-         "UNKNOWN": "Mafhemtekch mli7. tnajam t3awed t9olli chneya t7eb ?",
-         "NOISE": "Tnajam twatha7li akthar y3aychek ?"
+        "GREETING": "مرحباً ! 👋 أهلاً بك في {ai_agent_name}. كيف يمكنني مساعدتك اليوم؟",
+        "ASK_PRICE": "سعر الـ {product} هو {price} دينار. هل ترغب في طلبه؟",
+        "ASK_AVAILABILITY": "نعم، الـ {product} متوفر. لدينا المقاسات {sizes} بالألوان {colors}.",
+        "ORDER_PRODUCT": "ممتاز. لإتمام طلبك لـ {product}، أحتاج إلى بعض المعلومات الإضافية.",
+        "ASK_DELIVERY": "يستغرق التوصيل من يومين إلى 3 أيام عمل في جميع أنحاء تونس بتكلفة 7 دنانير.",
+        "ASK_DETAILS": "هذا الـ {product} ذو جودة ممتازة! لمزيد من التفاصيل، هل يمكنك تحديد ما تبحث عنه (المقاس، القماش، المصدر)؟",
+        "ASK_DISCOUNT": "عذراً، أسعارنا ثابتة، لكننا نقدم أحياناً توصيلاً مجانياً للطلبات الكبيرة!",
+        "ASK_LOCATION": "نحن متجر إلكتروني 100% في الوقت الحالي.",
+        "CANCEL_ORDER": "تم إلغاء طلبك. لا تتردد في التواصل معنا مرة أخرى!",
+        "CHECK_PACKAGE": "أقوم بالتحقق من مسار طردك... من المفترض أن يصل قريباً.",
+        "COMPLAINT": "نأسف لسماع ذلك. سيقوم أحد ممثلي خدمة العملاء بمتابعة الأمر معك.",
+        "CONFIRM_DENY": "حسناً، عُلم.",
+        "INFORM_INFO": "شكراً على المعلومة. تم تسجيلها!",
+        "TRACK_ORDER": "لتتبع طلبك، يرجى تزويدي برقم هاتفك أو رقم تتبع الطلب.",
+        "UNKNOWN": "لم أفهم قصدك تماماً. هل يمكنك إعادة صياغة طلبك؟",
+        "NOISE": "هل يمكنك التوضيح أكثر من فضلك؟"
     },
     "EN": {
-         "GREETING": "Hello ! 👋 Welcome to TikTak. How can I help you today ?",
+         "GREETING": "Hello ! 👋 Welcome to {ai_agent_name}. How can I help you today ?",
          "ASK_PRICE": "The {product} costs {price} TND. Would you like to order it ?",
          "ASK_AVAILABILITY": "Yes, the {product} is in stock. We have sizes {sizes} in {colors}.",
          "ORDER_PRODUCT": "Perfect. To process your order for {product}, I'll need a few more details.",
@@ -67,12 +67,12 @@ MISSING_ENTITY_TEMPLATES = {
         "phone_number": "Pouvez-vous me donner votre numéro de téléphone pour le livreur ?"
     },
     "AR": {
-        "product": "Ana article ya3jbek ?",
-        "color": "Bahi pour el {product} ! Ana couleur t7eb ?",
-        "size": "Mriguel pour {product} b {color}. chnowa taille mte3ek ?",
-        "quantity": "Kadeh men {product} t7eb t3adi commande ?",
-        "address": "Ekhir etape: a3tini l'adresse mte3ek kema lzem ?",
-        "phone_number": "A3tini num téléphounek bech nkalmek el livreur ?"
+        "product": "ما هو المنتج الذي يثير اهتمامك؟",
+        "color": "اختيار رائع لـ {product}! ما هو اللون الذي تفضله؟",
+        "size": "حسناً لـ {product} باللون {color}. ما هو مقاسك؟",
+        "quantity": "كم عدد الـ {product} الذي تود طلبه؟",
+        "address": "الخطوة الأخيرة: ما هو عنوان التوصيل بالكامل؟",
+        "phone_number": "هل يمكنك إعطائي رقم هاتفك للتواصل مع عامل التوصيل؟"
     },
     "EN": {
          "product": "Which item are you interested in ?",
@@ -90,92 +90,90 @@ REQUIRED_ORDER_ENTITIES = ["product", "color", "size", "address", "phone_number"
 # Multiple products found — ask user to pick one
 DISAMBIGUATION_TEMPLATE = {
     "FR": "J'ai trouvé {count} articles correspondants :\n{list}\n\nLequel vous intéresse ? (tapez le numéro ou le nom) Ou envoyez-moi une photo 📸",
-    "AR": "L9it {count} article ychabhou l li tlawj 3lih :\n{list}\n\nAma hiya li t7eb 3liha ? (ekteb numéro wala l'esm) Wala ab3athli tswira 📸",
+    "AR": "لقد وجدت {count} منتجات مطابقة:\n{list}\n\nأي منها يهمك؟ (اكتب الرقم أو الاسم) أو أرسل لي صورة 📸",
     "EN": "I found {count} matching items :\n{list}\n\nWhich one are you interested in? (type the number or name) Or send me a photo 📸"
 }
 
 # Chosen variation is out of stock
 OUT_OF_STOCK_TEMPLATE = {
     "FR": "Désolé, le {product} en {color} / taille {size} est actuellement en rupture de stock. 😔",
-    "AR": "Samahni, el {product} en {color} / taille {size} m3adech fih stock tawa. 😔",
+    "AR": "عذراً، الـ {product} باللون {color} / المقاس {size} غير متوفر في المخزون حالياً. 😔",
     "EN": "Sorry, the {product} in {color} / size {size} is currently out of stock. 😔"
 }
 
 OUT_OF_STOCK_AVAILABLE = {
     "FR": "\nDisponible en : {avail}",
-    "AR": "\nDispo fi : {avail}",
+    "AR": "\nمتوفر في : {avail}",
     "EN": "\nAvailable in : {avail}"
 }
 
 OUT_OF_STOCK_SIZES = {
     "FR": "\nTailles disponibles : {avail}",
-    "AR": "\nTaillouet li fihom stock : {avail}",
+    "AR": "\nالمقاسات المتوفرة : {avail}",
     "EN": "\nAvailable sizes : {avail}"
 }
 
 OUT_OF_STOCK_COLORS = {
     "FR": "\nCouleurs disponibles : {avail}",
-    "AR": "\nCouleurat li fihom stock : {avail}",
+    "AR": "\nالألوان المتوفرة : {avail}",
     "EN": "\nAvailable colors : {avail}"
 }
 
 MISSING_ENTITY_DEFAULT = {
     "FR": "Pouvez-vous me dire {first_missing} ?",
-    "AR": "Tnajam t9olli {first_missing} ?",
+    "AR": "هل يمكنك إخباري بـ {first_missing}؟",
     "EN": "Can you tell me {first_missing} ?"
 }
 
 INFORM_INFO_DEFAULT = {
     "FR": "Et pour la {first_missing} ?",
-    "AR": "W ba9i {first_missing} ?",
+    "AR": "وماذا عن الـ {first_missing}؟",
     "EN": "And what about the {first_missing} ?"
 }
 
 INFORM_PRODUCT_DEFAULT = {
     "FR": "Merci pour ces informations ! Quel article souhaitez-vous commander ?",
-    "AR": "Aychak 3al ma3loumet ! Ana article t7eb t3adi 3lih commande ?",
+    "AR": "شكراً على هذه المعلومات! ما هو المنتج الذي تود طلبه؟",
     "EN": "Thanks for the info ! What item do you want to order ?"
 }
 
 ASK_AVAILABILITY_DEFAULT = {
     "FR": "Sur quel article souhaitez-vous vérifier la disponibilité ?",
-    "AR": "Ana article t7eb tchouf ken dispo ?",
+    "AR": "ما هو المنتج الذي تود التحقق من توفره؟",
     "EN": "Which item do you want to check availability for ?"
 }
 
 ASK_PRICE_DEFAULT = {
     "FR": "Sur quel article souhaitez-vous connaître le prix ?",
-    "AR": "Ana article t7eb taaref soumou ?",
+    "AR": "ما هو المنتج الذي تود معرفة سعره؟",
     "EN": "Which item do you want to know the price of ?"
 }
 
 NOISE_DEFAULT = {
     "FR": "Parlez plus clairement s'il vous plaît. ",
-    "AR": "Watha7li klemek y3aychek. ",
+    "AR": "يرجى التحدث بوضوح أكثر من فضلك. ",
     "EN": "Please speak more clearly. "
 }
 
 STOCK_CHECK_ERROR = {
     "FR": "Désolé, impossible de vérifier le stock pour le moment. Veuillez réessayer.",
-    "AR": "Samahni, mnjmch nchouf stock tawa. 3awed jarab s'il vous plaît.",
+    "AR": "عذراً، لا يمكن التحقق من المخزون في الوقت الحالي. يرجى المحاولة مرة أخرى.",
     "EN": "Sorry, unable to check stock at the moment. Please try again."
 }
 
 # Order confirmed with a reference number from the API
 ORDER_CONFIRMED_TEMPLATE = {
     "FR": "🎉 Commande confirmée ! Votre {product} est en cours de préparation.\n📦 Référence commande : #{ref}\nLe livreur vous contactera dans 2 à 3 jours ouvrables.",
-    "AR": "🎉 Commande t3adet ! el {product} mte3ek 9a3din n7athrou fiha.\n📦 Référence commande : #{ref}\nLivreur bch ykalmek fi 2 wela 3 ayam.",
+    "AR": "🎉 تم تأكيد الطلب! جارٍ تجهيز الـ {product} الخاص بك.\n📦 رقم مرجع الطلب : #{ref}\nسيتواصل معك عامل التوصيل خلال يومين إلى 3 أيام عمل.",
     "EN": "🎉 Order confirmed ! Your {product} is being prepared.\n📦 Order reference : #{ref}\nThe driver will contact you in 2 to 3 business days."
 }
 
 # Order confirmed but Mock API did not return a reference
 ORDER_CONFIRMED_NO_REF_TEMPLATE = {
     "FR": "🎉 Commande enregistrée ! Votre {product} est en cours de préparation.\nLe livreur vous contactera dans 2 à 3 jours ouvrables. 🚚",
-    "AR": "🎉 Commande 9ayedneha ! el {product} mte3ek 9a3din n7athrou fiha.\nLivreur bch ykalmek fi 2 wela 3 ayam. 🚚",
+    "AR": "🎉 تم تسجيل الطلب! جارٍ تجهيز الـ {product} الخاص بك.\nسيتواصل معك عامل التوصيل خلال يومين إلى 3 أيام عمل. 🚚",
     "EN": "🎉 Order registered ! Your {product} is being prepared.\nThe driver will contact you in 2 to 3 business days. 🚚"
 }
 
 # Fallback generic product names used if NLU fails to extract the product entity
 FALLBACK_PRODUCTS = ["pull", "t-shirt", "veste", "pantalon", "robe"]
-
-
