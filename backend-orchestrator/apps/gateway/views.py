@@ -263,7 +263,6 @@ class MessengerWebhookPOC(APIView):
             "status": "success",
             "bot_response": {
                 "text": bot_response_text,
-                "delay_seconds": bot_config.response_delay,
                 "internal_debug": {
                     "intent_detected":    extracted_intent,
                     "entities_extracted": extracted_entities,

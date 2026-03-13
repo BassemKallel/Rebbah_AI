@@ -9,8 +9,9 @@ Responsibilities:
 """
 import re
 import logging
-from django.conf import settings
-from apps.gateway.response_templates import (
+from typing import Optional, Set
+from django.conf import settings  # pyre-ignore[21]
+from apps.gateway.response_templates import (  # pyre-ignore[21]
     TEMPLATES, MISSING_ENTITY_TEMPLATES, REQUIRED_ORDER_ENTITIES,
     OUT_OF_STOCK_TEMPLATE, ORDER_CONFIRMED_TEMPLATE, ORDER_CONFIRMED_NO_REF_TEMPLATE,
     OUT_OF_STOCK_AVAILABLE, OUT_OF_STOCK_SIZES, OUT_OF_STOCK_COLORS,
@@ -88,12 +89,13 @@ _VALID_SIZES = {"S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE", "XS", "XXL
 # ─── Entity Guards ───────────────────────────────────────────────────────────
 
 def apply_entity_guards(nlu_raw_entities: list, intent: str, conversation) -> dict:
+    relevant: Set[str] = set()
     if (intent == "INFORM_INFO"
             and conversation.missing_entities
             and conversation.state == "WAITING_USER_REPLY"):
         relevant = set(conversation.missing_entities)
     else:
-        relevant = INTENT_ENTITY_FILTER.get(intent, set())
+        relevant = set(INTENT_ENTITY_FILTER.get(intent, set()))
 
     phone_texts = {e["text"].strip() for e in nlu_raw_entities if e["label"] == "phone_number"}
 
@@ -268,7 +270,7 @@ def _check_stock(matched_product: dict, color: str, size: str) -> tuple:
 
 def run_state_machine(intent: str, previous_state: str, current_context: dict,
                       matched_product, lead, conversation,
-                      vision_variation_id: str = None, bot_config = None, text: str = "") -> dict:
+                      vision_variation_id: Optional[str] = None, bot_config = None, text: str = "") -> dict:
     
     lang = "FR"
     if bot_config:
@@ -279,21 +281,15 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
 
     # Build substitution variables
     shop_name = bot_config.shop_name if bot_config and bot_config.shop_name else "notre boutique"
+    ai_agent_name = bot_config.ai_agent_name if bot_config and bot_config.ai_agent_name else "TikTak AI"
     variables = {
         "shop_name": shop_name,
+        "ai_agent_name": ai_agent_name,
         "product": matched_product["name"] if matched_product else current_context.get("product", "cet article"),
         "color": current_context.get("color", ""),
         "size": current_context.get("size", ""),
         "price": str(matched_product.get("base_price", "0")) if matched_product else "0",
     }
-    
-    # Format out of context logic
-    if intent in ("UNKNOWN", "NOISE") and bot_config and bot_config.out_of_context_message:
-        return {
-            "bot_response": _format_bot_response(bot_config.out_of_context_message, variables),
-            "new_state": previous_state,
-            "missing_list": []
-        }
 
     # Custom intents override
     custom_intents = bot_config.custom_intents if bot_config and isinstance(bot_config.custom_intents, dict) else {}
@@ -311,13 +307,6 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
     bot_response = TEMPLATES.get(lang, {}).get("UNKNOWN", "Je n'ai pas compris.")
     missing_list = []
     new_state    = previous_state
-
-    if intent == "GREETING" and bot_config and bot_config.custom_greeting:
-        return {
-            "bot_response": _format_bot_response(bot_config.custom_greeting, variables),
-            "new_state": new_state,
-            "missing_list": missing_list
-        }
 
     # ── ORDER_PRODUCT ──────────────────────────────────────────────────────
     if intent == "ORDER_PRODUCT":
