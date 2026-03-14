@@ -15,22 +15,33 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 
-from apps.crm.models import Lead, Conversation, Message, BotConfiguration
+from apps.crm.models import Lead, Conversation, Message, BotConfiguration, Company
 from .context_manager import ContextManager
 from .response_templates import DISAMBIGUATION_TEMPLATE, REQUIRED_ORDER_ENTITIES, FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
 from .services.azure_storage import azure_storage_service
 
+
 logger = logging.getLogger(__name__)
 
 context_manager = ContextManager()
 
-# ─── Mapping page_id / instagram_id → shop_id ────────────────────────────
-# Configure in settings.py:  PAGE_SHOP_MAPPING = {"PAGE_ID": "shop-uuid", ...}
-PAGE_SHOP_MAPPING = getattr(settings, "PAGE_SHOP_MAPPING", {})
-
 # Webhook verify token (set META_VERIFY_TOKEN in settings.py or .env)
 META_VERIFY_TOKEN = getattr(settings, "META_VERIFY_TOKEN", "tiktak_verify_token")
+
+
+def resolve_page_to_shop(page_id):
+    """
+    Dynamically resolves a Meta page_id to a shop_id by querying Company.
+    Falls back to PAGE_SHOP_MAPPING from settings.py if no DB entry exists.
+    """
+    try:
+        company = Company.objects.get(meta_page_id=page_id, is_active=True)
+        return company.shop_id
+    except Company.DoesNotExist:
+        # Fallback to settings dict (for backward compatibility)
+        mapping = getattr(settings, "PAGE_SHOP_MAPPING", {})
+        return mapping.get(page_id)
 
 
 class MetaWebhookView(APIView):
@@ -86,8 +97,8 @@ class MetaWebhookView(APIView):
         for entry in data.get("entry", []):
             page_id = entry.get("id", "")
 
-            # Resolve shop_id from page/instagram ID
-            shop_id = PAGE_SHOP_MAPPING.get(page_id)
+            # Resolve shop_id dynamically from DB (BotConfiguration.meta_page_id)
+            shop_id = resolve_page_to_shop(page_id)
             if not shop_id:
                 logger.warning(f"[META WEBHOOK] No shop mapped for page_id={page_id}, skipping")
                 continue
