@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 import json
-from .models import Lead, Conversation, Message, BotConfiguration
+from .models import Lead, Conversation, Message, BotConfiguration, Company
 from apps.gateway.response_templates import TEMPLATES
 
 @admin.register(BotConfiguration)
@@ -27,6 +27,28 @@ class BotConfigurationAdmin(admin.ModelAdmin):
         data = TEMPLATES.get(lang, {})
         return format_html("<pre>{}</pre>", json.dumps(data, indent=2, ensure_ascii=False))
     default_intents.short_description = "Default Intents (Usine)"
+
+
+@admin.register(Company)
+class CompanyAdmin(admin.ModelAdmin):
+    list_display = ('name', 'shop_id', 'meta_page_id', 'is_active', 'created_at')
+    list_filter = ('is_active', 'created_at')
+    search_fields = ('name', 'shop_id', 'meta_page_id')
+    list_editable = ('is_active',)
+    
+    fieldsets = (
+        ('Identité', {
+            'fields': ('name', 'shop_id', 'is_active')
+        }),
+        ('Meta Integration', {
+            'fields': ('meta_page_id', 'meta_page_access_token', 'instagram_page_id'),
+            'description': 'Facebook Page ID et Token pour la réception des messages Messenger/Instagram.'
+        }),
+        ('Bot Configuration', {
+            'fields': ('bot_config',),
+            'description': 'Lier à une configuration de bot pour la personnalisation.'
+        }),
+    )
 
 
 class MessageInline(admin.TabularInline):
