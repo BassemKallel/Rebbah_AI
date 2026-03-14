@@ -99,3 +99,16 @@ PRODUCTS_CACHE_TTL       = int(os.getenv('PRODUCTS_CACHE_TTL',   '600'))  # 10 m
 
 # Request timeouts (seconds)
 EXTERNAL_REQUEST_TIMEOUT = int(os.getenv('EXTERNAL_REQUEST_TIMEOUT', '5'))
+
+# ============================================================
+# META WEBHOOK CONFIGURATION (Messenger / Instagram)
+# ============================================================
+
+# Token used by Meta to verify the webhook endpoint (GET request)
+META_VERIFY_TOKEN = os.getenv('META_VERIFY_TOKEN', '')
+
+# Mapping: Meta Page ID / Instagram Business ID → TikTak shop_id
+# Example: PAGE_SHOP_MAPPING = {"123456789": "b632373b-398a-4e21-9b17-a99b511f8c47"}
+import json as _json
+PAGE_SHOP_MAPPING = _json.loads(os.getenv('PAGE_SHOP_MAPPING', '{"111111111": "b632373b-398a-4e21-9b17-a99b511f8c47"}'))
+
