@@ -30,18 +30,16 @@ context_manager = ContextManager()
 META_VERIFY_TOKEN = getattr(settings, "META_VERIFY_TOKEN", "tiktak_verify_token")
 
 
-def resolve_page_to_shop(page_id):
+def resolve_page_to_company(page_id):
     """
-    Dynamically resolves a Meta page_id to a shop_id by querying Company.
-    Falls back to PAGE_SHOP_MAPPING from settings.py if no DB entry exists.
+    Dynamically resolves a Meta page_id to a Company object.
+    Configured via Django Admin → Companies.
+    Returns the Company instance, or None if not found.
     """
     try:
-        company = Company.objects.get(meta_page_id=page_id, is_active=True)
-        return company.shop_id
+        return Company.objects.get(meta_page_id=page_id, is_active=True)
     except Company.DoesNotExist:
-        # Fallback to settings dict (for backward compatibility)
-        mapping = getattr(settings, "PAGE_SHOP_MAPPING", {})
-        return mapping.get(page_id)
+        return None
 
 
 class MetaWebhookView(APIView):
@@ -97,11 +95,14 @@ class MetaWebhookView(APIView):
         for entry in data.get("entry", []):
             page_id = entry.get("id", "")
 
-            # Resolve shop_id dynamically from DB (BotConfiguration.meta_page_id)
-            shop_id = resolve_page_to_shop(page_id)
-            if not shop_id:
-                logger.warning(f"[META WEBHOOK] No shop mapped for page_id={page_id}, skipping")
+            # Resolve Company dynamically from DB
+            company = resolve_page_to_company(page_id)
+            if not company:
+                logger.warning(f"[META WEBHOOK] No company mapped for page_id={page_id}, skipping")
                 continue
+
+            shop_id = company.shop_id
+            api_token = company.tiktak_api_token  # Per-shop API token
 
             for messaging_event in entry.get("messaging", []):
                 sender_psid = messaging_event.get("sender", {}).get("id", "")
@@ -124,14 +125,14 @@ class MetaWebhookView(APIView):
                         break
 
                 # ── Delegate to existing pipeline ─────────────────────────
-                result = self._process_message(user_id, shop_id, text, image_url)
+                result = self._process_message(user_id, shop_id, text, image_url, api_token=api_token)
                 result["platform"] = platform
                 result["sender_psid"] = sender_psid
                 responses.append(result)
 
         return Response({"status": "ok", "responses": responses})
 
-    def _process_message(self, user_id, shop_id, text, image_url):
+    def _process_message(self, user_id, shop_id, text, image_url, api_token=None):
         """
         Reuses the exact same processing logic as MessengerWebhookPOC,
         but called internally with already-parsed data.
@@ -219,7 +220,7 @@ class MetaWebhookView(APIView):
 
         if prod_name:
             try:
-                products = tiktak_service.get_products(shop_id)
+                products = tiktak_service.get_products(shop_id, api_token=api_token)
                 matched_product, color_from_vision, candidates = tiktak_service.find_product(
                     products, prod_name, vision_variation_id
                 )

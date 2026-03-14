@@ -176,6 +176,12 @@ class Company(models.Model):
         help_text="Instagram Business Account ID (si différent du Page ID)"
     )
 
+    # ── Tiktak API ─────────────────────────────────────────────────────
+    tiktak_api_token = models.TextField(
+        blank=True, null=True,
+        help_text="Token d'authentification pour l'API Tiktak (Bearer token)"
+    )
+
     # ── Link to BotConfiguration ───────────────────────────────────────
     bot_config = models.OneToOneField(
         BotConfiguration, on_delete=models.SET_NULL,
