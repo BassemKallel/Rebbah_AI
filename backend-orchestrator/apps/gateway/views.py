@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 
-from apps.crm.models import Lead, Conversation, Message
+from apps.crm.models import Lead, Conversation, Message, BotConfiguration
 from .context_manager import ContextManager
 from .response_templates import DISAMBIGUATION_TEMPLATE, REQUIRED_ORDER_ENTITIES, FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
@@ -520,6 +520,9 @@ class MessengerWebhookPOC(APIView):
             context_manager.add_message(user_id, role="bot", text=bot_text)
             return Response({"status": "success", "bot_response": {"text": bot_text, "internal_debug": {"intent_detected": extracted_intent, "new_state": new_state}}})
 
+        # Fetch Bot configuration for this shop
+        bot_config, _ = BotConfiguration.objects.get_or_create(shop_id=shop_id)
+
         # ── 11. State Machine ─────────────────────────────────────────────
         # Inject shop_id into context for create_pending_order helper
         current_context["shop_id"] = shop_id
@@ -531,6 +534,8 @@ class MessengerWebhookPOC(APIView):
             lead=lead,
             conversation=conversation,
             vision_variation_id=vision_variation_id,
+            bot_config=bot_config,
+            text=text,
         )
         current_context.pop("shop_id", None)
 

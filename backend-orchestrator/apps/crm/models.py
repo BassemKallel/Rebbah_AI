@@ -110,3 +110,43 @@ class Message(models.Model):
 
     def __str__(self):
         return f"[{self.sender}] {self.text[:30]}..."
+
+
+class BotConfiguration(models.Model):
+    """
+    Stores the configuration for the AI Agent per shop/client.
+    Contains dialect preference, custom greeting, and response delay.
+    """
+    LANGUAGE_CHOICES = [
+        ('AUTO', 'Auto-detect'),
+        ('FR', 'French'),
+        ('AR', 'Arabizi'),
+        ('EN', 'English'),
+    ]
+
+    shop_id = models.CharField(max_length=255, unique=True, help_text="The client/shop ID this configuration belongs to.")
+    shop_name = models.CharField(max_length=255, blank=True, null=True, help_text="The display name of the shop.")
+    
+    language = models.CharField(
+        max_length=4, 
+        choices=LANGUAGE_CHOICES, 
+        default='FR',
+        help_text="The language the bot should respond in."
+    )
+
+    ai_agent_name = models.CharField(max_length=255, default="Tiktak AI", help_text="Le nom donné au Ai agent" )
+    
+    custom_intents = models.JSONField(
+        default=dict, 
+        blank=True, 
+        help_text="Custom messages per intent (e.g. {\"ASK_PRICE\": \"Price is {{price}}\"}). Overrides defaults."
+    )
+    
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Config for Django {self.shop_id} ({self.language})"
+
+
