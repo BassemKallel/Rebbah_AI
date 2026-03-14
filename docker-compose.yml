@@ -1,4 +1,10 @@
 version: '3.8'
+
+networks:
+  public-net:
+  internal-net:
+  db-net:
+
 services:
   api-gateway:
     image: nginx:alpine
@@ -9,10 +15,13 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend-orchestrator
+    networks:
+      - public-net
 
   backend-orchestrator:
     build: ./backend-orchestrator
     container_name: backend-orchestrator
+    restart: unless-stopped
     volumes:
       - ./backend-orchestrator:/app
     env_file:
@@ -21,28 +30,44 @@ services:
       sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8000"
     depends_on:
-      - db
-      - redis
-      - nlu-service
-      - vision-service
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nlu-service:
+        condition: service_started
+      vision-service:
+        condition: service_started
     ports:
       - "8000:8000"
+    networks:
+      - public-net
+      - internal-net
+      - db-net
     deploy:
       resources:
         limits:
           memory: 512m
+
   nlu-service:
     build: ./nlu-service
     container_name: nlu-service
+    restart: unless-stopped
     volumes:
       - ./nlu-service:/app
+    networks:
+      - internal-net
     deploy:
       resources:
         limits:
           memory: 2g
+
   vision-service:
     build: ./vision-service
     container_name: vision-service
+    restart: unless-stopped
+    networks:
+      - internal-net
     deploy:
       resources:
         limits:
@@ -52,6 +77,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
   sync-worker:
     build: ./sync-worker
     container_name: sync-worker
@@ -64,13 +90,18 @@ services:
       VISION_SERVICE_URL:  http://vision-service:8002/vectorize
     depends_on:
       - vision-service
+    networks:
+      - internal-net
+      - db-net
     deploy:
       resources:
         limits:
           memory: 256m
+
   db:
-    image: postgres:15
+    image: ankane/pgvector:v0.5.1
     container_name: postgres-db
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -82,35 +113,34 @@ services:
       - ./database-init/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
+    networks:
+      - db-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
-          memory: 512m
-
-  vector-db:
-    image: ankane/pgvector:v0.5.1
-    container_name: vector-db
-    environment:
-      POSTGRES_USER: ${VECTOR_DB_USER}
-      POSTGRES_PASSWORD: ${VECTOR_DB_PASSWORD}
-      POSTGRES_DB: ${VECTOR_DB_NAME}
-    volumes:
-      - vector_data:/var/lib/postgresql/data
-    ports:
-      - "${VECTOR_DB_PORT}:5432"
-    deploy:
-      resources:
-        limits:
-          memory: 512m
+          memory: 768m
 
   redis:
     image: redis:7-alpine
     container_name: tiktak-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - db-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     deploy:
       resources:
         limits:
@@ -118,5 +148,4 @@ services:
 
 volumes:
   postgres_data:
-  vector_data:
   redis_data:
