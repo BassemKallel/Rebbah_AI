@@ -81,17 +81,22 @@ def normalize_tiktak_products(results: list) -> list:
 
 # ─── Fetching ────────────────────────────────────────────────────────────────
 
-def get_products(shop_id: str) -> list:
+def get_products(shop_id: str, api_token: str = None) -> list:
     """
     Return the full product list for a shop, using Redis cache when available.
     Paginates through all TikTak API pages (max 10).
+    
+    Args:
+        shop_id: The shop identifier on the Tiktak platform.
+        api_token: Per-shop API token. Falls back to settings.TIKTAK_API_TOKEN if not provided.
     """
     cache_key = f"tiktak_products:{shop_id}"
     products = cache.get(cache_key)
 
     if products is None:
         logger.info(f"[TIKTAK] cache miss shop_id={shop_id}")
-        api_headers = {"Authorization": f"Bearer {settings.TIKTAK_API_TOKEN}"}
+        token = api_token or settings.TIKTAK_API_TOKEN
+        api_headers = {"Authorization": f"Bearer {token}"}
         all_results = []
         next_url    = TIKTAK_API_PRODUCTS_URL
         params      = {"company": shop_id}
