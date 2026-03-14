@@ -150,3 +150,46 @@ class BotConfiguration(models.Model):
         return f"Config for Django {self.shop_id} ({self.language})"
 
 
+class Company(models.Model):
+    """
+    Represents a client company / shop connected to the platform.
+    Stores business identity + Meta platform integration details.
+    BotConfiguration is for personalization; Company is for identity.
+    """
+    name = models.CharField(max_length=255, help_text="Nom de la boutique")
+    shop_id = models.CharField(
+        max_length=255, unique=True,
+        help_text="UUID du shop sur la plateforme Tiktak"
+    )
+
+    # ── Meta Platform Integration ──────────────────────────────────────
+    meta_page_id = models.CharField(
+        max_length=100, blank=True, null=True, unique=True,
+        help_text="Facebook Page ID (depuis Meta Developer → Messenger → Token d'accès)"
+    )
+    meta_page_access_token = models.TextField(
+        blank=True, null=True,
+        help_text="Page Access Token pour envoyer des réponses via Meta Send API"
+    )
+    instagram_page_id = models.CharField(
+        max_length=100, blank=True, null=True, unique=True,
+        help_text="Instagram Business Account ID (si différent du Page ID)"
+    )
+
+    # ── Link to BotConfiguration ───────────────────────────────────────
+    bot_config = models.OneToOneField(
+        BotConfiguration, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='company',
+        help_text="Configuration du bot IA associée"
+    )
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "Companies"
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.shop_id})"
