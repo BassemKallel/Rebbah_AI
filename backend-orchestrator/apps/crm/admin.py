@@ -40,9 +40,9 @@ class CompanyAdmin(admin.ModelAdmin):
         ('Identité', {
             'fields': ('name', 'shop_id', 'is_active')
         }),
-        ('Meta Integration', {
-            'fields': ('meta_page_id', 'meta_page_access_token', 'instagram_page_id'),
-            'description': 'Facebook Page ID et Token pour la réception des messages Messenger/Instagram.'
+        ('Meta & Tiktak Integration', {
+            'fields': ('meta_page_id', 'meta_page_access_token', 'instagram_page_id', 'tiktak_api_token'),
+            'description': 'Facebook Page ID, Token Messenger, et Token API Tiktak pour chaque shop.'
         }),
         ('Bot Configuration', {
             'fields': ('bot_config',),
