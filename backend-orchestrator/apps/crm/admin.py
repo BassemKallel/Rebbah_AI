@@ -1,7 +1,33 @@
 from django.contrib import admin
 from django.utils.html import format_html
 import json
-from .models import Lead, Conversation, Message
+from .models import Lead, Conversation, Message, BotConfiguration
+from apps.gateway.response_templates import TEMPLATES
+
+@admin.register(BotConfiguration)
+class BotConfigurationAdmin(admin.ModelAdmin):
+    list_display = ('shop_id', 'shop_name', 'language', 'created_at')
+    list_filter = ('language', 'created_at')
+    search_fields = ('shop_id', 'shop_name')
+    readonly_fields = ('default_intents',)
+    
+    fieldsets = (
+        ('General', {
+            'fields': ('shop_id', 'shop_name', 'language','ai_agent_name')
+        }),
+        ('Custom Responses', {
+            'fields': ('custom_intents', 'default_intents')
+        }),
+    )
+
+    def default_intents(self, obj):
+        if not obj or not getattr(obj, 'language', None):
+            return "-"
+        lang = obj.language if obj.language in TEMPLATES else 'FR'
+        data = TEMPLATES.get(lang, {})
+        return format_html("<pre>{}</pre>", json.dumps(data, indent=2, ensure_ascii=False))
+    default_intents.short_description = "Default Intents (Usine)"
+
 
 class MessageInline(admin.TabularInline):
     model = Message
