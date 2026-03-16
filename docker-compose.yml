@@ -66,8 +66,11 @@ services:
     build: ./vision-service
     container_name: vision-service
     restart: unless-stopped
+    env_file:
+      - .env
     networks:
       - internal-net
+      - db-net
     deploy:
       resources:
         limits:
