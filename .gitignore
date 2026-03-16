@@ -11,7 +11,6 @@ build/
 # Docker
 *.log
 docker-compose.override.yml
-Dockerfile*
 
 # VSCode
 .vscode/
