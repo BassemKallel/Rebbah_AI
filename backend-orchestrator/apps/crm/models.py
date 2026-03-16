@@ -82,6 +82,9 @@ class Conversation(models.Model):
     context_data = models.JSONField(default=dict, blank=True, help_text="JSON storing extracted entities across messages")
     missing_entities = models.JSONField(default=list, blank=True, help_text="List of entities still needed to complete the intent")
     
+    # Grace period tracking
+    completed_at = models.DateTimeField(blank=True, null=True, help_text="Timestamp when order was confirmed — used for AWAITING_CORRECTION grace period")
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
