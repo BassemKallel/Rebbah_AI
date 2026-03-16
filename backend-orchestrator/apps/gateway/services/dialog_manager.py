@@ -22,27 +22,12 @@ from apps.gateway.response_templates import (  # pyre-ignore[21]
 
 logger = logging.getLogger(__name__)
 
-def _detect_language(text: str) -> str:
-    """Simple heuristic to detect language based on character sets / keywords."""
+def detect_language(text: str) -> str:
+    """Detect language: Arabic characters → AR, everything else → FR."""
     if not text:
         return "FR"
-        
-    text_lower = text.lower()
-    # Arabic characters check
     if re.search(r'[\u0600-\u06FF]', text):
         return "AR"
-        
-    # English keywords
-    eng_keywords = {"hello", "hi", "how", "what", "price", "thanks", "please", "yes", "no"}
-    if any(kw in text_lower.split() for kw in eng_keywords):
-        return "EN"
-        
-    # Arabizi keywords
-    arabizi_keywords = {"aaslema", "bkaddech", "kadech", "b9adeh", "brabi", "ey", "le", "chokran"}
-    if any(kw in text_lower.split() for kw in arabizi_keywords):
-        return "AR"
-
-    # Default to French
     return "FR"
 
 def _format_bot_response(response: str, variables: dict) -> str:
@@ -275,7 +260,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
     lang = "FR"
     if bot_config:
         if bot_config.language == "AUTO":
-            lang = _detect_language(text)
+            lang = detect_language(text)
         else:
             lang = bot_config.language
 
@@ -502,7 +487,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
 
     # ── ALL OTHER INTENTS ──────────────────────────────────────────────────
     else:
-        if intent == "NOISE" and previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
+        if intent in ("NOISE", "CONFIRM_DENY") and previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
             new_state    = "WAITING_USER_REPLY"
             missing_list = conversation.missing_entities
             first_missing = missing_list[0] if missing_list else None
