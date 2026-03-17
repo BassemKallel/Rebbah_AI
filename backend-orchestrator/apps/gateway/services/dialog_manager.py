@@ -57,8 +57,8 @@ INTENT_ENTITY_FILTER = {
     "UNKNOWN":         set(),
     "NOISE":           set(),
     "ASK_DETAILS":     {"product"},
-    "ASK_DISCOUNT":    set(),
-    "ASK_LOCATION":    set(),
+    "ASK_DISCOUNT":    {"product", "color", "size"},
+    "ASK_LOCATION":    {"address", "phone_number"},
     "CANCEL_ORDER":    set(),
     "CHECK_PACKAGE":   set(),
     "COMPLAINT":       set(),
@@ -75,9 +75,9 @@ _VALID_SIZES = {"S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE", "XS", "XXL
 
 def apply_entity_guards(nlu_raw_entities: list, intent: str, conversation) -> dict:
     relevant: Set[str] = set()
-    if (intent == "INFORM_INFO"
-            and conversation.missing_entities
-            and conversation.state == "WAITING_USER_REPLY"):
+    if (conversation.missing_entities
+            and conversation.state in ("WAITING_USER_REPLY", "NEW_CONVERSATION")
+            and intent in ("INFORM_INFO", "ASK_LOCATION", "CONFIRM_DENY")):
         relevant = set(conversation.missing_entities)
     else:
         relevant = set(INTENT_ENTITY_FILTER.get(intent, set()))
@@ -251,6 +251,19 @@ def _check_stock(matched_product: dict, color: str, size: str) -> tuple:
     return False, avail
 
 
+def _auto_fill_single_color(matched_product: dict, current_context: dict) -> None:
+    """If only one in-stock color exists for the product, pre-fill it in context."""
+    if not matched_product:
+        return
+    in_stock_colors = list({
+        v["color"] for v in matched_product.get("variations", [])
+        if v.get("stock_quantity", 0) > 0 and v.get("color")
+    })
+    if len(in_stock_colors) == 1:
+        current_context["color"] = in_stock_colors[0]
+        logger.info(f"[AUTO COLOR] Single color available: '{in_stock_colors[0]}' — pre-filled in context")
+
+
 # ─── State Machine ───────────────────────────────────────────────────────────
 
 def run_state_machine(intent: str, previous_state: str, current_context: dict,
@@ -317,6 +330,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                     bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
                 current_context.pop("color", None)
                 current_context.pop("size",  None)
+                _auto_fill_single_color(matched_product, current_context)
                 missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
             else:
                 first_missing = missing_list[0]
@@ -353,6 +367,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                     bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
                 current_context.pop("color", None)
                 current_context.pop("size",  None)
+                _auto_fill_single_color(matched_product, current_context)
                 missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                 new_state    = "WAITING_USER_REPLY"
             else:
@@ -387,13 +402,14 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                         bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
                     current_context.pop("color", None)
                     current_context.pop("size",  None)
+                    _auto_fill_single_color(matched_product, current_context)
                     missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                 else:
                     first_missing = missing_list[0]
                     bot_response  = (
                         MISSING_ENTITY_TEMPLATES.get(lang, {})
                         .get(first_missing, INFORM_INFO_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
-                        .replace("{product}", current_context.get("product", "cet article"))
+                        .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
                         .replace("{color}",   color)
                     )
             else:
@@ -419,6 +435,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                             bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
                         current_context.pop("color", None)
                         current_context.pop("size",  None)
+                        _auto_fill_single_color(matched_product, current_context)
                         missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                         new_state    = "WAITING_USER_REPLY"
                     else:
@@ -440,29 +457,61 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
     # ── ASK_PRICE / ASK_AVAILABILITY / ASK_DELIVERY ────────────────────────
     elif intent in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY"):
         if previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
+            skip_missing_flow = False
+
             if intent == "ASK_PRICE" and matched_product:
                 price = matched_product.get('base_price', '0')
                 bot_response = TEMPLATES.get(lang, {}).get("ASK_PRICE", "").replace("{product}", matched_product['name']).replace("{price}", str(price)) + " "
             elif intent == "ASK_AVAILABILITY" and matched_product:
-                variations = matched_product.get("variations", [])
-                sizes  = ", ".join(list(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
-                colors = ", ".join(list(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                bot_response = TEMPLATES.get(lang, {}).get("ASK_AVAILABILITY", "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+                size  = current_context.get("size", "")
+                color = current_context.get("color", "")
+                if size:
+                    # User asked about a specific size — validate stock first
+                    stock_ok, avail = _check_stock(matched_product, color, size)
+                    if not stock_ok:
+                        display = matched_product["name"]
+                        bot_response = (
+                            OUT_OF_STOCK_TEMPLATE.get(lang, "")
+                            .replace("{product}", display)
+                            .replace("{color}", color)
+                            .replace("{size}", size)
+                        )
+                        if avail:
+                            bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
+                        current_context.pop("size", None)
+                        _auto_fill_single_color(matched_product, current_context)
+                        missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                        new_state = "WAITING_USER_REPLY"
+                        skip_missing_flow = True  # Don't re-append missing list below
+                    else:
+                        # Size IS in stock — confirm and continue flow
+                        variations = matched_product.get("variations", [])
+                        sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
+                        colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
+                        bot_response = TEMPLATES.get(lang, {}).get("ASK_AVAILABILITY", "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+                else:
+                    # No specific size — show all available
+                    variations = matched_product.get("variations", [])
+                    sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
+                    colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
+                    bot_response = TEMPLATES.get(lang, {}).get("ASK_AVAILABILITY", "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
             else:
                 bot_response = TEMPLATES.get(lang, {}).get(intent, "")
 
-            for req in REQUIRED_ORDER_ENTITIES:
-                if req not in current_context:
-                    missing_list.append(req)
-            if missing_list:
-                new_state    = "WAITING_USER_REPLY"
-                first_missing = missing_list[0]
-                bot_response += (
-                    MISSING_ENTITY_TEMPLATES.get(lang, {})
-                    .get(first_missing, MISSING_ENTITY_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
-                    .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
-                    .replace("{color}",   current_context.get("color", ""))
-                )
+            if not skip_missing_flow:
+                for req in REQUIRED_ORDER_ENTITIES:
+                    if req not in current_context:
+                        missing_list.append(req)
+                if missing_list:
+                    new_state    = "WAITING_USER_REPLY"
+                    first_missing = missing_list[0]
+                    bot_response += (
+                        MISSING_ENTITY_TEMPLATES.get(lang, {})
+                        .get(first_missing, MISSING_ENTITY_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
+                        .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
+                        .replace("{color}",   current_context.get("color", ""))
+                    )
+
         else:
             if not matched_product:
                 if intent == "ASK_AVAILABILITY":
@@ -487,16 +536,20 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
 
     # ── ALL OTHER INTENTS ──────────────────────────────────────────────────
     else:
-        if intent in ("NOISE", "CONFIRM_DENY") and previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
+        # Preserve context for vague/confirmatory intents when entities are still missing
+        if intent in ("NOISE", "CONFIRM_DENY", "ASK_LOCATION") and conversation.missing_entities:
             new_state    = "WAITING_USER_REPLY"
             missing_list = conversation.missing_entities
             first_missing = missing_list[0] if missing_list else None
-            bot_response  = NOISE_DEFAULT.get(lang, "")
+            if intent == "ASK_LOCATION":
+                bot_response = TEMPLATES.get(lang, {}).get("ASK_LOCATION", "") + " "
+            else:
+                bot_response = NOISE_DEFAULT.get(lang, "")
             if first_missing:
                 bot_response += (
                     MISSING_ENTITY_TEMPLATES.get(lang, {})
                     .get(first_missing, MISSING_ENTITY_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
-                    .replace("{product}", current_context.get("product", "cet article"))
+                    .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
                     .replace("{color}",   current_context.get("color", ""))
                 )
         else:

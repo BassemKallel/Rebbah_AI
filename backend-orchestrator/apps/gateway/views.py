@@ -121,6 +121,11 @@ class MetaWebhookView(APIView):
                 if bot_text and token:
                     messenger_service.send_message(sender_psid, bot_text, token)
 
+                # ── Send matched product image if found ────────────────
+                matched_image = result.get("matched_image_url")
+                if matched_image and token:
+                    messenger_service.send_image(sender_psid, matched_image, token)
+
                 responses.append(result)
 
         return Response({"status": "ok", "responses": responses})
