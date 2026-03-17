@@ -112,12 +112,14 @@ class MessagePipeline:
 
         # ── 5. NLU API ────────────────────────────────────────────────────
         nlu_raw_entities = []
-        extracted_intent = "UNKNOWN"
+        extracted_intent  = "UNKNOWN"
+        intent_confidence = None
 
         if text:
             nlu_result = ai_service.call_nlu(text)
-            extracted_intent = nlu_result["intent"]
-            nlu_raw_entities = nlu_result["raw_entities"]
+            extracted_intent    = nlu_result["intent"]
+            nlu_raw_entities    = nlu_result["raw_entities"]
+            intent_confidence   = nlu_result.get("confidence_score")
             is_error = is_error or nlu_result["error"]
 
             # Entity filtering & guards
@@ -146,6 +148,7 @@ class MessagePipeline:
             sender="USER",
             text=text if text else f"[Image: {image_url}]",
             extracted_intent=extracted_intent,
+            intent_confidence_score=intent_confidence if text else None,
             extracted_entities=extracted_entities,
             is_error=is_error,
         )
@@ -242,14 +245,12 @@ class MessagePipeline:
         context_manager.add_message(user_id, role="bot", text=bot_response_text)
 
         # ── Grace Period: AWAITING_CORRECTION ─────────────────────────────
+        # NOTE: AWAITING_CORRECTION is ONLY for post-order grace period.
+        # Regular "waiting for missing entity" stays as WAITING_USER_REPLY.
         if new_state == "COMPLETED":
             new_state = "AWAITING_CORRECTION"
             conversation.state = new_state
             conversation.completed_at = timezone.now()
-            conversation.save()
-        elif new_state == "WAITING_USER_REPLY" and len(missing_list) == 1:
-            new_state = "AWAITING_CORRECTION"
-            conversation.state = new_state
             conversation.save()
 
         # ── Build result ──────────────────────────────────────────────────
