@@ -18,6 +18,7 @@ from rest_framework.permissions import AllowAny
 
 from apps.crm.models import Company
 from .pipeline import MessagePipeline
+from .services import messenger_service
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,21 @@ class MetaWebhookView(APIView):
                 result = pipeline.run(user_id, shop_id, text, image_url=image_url, api_token=api_token)
                 result["platform"] = platform
                 result["sender_psid"] = sender_psid
+
+                # ── Retrieve & persist sender name ─────────────────────
+                token = company.meta_page_access_token
+                if token and sender_psid:
+                    sender_name = messenger_service.get_sender_name(sender_psid, token)
+                    if sender_name:
+                        from apps.crm.models import Lead
+                        Lead.objects.filter(platform_id=user_id).update(name=sender_name)
+                        logger.info(f"[META WEBHOOK] Lead name updated: '{sender_name}' for {user_id}")
+
+                # ── Send bot reply back to Messenger ───────────────────
+                bot_text = result.get("text", "")
+                if bot_text and token:
+                    messenger_service.send_message(sender_psid, bot_text, token)
+
                 responses.append(result)
 
         return Response({"status": "ok", "responses": responses})
