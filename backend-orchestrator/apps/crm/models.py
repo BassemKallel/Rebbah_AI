@@ -106,6 +106,10 @@ class Message(models.Model):
     
     # NLU debug info
     extracted_intent = models.CharField(max_length=50, blank=True, null=True)
+    intent_confidence_score = models.FloatField(
+        blank=True, null=True,
+        help_text="Confidence score of the detected intent (0.0 to 1.0)"
+    )
     extracted_entities = models.JSONField(default=dict, blank=True)
     is_error = models.BooleanField(default=False, help_text="True if NLU failed or fallback was triggered")
     
