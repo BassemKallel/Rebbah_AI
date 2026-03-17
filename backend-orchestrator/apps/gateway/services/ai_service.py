@@ -72,13 +72,22 @@ def call_nlu(text: str) -> dict:
         "error": bool
     }
     """
-    result = {"intent": "UNKNOWN", "raw_entities": [], "error": False}
+    result = {"intent": "UNKNOWN", "confidence_score": None, "raw_entities": [], "error": False}
     try:
         res = requests.post(NLU_URL, json={"message": text}, timeout=REQUEST_TIMEOUT)
         if res.status_code == 200:
             data = res.json()
-            result["intent"]       = data.get("intent", {}).get("intent", "UNKNOWN")
-            result["raw_entities"] = data.get("entities", [])
+            intent_data = data.get("intent", {})
+            logger.debug(f"[NLU] raw intent payload: {intent_data}")
+            result["intent"]           = intent_data.get("intent", "UNKNOWN")
+            # Try common field names for the confidence score
+            result["confidence_score"] = (
+                intent_data.get("score")
+                or intent_data.get("confidence")
+                or intent_data.get("probability")
+                or intent_data.get("prob")
+            )
+            result["raw_entities"]     = data.get("entities", [])
         else:
             logger.error(f"[NLU] HTTP {res.status_code}")
             result["error"] = True
