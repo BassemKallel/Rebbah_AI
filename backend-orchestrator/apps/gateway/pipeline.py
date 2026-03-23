@@ -82,15 +82,31 @@ class MessagePipeline:
 
         # Handle grace period expiration
         if conversation.state == "AWAITING_CORRECTION":
-            if conversation.completed_at and (timezone.now() - conversation.completed_at) > timedelta(minutes=GRACE_PERIOD_MINUTES):
+            if conversation.completed_at:
+                try:
+                    elapsed_minutes = (timezone.now() - conversation.completed_at).total_seconds() / 60
+                except TypeError:
+                    # Fallback: make completed_at timezone-aware if stored naive
+                    from django.utils import timezone as tz
+                    completed_at_aware = tz.make_aware(conversation.completed_at.replace(tzinfo=None))
+                    elapsed_minutes = (tz.now() - completed_at_aware).total_seconds() / 60
+                logger.info(f"[PIPELINE] Grace period: {elapsed_minutes:.1f}min elapsed / {GRACE_PERIOD_MINUTES}min limit")
+                if elapsed_minutes > GRACE_PERIOD_MINUTES:
+                    conversation.state = "COMPLETED"
+                    conversation.save()
+                    context_manager.clear_context(user_id)
+                    conversation = Conversation.objects.create(lead=lead, shop_id=shop_id, state="NEW_CONVERSATION")
+                else:
+                    # Still in grace period — restore to WAITING_USER_REPLY
+                    conversation.state = "WAITING_USER_REPLY"
+                    conversation.save()
+            else:
+                # completed_at not set — treat as expired, start fresh
+                logger.warning("[PIPELINE] AWAITING_CORRECTION but completed_at is None — starting new conversation")
                 conversation.state = "COMPLETED"
                 conversation.save()
                 context_manager.clear_context(user_id)
                 conversation = Conversation.objects.create(lead=lead, shop_id=shop_id, state="NEW_CONVERSATION")
-            else:
-                # Still in grace period — restore to WAITING_USER_REPLY so dialog_manager logic works
-                conversation.state = "WAITING_USER_REPLY"
-                conversation.save()
 
         # ── 3. Hot Memory ─────────────────────────────────────────────────
         context_manager.add_message(user_id, role="user", text=text)
@@ -243,22 +259,20 @@ class MessagePipeline:
         conversation.context_data = current_context
         conversation.save()
 
-        # Update user message with the resulting state
-        user_message.conversation_state_after = new_state
-        user_message.save(update_fields=["conversation_state_after"])
-
         # ── 13. Save Bot Message ──────────────────────────────────────────
         Message.objects.create(conversation=conversation, sender="BOT", text=bot_response_text, is_error=False)
         context_manager.add_message(user_id, role="bot", text=bot_response_text)
 
         # ── Grace Period: AWAITING_CORRECTION ─────────────────────────────
-        # NOTE: AWAITING_CORRECTION is ONLY for post-order grace period.
-        # Regular "waiting for missing entity" stays as WAITING_USER_REPLY.
         if new_state == "COMPLETED":
             new_state = "AWAITING_CORRECTION"
             conversation.state = new_state
             conversation.completed_at = timezone.now()
             conversation.save()
+
+        # Update user message with the FINAL state (after AWAITING_CORRECTION override)
+        user_message.conversation_state_after = new_state
+        user_message.save(update_fields=["conversation_state_after"])
 
         # ── Build result ──────────────────────────────────────────────────
         result.update({
