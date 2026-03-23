@@ -135,6 +135,14 @@ class MessagePipeline:
                 extracted_entities["product"] = f"Article_From_Image_{vision_result['product_id']}"
                 matched_image_url = vision_result.get("image_url")
                 vision_variation_id = vision_result.get("variation_id")
+
+                # Pre-fill color from variation (size is left for the user to provide)
+                if vision_variation_id:
+                    products = tiktak_service.get_products(shop_id, api_token)
+                    detected_color = tiktak_service.get_color_from_variation(vision_variation_id, products)
+                    if detected_color:
+                        extracted_entities["color"] = detected_color
+                        logger.info(f"[PIPELINE] Vision pre-filled color='{detected_color}'")
             else:
                 is_error = True
 
