@@ -140,7 +140,7 @@ class MessagePipeline:
 
         # ── 5. NLU API ────────────────────────────────────────────────────
         nlu_raw_entities = []
-        extracted_intent  = "UNKNOWN"
+        extracted_intent  = "NOISE"
         intent_confidence = None
 
         if text:
@@ -164,7 +164,7 @@ class MessagePipeline:
                         break
 
         # Default intent when only an image was provided
-        if (image_url or image_file) and (extracted_intent == "UNKNOWN" or not text):
+        if (image_url or image_file) and (extracted_intent == "NOISE" or not text):
             extracted_intent = "ORDER_PRODUCT"
 
         # Detect language for disambiguation messages
@@ -191,7 +191,7 @@ class MessagePipeline:
 
         # ── 8. Contextual Mapping ─────────────────────────────────────────
         previous_state = conversation.state
-        _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT", "UNKNOWN"}
+        _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT"}
 
         if extracted_intent in _contextual_intents:
             extracted_entities, contextual_match = dialog_manager.run_contextual_mapping(

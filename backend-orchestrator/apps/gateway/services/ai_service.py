@@ -72,14 +72,14 @@ def call_nlu(text: str) -> dict:
         "error": bool
     }
     """
-    result = {"intent": "UNKNOWN", "confidence_score": None, "raw_entities": [], "error": False}
+    result = {"intent": "NOISE", "confidence_score": None, "raw_entities": [], "error": False}
     try:
         res = requests.post(NLU_URL, json={"message": text}, timeout=REQUEST_TIMEOUT)
         if res.status_code == 200:
             data = res.json()
             intent_data = data.get("intent", {})
             logger.debug(f"[NLU] raw intent payload: {intent_data}")
-            result["intent"] = intent_data.get("intent", "UNKNOWN")
+            result["intent"] = intent_data.get("intent", "NOISE")
             # Extract confidence score — use explicit None checks (not `or`) to handle score=0.0
             _conf = intent_data.get("confidence")
             if _conf is None:
