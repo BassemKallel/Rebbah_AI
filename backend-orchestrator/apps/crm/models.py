@@ -1,14 +1,15 @@
 from django.db import models
 from django.utils import timezone
-import time
+import uuid as uuid_lib
 
 class Lead(models.Model):
     """
     Represents a potential customer identified via WhatsApp/Messenger.
     Stores both lead info AND pending pre-order data waiting for agent confirmation.
     """
-    platform_id = models.CharField(max_length=255, unique=True, help_text="e.g., whatsapp:+21612345678")
-    name = models.CharField(max_length=255, blank=True, null=True)
+    uuid        = models.UUIDField(default=uuid_lib.uuid4, unique=True, editable=False, help_text="Stable public identifier for this lead")
+    platform_id = models.CharField(max_length=255, unique=True, help_text="e.g., PSID Meta ou whatsapp:+21612345678")
+    name        = models.CharField(max_length=255, blank=True, null=True)
     
     # ===== PRÉ-COMMANDE (En attente de confirmation agent) =====
     shop_id = models.CharField(max_length=255, blank=True, null=True, help_text="Associated shop")
@@ -72,8 +73,10 @@ class Conversation(models.Model):
     """
     Represents an ongoing chat session with a lead.
     """
-    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="conversations")
-    shop_id = models.CharField(max_length=255, help_text="Which shop context is this happening in?")
+    lead      = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="conversations")
+    lead_uuid = models.UUIDField(null=True, blank=True, help_text="Denormalized lead UUID for direct querying")
+    sender_id = models.CharField(max_length=255, null=True, blank=True, help_text="Denormalized platform_id of the sender")
+    shop_id   = models.CharField(max_length=255, help_text="Which shop context is this happening in?")
     
     # Simple state machine for the POC (e.g., NEW, ASKING_SIZE, ASKING_COLOR, COMPLETED)
     state = models.CharField(max_length=50, default="NEW_CONVERSATION")
