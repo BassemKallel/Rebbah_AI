@@ -79,15 +79,19 @@ def call_nlu(text: str) -> dict:
             data = res.json()
             intent_data = data.get("intent", {})
             logger.debug(f"[NLU] raw intent payload: {intent_data}")
-            result["intent"]           = intent_data.get("intent", "UNKNOWN")
-            # Try common field names for the confidence score
-            result["confidence_score"] = (
-                intent_data.get("score")
-                or intent_data.get("confidence")
-                or intent_data.get("probability")
-                or intent_data.get("prob")
-            )
-            result["raw_entities"]     = data.get("entities", [])
+            result["intent"] = intent_data.get("intent", "UNKNOWN")
+            # Extract confidence score — use explicit None checks (not `or`) to handle score=0.0
+            _conf = intent_data.get("confidence")
+            if _conf is None:
+                _conf = intent_data.get("score")
+            if _conf is None:
+                _conf = intent_data.get("probability")
+            if _conf is None:
+                _conf = intent_data.get("prob")
+            result["confidence_score"] = _conf
+            logger.info(f"[NLU] intent={result['intent']} confidence={_conf} | raw={intent_data}")
+            result["raw_entities"] = data.get("entities", [])
+
         else:
             logger.error(f"[NLU] HTTP {res.status_code}")
             result["error"] = True
