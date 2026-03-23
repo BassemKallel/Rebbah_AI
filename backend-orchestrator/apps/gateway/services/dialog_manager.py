@@ -54,7 +54,6 @@ INTENT_ENTITY_FILTER = {
     "INFORM_INFO":     {"address", "phone_number", "color", "size"},
     "ASK_DELIVERY":    set(),
     "GREETING":        set(),
-    "UNKNOWN":         set(),
     "NOISE":           set(),
     "ASK_DETAILS":     {"product"},
     "ASK_DISCOUNT":    {"product", "color", "size"},
@@ -140,7 +139,7 @@ def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
 
 def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
                             nlu_raw_entities: list, current_context: dict) -> tuple:
-    _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT", "UNKNOWN"}
+    _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT"}
     previous_state = conversation.state
 
     if not (previous_state == "WAITING_USER_REPLY"
@@ -295,7 +294,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
         # But wait, ORDER_PRODUCT and INFORM_INFO have complex state logic for missing entities.
         # So we only override single turn intents directly if it's purely informational or if it's already fulfilled.
         # For simplicity, we only fully return custom directly for informational intents:
-        if intent in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY", "GREETING") or (intent not in ["ORDER_PRODUCT", "INFORM_INFO", "NOISE", "UNKNOWN"]):
+        if intent in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY", "GREETING") or (intent not in ["ORDER_PRODUCT", "INFORM_INFO", "NOISE"]):
             return {
                 "bot_response": _format_bot_response(custom_intents[intent], variables),
                 "new_state": previous_state,
