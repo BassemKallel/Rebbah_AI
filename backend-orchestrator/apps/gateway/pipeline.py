@@ -74,11 +74,17 @@ class MessagePipeline:
         # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
         lead, _ = Lead.objects.get_or_create(platform_id=user_id)
         conversation = Conversation.objects.filter(
-            lead=lead,
+            sender_id=user_id,
             state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
         ).first()
         if not conversation:
-            conversation = Conversation.objects.create(lead=lead, shop_id=shop_id, state="NEW_CONVERSATION")
+            conversation = Conversation.objects.create(
+                lead=lead,
+                lead_uuid=lead.uuid,
+                sender_id=user_id,
+                shop_id=shop_id,
+                state="NEW_CONVERSATION"
+            )
 
         # Handle grace period expiration
         if conversation.state == "AWAITING_CORRECTION":
@@ -95,7 +101,10 @@ class MessagePipeline:
                     conversation.state = "COMPLETED"
                     conversation.save()
                     context_manager.clear_context(user_id)
-                    conversation = Conversation.objects.create(lead=lead, shop_id=shop_id, state="NEW_CONVERSATION")
+                    conversation = Conversation.objects.create(
+                        lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
+                        shop_id=shop_id, state="NEW_CONVERSATION"
+                    )
                 else:
                     # Still in grace period — restore to WAITING_USER_REPLY
                     conversation.state = "WAITING_USER_REPLY"
@@ -106,7 +115,10 @@ class MessagePipeline:
                 conversation.state = "COMPLETED"
                 conversation.save()
                 context_manager.clear_context(user_id)
-                conversation = Conversation.objects.create(lead=lead, shop_id=shop_id, state="NEW_CONVERSATION")
+                conversation = Conversation.objects.create(
+                    lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
+                    shop_id=shop_id, state="NEW_CONVERSATION"
+                )
 
         # ── 3. Hot Memory ─────────────────────────────────────────────────
         context_manager.add_message(user_id, role="user", text=text)
