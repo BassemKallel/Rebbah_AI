@@ -189,6 +189,33 @@ def get_products(shop_id: str, api_token: str = None) -> list:
     return products or []
 
 
+
+# ─── Variation lookup ─────────────────────────────────────────────────────────
+
+def get_color_from_variation(variation_id, products: list) -> str | None:
+    """
+    Return the color of a specific variation by its ID.
+    Used to pre-fill the color entity when the vision service identifies a product via image.
+
+    Args:
+        variation_id: ID returned by the vision service (int or str)
+        products:     Normalized product list from get_products()
+
+    Returns:
+        color string if found and non-empty, else None
+    """
+    vid = str(variation_id)
+    for product in products:
+        for variation in product.get("variations", []):
+            if str(variation.get("id")) == vid:
+                color = variation.get("color", "").strip()
+                if color:
+                    logger.info(f"[TIKTAK] variation_id={vid} → color='{color}'")
+                    return color
+    logger.warning(f"[TIKTAK] variation_id={vid} not found in catalog — color not pre-filled")
+    return None
+
+
 # ─── Matching ────────────────────────────────────────────────────────────────
 
 def find_product(products: list, prod_name: str, vision_variation_id: str = None) -> tuple:
