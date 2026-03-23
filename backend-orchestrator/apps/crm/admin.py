@@ -54,9 +54,9 @@ class CompanyAdmin(admin.ModelAdmin):
 class MessageInline(admin.TabularInline):
     model = Message
     extra = 0
-    readonly_fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'pretty_entities', 'is_error', 'created_at')
+    readonly_fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'created_at')
     can_delete = False
-    fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'pretty_entities', 'is_error', 'created_at')
+    fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'created_at')
 
     def confidence_badge(self, obj):
         if obj.intent_confidence_score is None:
@@ -68,6 +68,19 @@ class MessageInline(admin.TabularInline):
             color, score
         )
     confidence_badge.short_description = "Confiance"
+
+    def state_transition(self, obj):
+        before = obj.conversation_state_before or "?"
+        after  = obj.conversation_state_after  or "?"
+        if before == after:
+            return format_html('<span style="color:#888">{}</span>', before)
+        return format_html(
+            '<span style="color:#2980b9;font-weight:bold">{}</span>'
+            ' → '
+            '<span style="color:#27ae60;font-weight:bold">{}</span>',
+            before, after
+        )
+    state_transition.short_description = "État (avant → après)"
 
     def pretty_entities(self, obj):
         if not obj.extracted_entities:

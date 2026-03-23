@@ -142,6 +142,8 @@ class MessagePipeline:
         # Detect language for disambiguation messages
         lang = detect_language(text)
 
+        state_before = conversation.state
+
         # ── 6. Save User Message ──────────────────────────────────────────
         user_message = Message.objects.create(
             conversation=conversation,
@@ -151,6 +153,7 @@ class MessagePipeline:
             intent_confidence_score=intent_confidence if text else None,
             extracted_entities=extracted_entities,
             is_error=is_error,
+            conversation_state_before=state_before,
         )
 
         # ── 7. Context Accumulation ───────────────────────────────────────
@@ -239,6 +242,10 @@ class MessagePipeline:
         conversation.missing_entities = missing_list
         conversation.context_data = current_context
         conversation.save()
+
+        # Update user message with the resulting state
+        user_message.conversation_state_after = new_state
+        user_message.save(update_fields=["conversation_state_after"])
 
         # ── 13. Save Bot Message ──────────────────────────────────────────
         Message.objects.create(conversation=conversation, sender="BOT", text=bot_response_text, is_error=False)

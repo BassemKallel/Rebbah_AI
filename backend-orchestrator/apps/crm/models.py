@@ -112,7 +112,16 @@ class Message(models.Model):
     )
     extracted_entities = models.JSONField(default=dict, blank=True)
     is_error = models.BooleanField(default=False, help_text="True if NLU failed or fallback was triggered")
-    
+
+    # Conversation state tracking
+    conversation_state_before = models.CharField(
+        max_length=50, blank=True, null=True,
+        help_text="State of the conversation BEFORE processing this message"
+    )
+    conversation_state_after = models.CharField(
+        max_length=50, blank=True, null=True,
+        help_text="State of the conversation AFTER processing this message"
+    )
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
