@@ -92,7 +92,7 @@ class MetaWebhookView(APIView):
                 if not sender_psid or not message_obj:
                     continue
 
-                user_id = f"{platform}:{sender_psid}"
+                user_id = sender_psid   # PSID brut — ex: "7341829462837401"
                 text = message_obj.get("text", "")
 
                 # Extract image URL from attachments

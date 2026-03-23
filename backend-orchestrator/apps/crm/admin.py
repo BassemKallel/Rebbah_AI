@@ -62,10 +62,11 @@ class MessageInline(admin.TabularInline):
         if obj.intent_confidence_score is None:
             return "-"
         score = obj.intent_confidence_score
+        pct   = f"{score:.0%}"
         color = "#27ae60" if score >= 0.8 else ("#e67e22" if score >= 0.5 else "#e74c3c")
         return format_html(
-            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{:.0%}</span>',
-            color, score
+            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>',
+            color, pct
         )
     confidence_badge.short_description = "Confiance"
 
@@ -91,24 +92,24 @@ class MessageInline(admin.TabularInline):
 class ConversationInline(admin.TabularInline):
     model = Conversation
     extra = 0
-    readonly_fields = ('shop_id', 'state', 'created_at', 'updated_at')
+    readonly_fields = ('sender_id', 'lead_uuid', 'shop_id', 'state', 'created_at', 'updated_at')
     can_delete = False
-    fields = ('shop_id', 'state', 'created_at', 'updated_at')
+    fields = ('sender_id', 'lead_uuid', 'shop_id', 'state', 'created_at', 'updated_at')
     show_change_link = True
 
 @admin.register(Lead)
 class LeadAdmin(admin.ModelAdmin):
-    list_display = ('name', 'platform_id', 'shop_id', 'pending_order_reference', 'product_id', 'color', 'size', 'agent_confirmation_pending', 'created_at')
-    list_filter = ('agent_confirmation_pending', 'has_pending_order', 'shop_id', 'created_at')
+    list_display  = ('name', 'platform_id', 'uuid', 'shop_id', 'pending_order_reference', 'product_id', 'color', 'size', 'agent_confirmation_pending', 'created_at')
+    list_filter   = ('agent_confirmation_pending', 'has_pending_order', 'shop_id', 'created_at')
     search_fields = ('name', 'platform_id', 'pending_order_reference', 'phone_number', 'product_id')
-    readonly_fields = ('pending_order_created_at', 'created_at', 'updated_at', 'pending_order_reference')
+    readonly_fields = ('uuid', 'pending_order_created_at', 'created_at', 'updated_at', 'pending_order_reference')
     list_editable = ('agent_confirmation_pending',)
     date_hierarchy = 'created_at'
     inlines = [ConversationInline]
     
     fieldsets = (
         ('Info Client', {
-            'fields': ('platform_id', 'name'),
+            'fields': ('uuid', 'platform_id', 'name'),
             'classes': ('wide',)
         }),
         ('Pré-Commande (En Attente)', {
@@ -139,17 +140,17 @@ class LeadAdmin(admin.ModelAdmin):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ('__str__', 'lead', 'shop_id', 'state', 'created_at')
-    list_filter = ('state', 'shop_id')
-    search_fields = ('lead__platform_id', 'lead__name')
-    readonly_fields = ('created_at', 'updated_at', 'pretty_context', 'pretty_missing')
+    list_display  = ('sender_id', 'lead', 'shop_id', 'state', 'created_at')
+    list_filter   = ('state', 'shop_id')
+    search_fields = ('sender_id', 'lead__platform_id', 'lead__name', 'lead_uuid')
+    readonly_fields = ('lead_uuid', 'sender_id', 'created_at', 'updated_at', 'pretty_context', 'pretty_missing')
     inlines = [MessageInline]
     date_hierarchy = 'created_at'
     ordering = ('-updated_at',)
 
     fieldsets = (
-        ('Général', {
-            'fields': ('lead', 'shop_id', 'state')
+        ('Identification', {
+            'fields': ('sender_id', 'lead', 'lead_uuid', 'shop_id', 'state')
         }),
         ('Contexte & État', {
             'fields': ('pretty_context', 'pretty_missing')
@@ -194,10 +195,11 @@ class MessageAdmin(admin.ModelAdmin):
         if obj.intent_confidence_score is None:
             return "-"
         score = obj.intent_confidence_score
+        pct   = f"{score:.0%}"
         color = "#27ae60" if score >= 0.8 else ("#e67e22" if score >= 0.5 else "#e74c3c")
         return format_html(
-            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{:.0%}</span>',
-            color, score
+            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>',
+            color, pct
         )
     confidence_badge.short_description = "Confiance Intention"
     confidence_badge.allow_tags = True
