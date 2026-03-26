@@ -257,6 +257,7 @@ class MessagePipeline:
         result.update({
             "text": bot_response_text,
             "intent": extracted_intent,
+            "confidence_score": intent_confidence,
             "state": new_state,
             "entities": extracted_entities,
             "context": current_context,

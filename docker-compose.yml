@@ -1,23 +1,11 @@
 version: '3.8'
 
 networks:
-  public-net:
   internal-net:
   db-net:
 
-services:
-  api-gateway:
-    image: nginx:alpine
-    container_name: api-gateway
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - backend-orchestrator
-    networks:
-      - public-net
 
+services:
   backend-orchestrator:
     build: ./backend-orchestrator
     container_name: backend-orchestrator
@@ -41,7 +29,6 @@ services:
     ports:
       - "8000:8000"
     networks:
-      - public-net
       - internal-net
       - db-net
     deploy:
@@ -79,7 +66,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
 
   sync-worker:
     build: ./sync-worker
@@ -88,9 +75,9 @@ services:
       - .env
     environment:
       TIKTAK_API_BASE_URL: ${TIKTAK_API_BASE_URL}
-      TIKTAK_API_TOKEN:    ${TIKTAK_API_TOKEN}
-      COMPANY_SLUG:        ${COMPANY_SLUG}
-      VISION_SERVICE_URL:  http://vision-service:8002/vectorize
+      TIKTAK_API_TOKEN: ${TIKTAK_API_TOKEN}
+      COMPANY_SLUG: ${COMPANY_SLUG}
+      VISION_SERVICE_URL: http://vision-service:8002/vectorize
     depends_on:
       - vision-service
     networks:
@@ -119,7 +106,7 @@ services:
     networks:
       - db-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -140,7 +127,7 @@ services:
     networks:
       - db-net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 3

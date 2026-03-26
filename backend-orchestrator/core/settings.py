@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     # Our apps
     'apps.gateway',
     'apps.crm',
+    'apps.fallback_agent',
 ]
 
 MIDDLEWARE = [
@@ -31,6 +32,7 @@ MIDDLEWARE = [
     'core.middleware.AutoLoginMiddleware',  # Auto-login en /admin/ en mode DEBUG
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'apps.fallback_agent.middleware.AIFallbackMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'

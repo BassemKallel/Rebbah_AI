@@ -180,7 +180,9 @@ class MessengerWebhookPOC(APIView):
             "bot_response": {
                 "text": result["text"],
                 "internal_debug": {
+                    "user_query":         text,
                     "intent_detected":    result.get("intent"),
+                    "confidence_score":   result.get("confidence_score"),
                     "entities_extracted":  result.get("entities", {}),
                     "accumulated_context": result.get("context", {}),
                     "new_state":          result.get("state"),

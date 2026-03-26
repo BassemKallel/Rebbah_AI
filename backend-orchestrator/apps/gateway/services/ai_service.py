@@ -95,4 +95,13 @@ def call_nlu(text: str) -> dict:
         logger.error(f"[NLU] Connection error: {e}")
         result["error"] = True
 
+    # --- Rule-based fallback for basic testing when NLU is down ---
+    if result["intent"] == "UNKNOWN" or result["error"]:
+        low_text = text.lower().strip()
+        greetings = ["bonjour", "salut", "hello", "hi", "aslema", "ahla", "marhaba", "coucou"]
+        if any(g in low_text for g in greetings):
+            result["intent"] = "GREETING"
+            result["confidence_score"] = 0.99
+            result["error"] = False
+
     return result

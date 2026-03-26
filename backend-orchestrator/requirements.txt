@@ -5,3 +5,4 @@ psycopg2-binary
 redis
 requests
 azure-storage-blob
+google-genai

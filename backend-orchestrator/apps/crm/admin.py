@@ -63,9 +63,11 @@ class MessageInline(admin.TabularInline):
             return "-"
         score = obj.intent_confidence_score
         color = "#27ae60" if score >= 0.8 else ("#e67e22" if score >= 0.5 else "#e74c3c")
+        # Format the percentage string separately to avoid format_html issues with {:.0%}
+        score_pct = f"{score:.0%}"
         return format_html(
-            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{:.0%}</span>',
-            color, score
+            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>',
+            color, score_pct
         )
     confidence_badge.short_description = "Confiance"
 
