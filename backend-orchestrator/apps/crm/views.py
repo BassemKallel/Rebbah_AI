@@ -18,6 +18,8 @@ class LeadViewSet(viewsets.ModelViewSet):
     """
     queryset = Lead.objects.all().order_by('-created_at')
     serializer_class = LeadSerializer
+    authentication_classes = [TikTakTokenAuthentication]
+    permission_classes     = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -33,6 +35,8 @@ class ConversationViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Conversation.objects.all().order_by('-updated_at')
     serializer_class = ConversationSerializer
+    authentication_classes = [TikTakTokenAuthentication]
+    permission_classes     = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -65,6 +69,8 @@ class BotConfigurationViewSet(viewsets.GenericViewSet):
     queryset = BotConfiguration.objects.all().order_by('-updated_at')
     serializer_class = BotConfigurationSerializer
     lookup_field = 'shop_id'
+    authentication_classes = [TikTakTokenAuthentication]
+    permission_classes     = [IsAuthenticated]
 
     def retrieve(self, request, *args, **kwargs):
         """
