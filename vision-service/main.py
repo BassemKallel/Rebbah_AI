@@ -31,6 +31,11 @@ app = FastAPI(title="TikTak Vision Service", lifespan=lifespan)
 
 from typing import Optional
 
+# Minimum cosine similarity score to consider a result as a valid match.
+# Cosine similarity ranges from 0 (no match) to 1 (identical).
+# 0.4 filters out unrelated images while remaining permissive enough for similar products.
+SIMILARITY_THRESHOLD = 0.4
+
 class ImageRequest(BaseModel):
     image_url: str
     limit: int = 5
@@ -180,20 +185,24 @@ async def search_similar_products(request: ImageRequest):
 
         results = []
         for row in cur.fetchall():
-            results.append({
-                "product_id":    row[0],
-                "variation_id":  row[1],
-                "shop_id":       row[2],
-                "image_url":     row[3],
-                "similarity_score": float(row[4])
-            })
+            score = float(row[4])
+            if score >= SIMILARITY_THRESHOLD:  # Only return sufficiently similar results
+                results.append({
+                    "product_id":       row[0],
+                    "variation_id":     row[1],
+                    "shop_id":          row[2],
+                    "image_url":        row[3],
+                    "similarity_score": score
+                })
             
         cur.close()
         conn.close()
 
         return {
             "status": "success",
-            "results": results
+            "results": results,
+            "threshold": SIMILARITY_THRESHOLD,
+            "total_matches": len(results)
         }
         
     except psycopg2.Error as e:
@@ -257,18 +266,25 @@ async def search_similar_upload(
 
         results = []
         for row in cur.fetchall():
-            results.append({
-                "product_id":       row[0],
-                "variation_id":     row[1],
-                "shop_id":          row[2],
-                "image_url":        row[3],
-                "similarity_score": float(row[4])
-            })
+            score = float(row[4])
+            if score >= SIMILARITY_THRESHOLD:  # Only return sufficiently similar results
+                results.append({
+                    "product_id":       row[0],
+                    "variation_id":     row[1],
+                    "shop_id":          row[2],
+                    "image_url":        row[3],
+                    "similarity_score": score
+                })
 
         cur.close()
         conn.close()
 
-        return {"status": "success", "results": results}
+        return {
+            "status": "success",
+            "results": results,
+            "threshold": SIMILARITY_THRESHOLD,
+            "total_matches": len(results)
+        }
 
     except psycopg2.Error as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
