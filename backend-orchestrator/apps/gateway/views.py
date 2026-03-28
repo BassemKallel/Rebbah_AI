@@ -121,10 +121,10 @@ class MetaWebhookView(APIView):
                 if bot_text and token:
                     messenger_service.send_message(sender_psid, bot_text, token)
 
-                # ── Send matched product image if found ────────────────
-                matched_image = result.get("matched_image_url")
-                if matched_image and token:
-                    messenger_service.send_image(sender_psid, matched_image, token)
+                # Image produit désactivée — l'utilisateur a déjà envoyé l'image
+                # matched_image = result.get("matched_image_url")
+                # if matched_image and token:
+                #     messenger_service.send_image(sender_psid, matched_image, token)
 
                 responses.append(result)
 
@@ -168,10 +168,13 @@ class MessengerWebhookPOC(APIView):
         image_file = request.FILES.get("image")
 
         # ── 2. Delegate to pipeline ───────────────────────────────────────
+        company = Company.objects.filter(shop_id=shop_id, is_active=True).first()
+        api_token = company.tiktak_api_token if company else None
         result = pipeline.run(
             user_id, shop_id, text,
             image_url=image_url,
             image_file=image_file,
+            api_token=api_token,
         )
 
         # ── 3. Build HTTP Response ────────────────────────────────────────

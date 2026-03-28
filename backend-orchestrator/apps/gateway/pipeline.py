@@ -199,13 +199,20 @@ class MessagePipeline:
 
         # ── 8. Contextual Mapping ─────────────────────────────────────────
         previous_state = conversation.state
-        _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT"}
+        _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT", "CONFIRM_DENY", "UNKNOWN"}
+
+        # Redirect CONFIRM_DENY / UNKNOWN → INFORM_INFO during active flow
+        if (extracted_intent in ("CONFIRM_DENY", "UNKNOWN")
+                and previous_state == "WAITING_USER_REPLY"
+                and conversation.missing_entities):
+            logger.info(f"[PIPELINE] {extracted_intent} during active flow → INFORM_INFO")
+            extracted_intent = "INFORM_INFO"
 
         if extracted_intent in _contextual_intents:
             extracted_entities, contextual_match = dialog_manager.run_contextual_mapping(
                 conversation, text, extracted_entities, nlu_raw_entities, current_context
             )
-            if contextual_match and extracted_intent == "NOISE":
+            if contextual_match and extracted_intent in ("NOISE", "CONFIRM_DENY", "UNKNOWN"):
                 extracted_intent = "INFORM_INFO"
 
         # ── 9. Product Lookup ─────────────────────────────────────────────

@@ -90,6 +90,17 @@ def apply_entity_guards(nlu_raw_entities: list, intent: str, conversation) -> di
                 val = ent["text"].strip()
                 if len(val) < 3 or val.upper() in _VALID_SIZES or val in phone_texts:
                     continue
+                # Reject false addresses: strip confirmation words + size tokens
+                _confirm_words = {"ok", "okay", "oui", "non", "behi", "bahi", "yes", "no",
+                                  "bien", "d'accord", "daccord", "mrigel", "ena", "ey", "ah"}
+                cleaned = val.upper()
+                for sz in sorted(_VALID_SIZES, key=len, reverse=True):
+                    cleaned = re.sub(rf'\b{sz}\b', '', cleaned)
+                for cw in _confirm_words:
+                    cleaned = re.sub(rf'\b{cw.upper()}\b', '', cleaned)
+                if len(cleaned.strip()) < 3:
+                    logger.info(f"[ADDRESS GUARD] Rejected '{val}' — confirmation/size only")
+                    continue
             extracted[ent["label"]] = ent["text"]
 
     # Color correction bypass
@@ -171,6 +182,16 @@ def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
                     current_context[missing_field]    = text_clean
                     contextual_match = True
                     break
+                # Regex fallback: extract size from mixed text like "Behi L"
+                sizes_pattern = "|".join(sorted(valid_sizes, key=len, reverse=True))
+                size_match = re.search(rf'\b({sizes_pattern})\b', text_clean)
+                if size_match:
+                    found_size = size_match.group(1)
+                    extracted_entities[missing_field] = found_size
+                    current_context[missing_field]    = found_size
+                    contextual_match = True
+                    logger.info(f"[SIZE REGEX] Extracted '{found_size}' from '{text_clean}'")
+                    break
 
             elif missing_field == "quantity":
                 try:
@@ -199,8 +220,17 @@ def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
 
                 if missing_field == "address":
                     valid_sizes = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE"]
+                    # Strip confirmation words + sizes to reject "Okay L", "behi XL", etc.
+                    _confirm_words = {"ok", "okay", "oui", "non", "behi", "bahi", "yes", "no",
+                                      "bien", "daccord", "mrigel", "ena", "ey", "ah"}
+                    cleaned = val.upper()
+                    for sz in sorted(valid_sizes, key=len, reverse=True):
+                        cleaned = re.sub(rf'\b{sz}\b', '', cleaned)
+                    for cw in _confirm_words:
+                        cleaned = re.sub(rf'\b{cw.upper()}\b', '', cleaned)
                     if (val and len(val) >= 3 and val.upper() not in valid_sizes
-                            and not already_labelled and not gliner_not_addr):
+                            and not already_labelled and not gliner_not_addr
+                            and len(cleaned.strip()) >= 3):
                         extracted_entities[missing_field] = val
                         current_context[missing_field]    = val
                         contextual_match = True
