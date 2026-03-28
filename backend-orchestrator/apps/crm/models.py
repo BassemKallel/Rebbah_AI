@@ -218,3 +218,48 @@ class Company(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.shop_id})"
+
+
+class ResponseTemplate(models.Model):
+    """
+    Stores bot response templates in DB instead of hardcoded Python dicts.
+    Supports per-shop customization and multilingual responses.
+
+    Lookup chain in template_service:
+    1. Cache Redis
+    2. DB: shop-specific (shop_id provided)
+    3. DB: system default (shop_id=NULL, is_default=True)
+    4. Fallback: response_templates.py (if DB down)
+    """
+    LANGUAGE_CHOICES = [('FR', 'Français'), ('AR', 'Arabe'), ('EN', 'Anglais')]
+    TEMPLATE_TYPE_CHOICES = [
+        ('response',        'Réponse intent'),
+        ('missing_entity',  'Entité manquante'),
+        ('out_of_stock',    'Rupture de stock'),
+        ('order_confirmed', 'Commande confirmée'),
+        ('disambiguation',  'Disambiguation'),
+        ('misc',            'Divers'),
+    ]
+
+    shop_id       = models.CharField(max_length=255, blank=True, null=True,
+                                     help_text="NULL = défaut système, sinon shop spécifique")
+    language      = models.CharField(max_length=5, choices=LANGUAGE_CHOICES)
+    template_type = models.CharField(max_length=30, choices=TEMPLATE_TYPE_CHOICES)
+    intent        = models.CharField(max_length=100,
+                                     help_text="ex: GREETING, color, with_ref, noise_default")
+    text          = models.TextField(help_text="Texte avec {variable} placeholders")
+    is_default    = models.BooleanField(default=False,
+                                        help_text="True = template système par défaut")
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('shop_id', 'language', 'template_type', 'intent')]
+        ordering = ['template_type', 'language', 'intent']
+        verbose_name = "Response Template"
+        verbose_name_plural = "Response Templates"
+
+    def __str__(self):
+        shop = self.shop_id or "DEFAULT"
+        return f"[{self.language}] {self.template_type}/{self.intent} ({shop})"

@@ -209,3 +209,40 @@ class MessageAdmin(admin.ModelAdmin):
             return "-"
         return format_html("<pre>{}</pre>", json.dumps(obj.extracted_entities, indent=2, ensure_ascii=False))
     pretty_entities.short_description = "Extraction Data"
+
+
+# ── ResponseTemplate Admin ────────────────────────────────────────────────────
+from .models import ResponseTemplate
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from apps.gateway.services.template_service import invalidate_template_cache
+
+
+@admin.register(ResponseTemplate)
+class ResponseTemplateAdmin(admin.ModelAdmin):
+    list_display  = ('language', 'template_type', 'intent', 'shop_id', 'is_default', 'updated_at')
+    list_filter   = ('language', 'template_type', 'is_default')
+    search_fields = ('shop_id', 'intent', 'text')
+    list_editable = ('is_default',)
+    ordering      = ('template_type', 'language', 'intent')
+
+    fieldsets = (
+        ('Identification', {
+            'fields': ('shop_id', 'language', 'template_type', 'intent', 'is_default')
+        }),
+        ('Contenu', {
+            'fields': ('text',),
+            'description': 'Utilisez {variable} pour les placeholders dynamiques (ex: {product}, {color}, {ref})'
+        }),
+    )
+
+
+@receiver(post_save, sender=ResponseTemplate)
+def invalidate_response_template_cache(sender, instance, **kwargs):
+    """Auto-invalidate Redis cache whenever a template is saved in Admin."""
+    invalidate_template_cache(
+        shop_id=instance.shop_id,
+        language=instance.language,
+        template_type=instance.template_type,
+        intent=instance.intent,
+    )
