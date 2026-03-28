@@ -32,7 +32,8 @@ INTENTS_REQUIRING_ENTITIES = {
     "ORDER_PRODUCT",
     "ASK_AVAILABILITY",
     "ASK_PRICE",
-    "INFORM_INFO"
+    "INFORM_INFO",
+    "CONFIRM_DENY",
 }
 
 # Global model instances
