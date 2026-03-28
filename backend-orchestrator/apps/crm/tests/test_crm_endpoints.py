@@ -9,6 +9,8 @@ Coverage:
   - ResponseTemplateViewSet : list, retrieve, create, update, delete, preview
 """
 
+import uuid
+
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -24,7 +26,7 @@ from apps.crm.models import (
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-TOKEN_VALID   = "test-valid-token-abc123"
+TOKEN_VALID   = str(uuid.uuid4())   # generated at runtime — never stored in git
 TOKEN_INVALID = "wrong-token"
 SHOP_ID       = "TEST_SHOP_01"
 
