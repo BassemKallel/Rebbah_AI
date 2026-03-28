@@ -212,29 +212,121 @@ class MessageAdmin(admin.ModelAdmin):
 
 
 # ── ResponseTemplate Admin ────────────────────────────────────────────────────
+from django import forms
 from .models import ResponseTemplate
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from apps.gateway.services.template_service import invalidate_template_cache
 
 
+# ── Intent choices per template_type (mirrors response_templates.py) ──────────
+INTENT_CHOICES_BY_TYPE = {
+    "response": [
+        ("GREETING",       "GREETING — Salutation"),
+        ("ASK_PRICE",      "ASK_PRICE — Demande de prix"),
+        ("ASK_AVAILABILITY","ASK_AVAILABILITY — Disponibilité"),
+        ("ORDER_PRODUCT",  "ORDER_PRODUCT — Commander"),
+        ("ASK_DELIVERY",   "ASK_DELIVERY — Livraison"),
+        ("ASK_DETAILS",    "ASK_DETAILS — Détails produit"),
+        ("ASK_DISCOUNT",   "ASK_DISCOUNT — Remise"),
+        ("ASK_LOCATION",   "ASK_LOCATION — Localisation"),
+        ("CANCEL_ORDER",   "CANCEL_ORDER — Annuler"),
+        ("CHECK_PACKAGE",  "CHECK_PACKAGE — Suivi colis"),
+        ("COMPLAINT",      "COMPLAINT — Réclamation"),
+        ("CONFIRM_DENY",   "CONFIRM_DENY — Confirmation/Refus"),
+        ("INFORM_INFO",    "INFORM_INFO — Informer"),
+        ("TRACK_ORDER",    "TRACK_ORDER — Suivre commande"),
+        ("UNKNOWN",        "UNKNOWN — Incompris"),
+        ("NOISE",          "NOISE — Message vide/bruit"),
+    ],
+    "missing_entity": [
+        ("product",      "product — Produit"),
+        ("color",        "color — Couleur"),
+        ("size",         "size — Taille"),
+        ("quantity",     "quantity — Quantité"),
+        ("address",      "address — Adresse"),
+        ("phone_number", "phone_number — Téléphone"),
+    ],
+    "out_of_stock": [
+        ("default",   "default — Message principal rupture"),
+        ("available", "available — Disponible en : {avail}"),
+        ("sizes",     "sizes — Tailles disponibles : {avail}"),
+        ("colors",    "colors — Couleurs disponibles : {avail}"),
+    ],
+    "order_confirmed": [
+        ("with_ref", "with_ref — Confirmé avec référence #{ref}"),
+        ("no_ref",   "no_ref — Confirmé sans référence"),
+    ],
+    "disambiguation": [
+        ("default", "default — Plusieurs articles trouvés"),
+    ],
+    "misc": [
+        ("missing_entity_default",   "missing_entity_default — MISSING_ENTITY_DEFAULT"),
+        ("inform_info_default",       "inform_info_default — INFORM_INFO_DEFAULT"),
+        ("inform_product_default",    "inform_product_default — INFORM_PRODUCT_DEFAULT"),
+        ("ask_availability_default",  "ask_availability_default — ASK_AVAILABILITY_DEFAULT"),
+        ("ask_price_default",         "ask_price_default — ASK_PRICE_DEFAULT"),
+        ("noise_default",             "noise_default — NOISE_DEFAULT"),
+        ("stock_check_error",         "stock_check_error — STOCK_CHECK_ERROR"),
+    ],
+}
+
+ALL_INTENT_CHOICES = [("", "--- Choisir un intent ---")] + [
+    choice for choices in INTENT_CHOICES_BY_TYPE.values() for choice in choices
+]
+
+
+
+
+class ResponseTemplateForm(forms.ModelForm):
+    intent = forms.ChoiceField(choices=ALL_INTENT_CHOICES)
+
+    class Meta:
+        model = ResponseTemplate
+        fields = '__all__'
+        widgets = {
+            'text': forms.Textarea(attrs={'rows': 4, 'style': 'width:100%;font-family:monospace'}),
+        }
+
+
 @admin.register(ResponseTemplate)
 class ResponseTemplateAdmin(admin.ModelAdmin):
-    list_display  = ('language', 'template_type', 'intent', 'shop_id', 'is_default', 'updated_at')
-    list_filter   = ('language', 'template_type', 'is_default')
-    search_fields = ('shop_id', 'intent', 'text')
-    list_editable = ('is_default',)
-    ordering      = ('template_type', 'language', 'intent')
+    form                 = ResponseTemplateForm
+    list_display         = ('text_preview', 'intent', 'template_type', 'language', 'shop_id', 'is_default', 'updated_at')
+    list_display_links   = ('text_preview',)
+    list_filter          = ('language', 'template_type', 'is_default')
+    search_fields        = ('shop_id', 'intent', 'text')
+    list_editable        = ('is_default',)
+    ordering             = ('template_type', 'language', 'intent')
+    list_per_page        = 50
 
     fieldsets = (
         ('Identification', {
-            'fields': ('shop_id', 'language', 'template_type', 'intent', 'is_default')
+            'fields': ('shop_id', 'language', 'template_type', 'intent', 'is_default'),
+            'description': (
+                '<b>shop_id</b> = laisser vide pour le template système par défaut. '
+                'Renseigner un shop_id pour surcharger uniquement cette boutique.'
+            ),
         }),
         ('Contenu', {
             'fields': ('text',),
-            'description': 'Utilisez {variable} pour les placeholders dynamiques (ex: {product}, {color}, {ref})'
+            'description': (
+                'Placeholders disponibles : '
+                '<code>{product}</code> <code>{color}</code> <code>{size}</code> '
+                '<code>{price}</code> <code>{sizes}</code> <code>{colors}</code> '
+                '<code>{ref}</code> <code>{count}</code> <code>{list}</code> '
+                '<code>{avail}</code> <code>{first_missing}</code> '
+                '<code>{ai_agent_name}</code> <code>{shop_name}</code>'
+            ),
         }),
     )
+
+    def text_preview(self, obj):
+        preview = (obj.text or '')[:100].replace('\n', ' ')
+        if len(obj.text or '') > 100:
+            preview += '…'
+        return preview
+    text_preview.short_description = 'Texte'
 
 
 @receiver(post_save, sender=ResponseTemplate)
