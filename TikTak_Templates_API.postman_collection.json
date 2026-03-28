@@ -1,0 +1,327 @@
+{
+  "info": {
+    "name": "TikTak AI — Response Templates API",
+    "_postman_id": "tiktak-templates-v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "CRUD + Preview pour la personnalisation des templates de réponse TikTak AI.\n\nAuth: Authorization: Bearer <tiktak_api_token>\n  - La variable {{api_token}} est pré-remplie avec le token de dev (.env).\n  - En production, remplacer par le token de la boutique (Company.tiktak_api_token).\n\nBase URL: http://localhost:8000/api/v1/crm/templates/"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1/crm/templates",
+      "description": "URL de base de l'API templates"
+    },
+    {
+      "key": "api_token",
+      "value": "afc3781e72986a3c927b3c673a55a4d4d521f127",
+      "description": "Token TikTak API (settings.TIKTAK_API_TOKEN ou Company.tiktak_api_token)"
+    },
+    {
+      "key": "shop_id",
+      "value": "1LXybpj",
+      "description": "Identifiant de la boutique de test"
+    },
+    {
+      "key": "template_id",
+      "value": "",
+      "description": "Auto-rempli par la requête Create"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{api_token}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "📋 List / Lecture",
+      "item": [
+        {
+          "name": "List — tous les templates",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/",
+            "description": "Retourne tous les templates (systèmes + overrides boutiques)."
+          }
+        },
+        {
+          "name": "List — langue FR uniquement",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/?language=FR",
+              "query": [{ "key": "language", "value": "FR" }]
+            }
+          }
+        },
+        {
+          "name": "List — boutique spécifique + FR",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/?shop_id={{shop_id}}&language=FR",
+              "query": [
+                { "key": "shop_id",  "value": "{{shop_id}}" },
+                { "key": "language", "value": "FR" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List — filtrer par template_type",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/?template_type=response&language=FR",
+              "query": [
+                { "key": "template_type", "value": "response" },
+                { "key": "language",      "value": "FR" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List — filtrer par intent",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/?intent=GREETING",
+              "query": [{ "key": "intent", "value": "GREETING" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔍 Preview (texte résolu)",
+      "item": [
+        {
+          "name": "Preview — défaut système (sans shop)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/preview/?language=FR&template_type=response&intent=GREETING",
+              "query": [
+                { "key": "language",      "value": "FR" },
+                { "key": "template_type", "value": "response" },
+                { "key": "intent",        "value": "GREETING" }
+              ]
+            },
+            "description": "Résolution via la chaîne : Redis → DB défaut → Python fallback.\nRetourne: {\"text\": \"Bonjour ! 👋 ...\"}"
+          }
+        },
+        {
+          "name": "Preview — avec override boutique",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/preview/?shop_id={{shop_id}}&language=FR&template_type=response&intent=GREETING",
+              "query": [
+                { "key": "shop_id",       "value": "{{shop_id}}" },
+                { "key": "language",      "value": "FR" },
+                { "key": "template_type", "value": "response" },
+                { "key": "intent",        "value": "GREETING" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Preview — missing_entity / size / AR",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/preview/?language=AR&template_type=missing_entity&intent=size",
+              "query": [
+                { "key": "language",      "value": "AR" },
+                { "key": "template_type", "value": "missing_entity" },
+                { "key": "intent",        "value": "size" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Preview — out_of_stock / default / FR",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/preview/?language=FR&template_type=out_of_stock&intent=default",
+              "query": [
+                { "key": "language",      "value": "FR" },
+                { "key": "template_type", "value": "out_of_stock" },
+                { "key": "intent",        "value": "default" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "✏️ CRUD — Overrides boutique",
+      "item": [
+        {
+          "name": "Create — override GREETING FR",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('template_id', pm.response.json().id);",
+                  "  console.log('Créé — id:', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shop_id\": \"{{shop_id}}\",\n  \"language\": \"FR\",\n  \"template_type\": \"response\",\n  \"intent\": \"GREETING\",\n  \"text\": \"Bonjour et bienvenue dans notre boutique ! 🛍️ Comment puis-je vous aider ?\"\n}"
+            },
+            "description": "Crée un override. L'ID est auto-sauvegardé dans {{template_id}} via le test script."
+          }
+        },
+        {
+          "name": "Create — override ORDER_PRODUCT FR",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shop_id\": \"{{shop_id}}\",\n  \"language\": \"FR\",\n  \"template_type\": \"response\",\n  \"intent\": \"ORDER_PRODUCT\",\n  \"text\": \"Super choix ! Pour valider votre commande de {product}, j'ai besoin de vos coordonnées.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create — override out_of_stock",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shop_id\": \"{{shop_id}}\",\n  \"language\": \"FR\",\n  \"template_type\": \"out_of_stock\",\n  \"intent\": \"default\",\n  \"text\": \"Malheureusement le {product} en {color} taille {size} est épuisé pour l'instant. 😞\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get — template par ID",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/{{template_id}}/"
+          }
+        },
+        {
+          "name": "Patch — modifier le texte",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base_url}}/{{template_id}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Bonjour ! 👋 Ravie de vous accueillir. Que puis-je faire pour vous ?\"\n}"
+            },
+            "description": "Modification partielle. Le cache Redis est automatiquement invalidé (signal post_save)."
+          }
+        },
+        {
+          "name": "Delete — override boutique ✅ (204)",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/{{template_id}}/",
+            "description": "Supprime l'override boutique. Réponse attendue : 204 No Content."
+          }
+        },
+        {
+          "name": "Delete — template système ❌ (403)",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/1/",
+            "description": "Tente de supprimer un template système. Doit retourner 403 Forbidden."
+          }
+        }
+      ]
+    },
+    {
+      "name": "⚠️ Erreurs & Validations",
+      "item": [
+        {
+          "name": "Auth — sans token → 401",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{base_url}}/",
+            "description": "Requête sans header Authorization. Doit retourner 401 Unauthorized avec WWW-Authenticate: Bearer."
+          }
+        },
+        {
+          "name": "Auth — token incorrect → 401",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "TOKEN_INVALIDE", "type": "string" }]
+            },
+            "method": "GET",
+            "url": "{{base_url}}/",
+            "description": "Token aléatoire non reconnu. Doit retourner 401."
+          }
+        },
+        {
+          "name": "Create — sans shop_id → 400",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"FR\",\n  \"template_type\": \"response\",\n  \"intent\": \"GREETING\",\n  \"text\": \"Test sans shop_id\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create — doublon → 400",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shop_id\": \"{{shop_id}}\",\n  \"language\": \"FR\",\n  \"template_type\": \"response\",\n  \"intent\": \"GREETING\",\n  \"text\": \"Doublon — doit être rejeté\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Patch — template système → 403",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base_url}}/1/",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Tentative de modification système\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Preview — intent inconnu → 404",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/preview/?language=FR&template_type=response&intent=INTENT_INCONNU",
+              "query": [
+                { "key": "language",      "value": "FR" },
+                { "key": "template_type", "value": "response" },
+                { "key": "intent",        "value": "INTENT_INCONNU" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
