@@ -273,6 +273,7 @@ class MessagePipeline:
             vision_variation_id=vision_variation_id,
             bot_config=bot_config,
             text=text,
+            shop_id=shop_id,  # ← required for shop-specific template overrides
         )
         current_context.pop("shop_id", None)
 
