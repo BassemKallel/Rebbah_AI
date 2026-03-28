@@ -1,12 +1,12 @@
 """
 test_crm_endpoints.py — Unit tests for all CRM API endpoints.
 
-Coverage:
-  - TikTakTokenAuthentication (valid, invalid, missing)
-  - LeadViewSet       : list, retrieve, filter by shop_id
-  - ConversationViewSet: list, retrieve, messages action, filter by shop_id
-  - BotConfigurationViewSet: retrieve (auto-create), upsert (PUT/PATCH)
-  - ResponseTemplateViewSet : list, retrieve, create, update, delete, preview
+Coverage (53 tests):
+  - TikTakTokenAuthentication (4): valid/invalid/missing/malformed Bearer token
+  - LeadViewSet              (9): auth gate, list, filter, retrieve, create, delete
+  - ConversationViewSet      (7): auth gate, list, filter, retrieve, messages, write-block
+  - BotConfigurationViewSet  (8): auth gate, retrieve auto-create, upsert PUT/PATCH
+  - ResponseTemplateViewSet (25): auth gate, list, filter, CRUD, system-default protection, preview
 """
 
 import uuid
@@ -46,6 +46,11 @@ def auth_client(token=TOKEN_VALID):
     return c
 
 
+def anon_client():
+    """Return a plain APIClient with no credentials."""
+    return APIClient()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. TikTakTokenAuthentication
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,7 +71,7 @@ class AuthenticationTests(TestCase):
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_missing_authorization_header_returns_401(self):
-        client = APIClient()
+        client = anon_client()
         r = client.get("/api/v1/crm/templates/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
@@ -84,41 +89,74 @@ class AuthenticationTests(TestCase):
 
 class LeadViewSetTests(TestCase):
 
+    URL = "/api/v1/crm/leads/"
+
     def setUp(self):
+        make_company()
+        self.client_auth = auth_client(TOKEN_VALID)
         self.lead = Lead.objects.create(
             platform_id="messenger:lead001",
             shop_id=SHOP_ID,
         )
 
-    def _url_list(self):
-        return "/api/v1/crm/leads/"
-
     def _url_detail(self, pk):
-        return f"/api/v1/crm/leads/{pk}/"
+        return f"{self.URL}{pk}/"
+
+    # ── Auth gate ─────────────────────────────────────────────────────────
+
+    def test_list_requires_auth(self):
+        r = anon_client().get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── List ──────────────────────────────────────────────────────────────
 
     def test_list_returns_200(self):
-        r = APIClient().get(self._url_list())
+        r = self.client_auth.get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
     def test_list_contains_lead(self):
-        r = APIClient().get(self._url_list())
+        r = self.client_auth.get(self.URL)
         ids = [item["id"] for item in list(r.data)]
         self.assertIn(self.lead.id, ids)
 
     def test_filter_by_shop_id(self):
         Lead.objects.create(platform_id="messenger:lead002", shop_id="OTHER_SHOP")
-        r = APIClient().get(self._url_list(), {"shop_id": SHOP_ID})
+        r = self.client_auth.get(self.URL, {"shop_id": SHOP_ID})
         results = list(r.data)
         self.assertTrue(all(item["shop_id"] == SHOP_ID for item in results))
 
+    # ── Retrieve ──────────────────────────────────────────────────────────
+
     def test_retrieve_single_lead(self):
-        r = APIClient().get(self._url_detail(self.lead.id))
+        r = self.client_auth.get(self._url_detail(self.lead.id))
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.data["id"], self.lead.id)
 
     def test_retrieve_nonexistent_returns_404(self):
-        r = APIClient().get(self._url_detail(99999))
+        r = self.client_auth.get(self._url_detail(99999))
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+    # ── Create ────────────────────────────────────────────────────────────
+
+    def test_create_requires_auth(self):
+        r = anon_client().post(self.URL, {
+            "platform_id": "messenger:lead_unauth",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_create_with_auth_succeeds(self):
+        r = self.client_auth.post(self.URL, {
+            "platform_id": "messenger:lead_new",
+            "shop_id": SHOP_ID,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(Lead.objects.filter(platform_id="messenger:lead_new").exists())
+
+    # ── Delete ────────────────────────────────────────────────────────────
+
+    def test_delete_requires_auth(self):
+        r = anon_client().delete(self._url_detail(self.lead.id))
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,7 +165,11 @@ class LeadViewSetTests(TestCase):
 
 class ConversationViewSetTests(TestCase):
 
+    URL = "/api/v1/crm/conversations/"
+
     def setUp(self):
+        make_company()
+        self.client_auth = auth_client(TOKEN_VALID)
         self.lead = Lead.objects.create(platform_id="messenger:conv001")
         self.conv = Conversation.objects.create(
             lead=self.lead,
@@ -142,8 +184,16 @@ class ConversationViewSetTests(TestCase):
             text="Bonjour",
         )
 
+    # ── Auth gate ─────────────────────────────────────────────────────────
+
+    def test_list_requires_auth(self):
+        r = anon_client().get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── List ──────────────────────────────────────────────────────────────
+
     def test_list_conversations_200(self):
-        r = APIClient().get("/api/v1/crm/conversations/")
+        r = self.client_auth.get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
     def test_filter_by_shop_id(self):
@@ -153,23 +203,33 @@ class ConversationViewSetTests(TestCase):
             sender_id="messenger:conv002",
             shop_id="OTHER_SHOP", state="NEW_CONVERSATION",
         )
-        r = APIClient().get("/api/v1/crm/conversations/", {"shop_id": SHOP_ID})
+        r = self.client_auth.get(self.URL, {"shop_id": SHOP_ID})
         results = list(r.data)
         self.assertTrue(all(item["shop_id"] == SHOP_ID for item in results))
 
+    # ── Retrieve ──────────────────────────────────────────────────────────
+
     def test_retrieve_conversation(self):
-        r = APIClient().get(f"/api/v1/crm/conversations/{self.conv.id}/")
+        r = self.client_auth.get(f"{self.URL}{self.conv.id}/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
+    # ── Messages action ──────────────────────────────────────────────────
+
     def test_messages_action(self):
-        r = APIClient().get(f"/api/v1/crm/conversations/{self.conv.id}/messages/")
+        r = self.client_auth.get(f"{self.URL}{self.conv.id}/messages/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         messages = list(r.data)
         self.assertTrue(any(m["text"] == "Bonjour" for m in messages))
 
+    def test_messages_requires_auth(self):
+        r = anon_client().get(f"{self.URL}{self.conv.id}/messages/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── Write protection ─────────────────────────────────────────────────
+
     def test_write_not_allowed(self):
         """ConversationViewSet is read-only — POST should 405."""
-        r = APIClient().post("/api/v1/crm/conversations/", {"sender_id": "x"})
+        r = self.client_auth.post(self.URL, {"sender_id": "x"})
         self.assertEqual(r.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
@@ -179,20 +239,52 @@ class ConversationViewSetTests(TestCase):
 
 class BotConfigurationViewSetTests(TestCase):
 
+    URL_UPSERT = "/api/v1/crm/bot-configurations/"
+
+    def setUp(self):
+        make_company()
+        self.client_auth = auth_client(TOKEN_VALID)
+
+    def _url_detail(self, shop_id):
+        return f"{self.URL_UPSERT}{shop_id}/"
+
+    # ── Auth gate ─────────────────────────────────────────────────────────
+
+    def test_retrieve_requires_auth(self):
+        r = anon_client().get(self._url_detail(SHOP_ID))
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_upsert_put_requires_auth(self):
+        r = anon_client().put(self.URL_UPSERT, {
+            "shop_id": SHOP_ID, "shop_name": "Unauth", "language": "FR",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_upsert_patch_requires_auth(self):
+        BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Exists")
+        r = anon_client().patch(self.URL_UPSERT, {
+            "shop_id": SHOP_ID, "shop_name": "Hacked",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── Retrieve ──────────────────────────────────────────────────────────
+
     def test_retrieve_creates_config_if_missing(self):
         """GET /bot-configurations/<shop_id>/ auto-creates the config."""
-        r = APIClient().get(f"/api/v1/crm/bot-configurations/{SHOP_ID}/")
+        r = self.client_auth.get(self._url_detail(SHOP_ID))
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.data["shop_id"], SHOP_ID)
         self.assertTrue(BotConfiguration.objects.filter(shop_id=SHOP_ID).exists())
 
     def test_retrieve_returns_existing_config(self):
         BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Ma Boutique")
-        r = APIClient().get(f"/api/v1/crm/bot-configurations/{SHOP_ID}/")
+        r = self.client_auth.get(self._url_detail(SHOP_ID))
         self.assertEqual(r.data["shop_name"], "Ma Boutique")
 
+    # ── Upsert ────────────────────────────────────────────────────────────
+
     def test_upsert_put_creates_config(self):
-        r = APIClient().put("/api/v1/crm/bot-configurations/", {
+        r = self.client_auth.put(self.URL_UPSERT, {
             "shop_id":   SHOP_ID,
             "shop_name": "Boutique PUT",
             "language":  "FR",
@@ -202,7 +294,7 @@ class BotConfigurationViewSetTests(TestCase):
 
     def test_upsert_patch_updates_field(self):
         BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Old Name")
-        r = APIClient().patch("/api/v1/crm/bot-configurations/", {
+        r = self.client_auth.patch(self.URL_UPSERT, {
             "shop_id":   SHOP_ID,
             "shop_name": "New Name",
         }, format="json")
@@ -210,7 +302,7 @@ class BotConfigurationViewSetTests(TestCase):
         self.assertEqual(BotConfiguration.objects.get(shop_id=SHOP_ID).shop_name, "New Name")
 
     def test_upsert_missing_shop_id_returns_400(self):
-        r = APIClient().put("/api/v1/crm/bot-configurations/", {
+        r = self.client_auth.put(self.URL_UPSERT, {
             "shop_name": "No shop",
         }, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
@@ -230,8 +322,6 @@ class ResponseTemplateViewSetTests(TestCase):
 
         # System default template — use update_or_create because the seed migration
         # (0014) already inserts (shop_id=None, FR, response, GREETING).
-        # PostgreSQL allows multiple NULLs in unique_together, so we update the
-        # existing seeded row with our known test text.
         self.default_tmpl, _ = ResponseTemplate.objects.update_or_create(
             shop_id=None,
             language="FR",
@@ -248,11 +338,32 @@ class ResponseTemplateViewSetTests(TestCase):
             defaults={"text": "Bonjour boutique !", "is_default": False},
         )
 
-    # ── List ──────────────────────────────────────────────────────────────
+    # ── Auth gate ─────────────────────────────────────────────────────────
 
     def test_list_requires_auth(self):
-        r = APIClient().get(self.URL)
+        r = anon_client().get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_create_requires_auth(self):
+        r = anon_client().post(self.URL, {
+            "shop_id": SHOP_ID, "language": "FR",
+            "template_type": "response", "intent": "ASK_DELIVERY",
+            "text": "Unauthorized",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_delete_requires_auth(self):
+        r = anon_client().delete(f"{self.URL}{self.shop_tmpl.id}/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_preview_requires_auth(self):
+        r = anon_client().get(f"{self.URL}preview/", {
+            "shop_id": SHOP_ID, "language": "FR",
+            "template_type": "response", "intent": "GREETING",
+        })
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── List ──────────────────────────────────────────────────────────────
 
     def test_list_authenticated_returns_200(self):
         r = self.client_auth.get(self.URL)
@@ -309,14 +420,6 @@ class ResponseTemplateViewSetTests(TestCase):
             "text":          "Duplicate text",
         }, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_create_requires_auth(self):
-        r = APIClient().post(self.URL, {
-            "shop_id": SHOP_ID, "language": "FR",
-            "template_type": "response", "intent": "ASK_DELIVERY",
-            "text": "Unauthorized",
-        }, format="json")
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
     # ── Update ────────────────────────────────────────────────────────────
 
@@ -376,7 +479,7 @@ class ResponseTemplateViewSetTests(TestCase):
         self.assertEqual(r.data["text"], "Bonjour boutique !")
 
     def test_preview_falls_back_to_system_default(self):
-        """No override for OTHER_SHOP → should fall back to system default text (not shop override)."""
+        """No override for OTHER_SHOP → should fall back to system default text."""
         r = self.client_auth.get(f"{self.URL}preview/", {
             "shop_id":       "OTHER_SHOP",
             "language":      "FR",
@@ -384,9 +487,7 @@ class ResponseTemplateViewSetTests(TestCase):
             "intent":        "GREETING",
         })
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        # Must NOT return the SHOP_ID-specific override
         self.assertNotEqual(r.data["text"], "Bonjour boutique !")
-        # Must return some non-empty default text
         self.assertTrue(len(r.data["text"]) > 0)
 
     def test_preview_missing_params_returns_400(self):
@@ -409,10 +510,3 @@ class ResponseTemplateViewSetTests(TestCase):
             status.HTTP_200_OK,
             status.HTTP_404_NOT_FOUND,
         ])
-
-    def test_preview_requires_auth(self):
-        r = APIClient().get(f"{self.URL}preview/", {
-            "shop_id": SHOP_ID, "language": "FR",
-            "template_type": "response", "intent": "GREETING",
-        })
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
