@@ -1,10 +1,11 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ConversationViewSet, LeadViewSet, BotConfigurationViewSet
+from .views import ConversationViewSet, LeadViewSet, BotConfigurationViewSet, ResponseTemplateViewSet
 
 router = DefaultRouter()
 router.register(r'conversations', ConversationViewSet, basename='conversation')
 router.register(r'leads', LeadViewSet, basename='lead')
+router.register(r'templates', ResponseTemplateViewSet, basename='template')
 
 urlpatterns = [
     path('bot-configurations/', BotConfigurationViewSet.as_view({
