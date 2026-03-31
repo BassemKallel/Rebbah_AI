@@ -1,10 +1,11 @@
 from django.db import models
 from django.utils import timezone
 import uuid as uuid_lib
+import time
 
 class Lead(models.Model):
     """
-    Represents a potential customer identified via WhatsApp/Messenger.
+    Represents a potential customer identified via Messenger.
     Stores both lead info AND pending pre-order data waiting for agent confirmation.
     """
     uuid        = models.UUIDField(default=uuid_lib.uuid4, unique=True, editable=False, help_text="Stable public identifier for this lead")
@@ -115,6 +116,7 @@ class Message(models.Model):
     )
     extracted_entities = models.JSONField(default=dict, blank=True)
     is_error = models.BooleanField(default=False, help_text="True if NLU failed or fallback was triggered")
+    is_fallback = models.BooleanField(default=False, help_text="True si Gemini fallback a ete utilise")
 
     # Conversation state tracking
     conversation_state_before = models.CharField(
@@ -248,6 +250,10 @@ class ResponseTemplate(models.Model):
     intent        = models.CharField(max_length=100,
                                      help_text="ex: GREETING, color, with_ref, noise_default")
     text          = models.TextField(help_text="Texte avec {variable} placeholders")
+    available_variables = models.JSONField(
+        default=list, blank=True,
+        help_text='Variables utilisables dans ce template, ex: ["product", "price"]'
+    )
     is_default    = models.BooleanField(default=False,
                                         help_text="True = template système par défaut")
 
@@ -263,3 +269,58 @@ class ResponseTemplate(models.Model):
     def __str__(self):
         shop = self.shop_id or "DEFAULT"
         return f"[{self.language}] {self.template_type}/{self.intent} ({shop})"
+
+
+class NLUFallbackLog(models.Model):
+    """
+    Logs every Gemini fallback for active learning.
+    Used to retrain TunBERT with Gemini-corrected labels.
+    """
+    TRIGGER_CHOICES = [
+        ('LOW_CONFIDENCE', 'TunBERT confiance basse'),
+        ('SERVICE_DOWN',   'NLU service indisponible'),
+        ('ALWAYS_VERIFY',  'Intent destructif verifie'),
+    ]
+
+    message = models.OneToOneField(
+        'Message', on_delete=models.CASCADE, related_name='fallback_log',
+        help_text="Message utilisateur qui a declenche le fallback"
+    )
+
+    # Texte original
+    original_text = models.TextField(help_text="Message brut de l'utilisateur")
+
+    # TunBERT (avant correction)
+    tunbert_intent     = models.CharField(max_length=50, blank=True, null=True)
+    tunbert_confidence = models.FloatField(blank=True, null=True)
+    tunbert_entities   = models.JSONField(default=list, blank=True,
+                                          help_text="raw_entities retournees par GLiNER")
+
+    # Gemini (correction)
+    gemini_intent     = models.CharField(max_length=50)
+    gemini_confidence = models.FloatField(blank=True, null=True)
+    gemini_entities   = models.JSONField(default=list, blank=True,
+                                          help_text="Entites extraites par Gemini")
+
+    # Metadata
+    trigger_reason = models.CharField(max_length=20, choices=TRIGGER_CHOICES)
+    intent_changed = models.BooleanField(
+        default=False,
+        help_text="True si Gemini a corrige l'intent de TunBERT"
+    )
+
+    # Pour le reentrainement
+    reviewed       = models.BooleanField(default=False, help_text="Reviewed par un humain")
+    review_label   = models.CharField(max_length=50, blank=True, null=True,
+                                       help_text="Label final valide par l'humain")
+
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'NLU Fallback Log'
+        verbose_name_plural = 'NLU Fallback Logs'
+
+    def __str__(self):
+        arrow = "->" if self.intent_changed else "="
+        return f"[{self.trigger_reason}] {self.tunbert_intent} {arrow} {self.gemini_intent} | '{self.original_text[:40]}'"
