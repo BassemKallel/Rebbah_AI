@@ -4,7 +4,7 @@ TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client b
 
 ## 🏗️ Architecture du Projet
 
-```
+```text
 Meta Messenger (Webhook)
        │
        ▼
@@ -23,7 +23,7 @@ Cloudflare Tunnel  ──►  backend-orchestrator :8000   (Django — Orchestra
 ### Services
 
 | Service | Port | Description |
-|---|---|---|
+| --- | --- | --- |
 | `backend-orchestrator` | 8000 | Cœur du système — NLU, dialog manager, TikTak API. |
 | `nlu-service` | 8001 | TunBERT (intention) + GLiNER (entités). Limite : 2 Go RAM. |
 | `vision-service` | 8002 | CLIP (similarité image). Limite : 4 Go RAM, GPU optionnel. |
@@ -72,6 +72,7 @@ docker compose up --build -d
 ```
 
 Au premier démarrage, la commande `setup_initial_data` s'exécute automatiquement et crée :
+
 - Le **superutilisateur** Django (depuis `DJANGO_SUPERUSER_*`)
 - La **Company / Shop** initiale (depuis `SHOP_ID`, `TIKTAK_API_TOKEN`)
 
@@ -139,7 +140,7 @@ docker compose run --rm sync-worker
 ### 6. Vérification des services
 
 | Service | URL |
-|---|---|
+| --- | --- |
 | Django Admin | `http://localhost:8000/admin/` |
 | Backend (test POC) | `http://localhost:8000/api/v1/gateway/messenger/poc` |
 | nlu-service | `http://localhost:8001` (interne) |
@@ -150,7 +151,7 @@ docker compose run --rm sync-worker
 Copier `.env.example` en `.env` et renseigner les valeurs :
 
 | Variable | Description | Requis |
-|---|---|:---:|
+| --- | --- | :---: |
 | `POSTGRES_USER` | Utilisateur PostgreSQL | ✅ |
 | `POSTGRES_PASSWORD` | Mot de passe PostgreSQL | ✅ |
 | `POSTGRES_DB` | Nom de la base de données | ✅ |
@@ -184,7 +185,7 @@ docker compose exec backend-orchestrator python manage.py migrate
 ### Machine à États
 
 | État | Description |
-|---|---|
+| --- | --- |
 | `NEW_CONVERSATION` | Début de conversation |
 | `WAITING_USER_REPLY` | En attente d'une info (taille, couleur, adresse, téléphone) |
 | `WAITING_DISAMBIGUATION` | Plusieurs produits trouvés → demande de choix |
@@ -193,7 +194,7 @@ docker compose exec backend-orchestrator python manage.py migrate
 
 ### Pipeline de traitement
 
-```
+```text
 Message reçu → NLU (intent + confiance) → [Gemini Fallback si confiance < seuil]
     → Entity Guards → Accumulate Context
     → State Machine (Dialog Manager) → TikTak API (stock, prix, commande)
