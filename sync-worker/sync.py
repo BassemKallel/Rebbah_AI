@@ -1,26 +1,73 @@
+"""
+Multi-shop product sync worker.
+Reads all active companies from the crm_company table,
+then syncs each shop's catalog via the TikTak API → Vision Service pipeline.
+"""
 import os
 import time
 import requests
 import logging
+import psycopg2
 
-# Configuration
-TIKTAK_API_BASE_URL = os.getenv("TIKTAK_API_BASE_URL",  "https://api.tiktakpro.com")
-TIKTAK_API_TOKEN    = os.getenv("TIKTAK_API_TOKEN",      "")
-COMPANY_SLUG        = os.getenv("COMPANY_SLUG",          "1LXybpj")
-VISION_SERVICE_URL  = os.getenv("VISION_SERVICE_URL",    "http://vision-service:8002/vectorize")
+# ── Configuration ────────────────────────────────────────────────────────────
+
+TIKTAK_API_BASE_URL = os.getenv("TIKTAK_API_BASE_URL", "https://api.tiktakpro.com")
+VISION_SERVICE_URL  = os.getenv("VISION_SERVICE_URL",  "http://vision-service:8002/vectorize")
+
+# Django DB — same env vars as backend-orchestrator
+DB_HOST     = os.getenv("POSTGRES_HOST", "db")
+DB_PORT     = os.getenv("POSTGRES_PORT", "5432")
+DB_NAME     = os.getenv("POSTGRES_DB",   "tiktak_db")
+DB_USER     = os.getenv("POSTGRES_USER", "tiktak_user")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def fetch_products():
-    """Fetch tous les produits avec pagination."""
-    url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
-    headers = {"Authorization": f"Bearer {TIKTAK_API_TOKEN}"}
-    all_results = []
-    params = {"company": COMPANY_SLUG}
-    page_count = 0
 
-    logger.info(f"Fetching products pour company={COMPANY_SLUG}")
+# ── Database ─────────────────────────────────────────────────────────────────
+
+def get_active_companies():
+    """
+    Read all active companies from crm_company table.
+    Returns list of dicts: [{shop_id, name, tiktak_api_token}, ...]
+    """
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
+            user=DB_USER, password=DB_PASSWORD,
+        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT shop_id, name, tiktak_api_token
+            FROM crm_company
+            WHERE is_active = TRUE
+              AND shop_id IS NOT NULL
+              AND tiktak_api_token IS NOT NULL
+              AND tiktak_api_token != ''
+        """)
+        companies = [
+            {"shop_id": row[0], "name": row[1], "token": row[2]}
+            for row in cursor.fetchall()
+        ]
+        cursor.close()
+        conn.close()
+        logger.info(f"Found {len(companies)} active companies in DB")
+        return companies
+    except Exception as e:
+        logger.error(f"Failed to read companies from DB: {e}")
+        return []
+
+
+# ── TikTak API ───────────────────────────────────────────────────────────────
+
+def fetch_products(shop_id, token):
+    """Fetch all products for a shop with pagination."""
+    url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
+    headers = {"Authorization": f"Bearer {token}"}
+    all_results = []
+    params = {"company": shop_id}
+    page_count = 0
 
     while url and page_count < 10:
         try:
@@ -33,53 +80,46 @@ def fetch_products():
             all_results.extend(data.get("results", []))
             url = data.get("next")
             page_count += 1
-            logger.info(f"Page {page_count}: {len(data.get('results', []))} produits")
         except requests.exceptions.RequestException as e:
-            logger.error(f"Erreur page {page_count}: {e}")
+            logger.error(f"  Erreur page {page_count}: {e}")
             break
 
-    logger.info(f"Total brut: {len(all_results)} entrées")
     return all_results
 
+
 def vectorize_image(image_url, product_id, shop_id, variation_id):
-    """Envoie l'image au vision-service pour vectorisation."""
+    """Send image to vision-service for vectorization."""
     payload = {
         "image_url":       image_url,
         "product_id":      str(product_id),
         "variation_id":    str(variation_id),
         "shop_id":         str(shop_id),
-        "store_image_url": image_url
+        "store_image_url": image_url,
     }
-    
     try:
-        logger.info(f"Vectorizing {variation_id} pour produit {product_id}")
         response = requests.post(VISION_SERVICE_URL, json=payload, timeout=30)
         response.raise_for_status()
-        logger.info(f"Success: {response.json().get('status')}")
         return True
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed: {e}")
+        logger.error(f"  Vectorize failed: {e}")
         return False
 
-def sync_catalog():
-    """
-    Sync avec déduplication d'images.
-    
-    Logique: une même image (sweatshirt_bleu.webp) peut être partagée
-    par plusieurs tailles (S/M/L/XL). CLIP ne voit pas la taille
-    → vectoriser 1 fois par (product_id, image_url) unique.
-    """
-    logger.info(f"Démarrage sync company={COMPANY_SLUG}")
 
-    raw_results = fetch_products()
+# ── Sync Logic ───────────────────────────────────────────────────────────────
+
+def sync_shop(shop_id, token, shop_name):
+    """Sync a single shop's catalog."""
+    logger.info(f"── Syncing [{shop_name}] (shop_id={shop_id}) ──")
+
+    raw_results = fetch_products(shop_id, token)
     if not raw_results:
-        logger.warning("Aucun produit récupéré")
-        return
+        logger.warning(f"  No products for {shop_name}")
+        return 0, 0, 0
 
     success_count = 0
     failure_count = 0
     skipped_count = 0
-    seen_images   = set()  # déduplication
+    seen_images   = set()
 
     for product in raw_results:
         if product.get("parent") is not None:
@@ -87,7 +127,7 @@ def sync_catalog():
 
         product_id = product.get("id")
 
-        # Produits avec déclinaisons
+        # Products with variations
         for decl in product.get("declinaisons", []):
             image_url    = decl.get("photo")
             variation_id = decl.get("id")
@@ -98,38 +138,62 @@ def sync_catalog():
 
             dedup_key = (str(product_id), image_url)
             if dedup_key in seen_images:
-                logger.debug(f"Image déjà vectorisée: {image_url}")
                 skipped_count += 1
                 continue
 
             seen_images.add(dedup_key)
-            success = vectorize_image(image_url, product_id, COMPANY_SLUG, variation_id)
-            if success:
+            if vectorize_image(image_url, product_id, shop_id, variation_id):
                 success_count += 1
             else:
                 failure_count += 1
             time.sleep(0.5)
 
-        # Produit simple (sans déclinaisons)
+        # Simple product (no variations)
         if not product.get("declinaisons") and product.get("photo"):
             image_url = product["photo"]
             dedup_key = (str(product_id), image_url)
             if dedup_key not in seen_images:
                 seen_images.add(dedup_key)
-                success = vectorize_image(image_url, product_id, COMPANY_SLUG, product_id)
-                if success:
+                if vectorize_image(image_url, product_id, shop_id, product_id):
                     success_count += 1
                 else:
                     failure_count += 1
                 time.sleep(0.5)
 
     logger.info(
-        f"Sync terminé. "
-        f"Vectorisés: {success_count} | "
-        f"Échoués: {failure_count} | "
-        f"Skippés: {skipped_count}"
+        f"  [{shop_name}] Done: "
+        f"vectorized={success_count} | failed={failure_count} | skipped={skipped_count}"
+    )
+    return success_count, failure_count, skipped_count
+
+
+def sync_all():
+    """Main entry: sync all active companies from DB."""
+    companies = get_active_companies()
+
+    if not companies:
+        logger.warning("No active companies found — nothing to sync.")
+        return
+
+    total_ok = total_fail = total_skip = 0
+
+    for company in companies:
+        ok, fail, skip = sync_shop(
+            shop_id=company["shop_id"],
+            token=company["token"],
+            shop_name=company["name"],
+        )
+        total_ok   += ok
+        total_fail += fail
+        total_skip += skip
+
+    logger.info(
+        f"═══ ALL SHOPS SYNC COMPLETE ═══ "
+        f"shops={len(companies)} | "
+        f"vectorized={total_ok} | failed={total_fail} | skipped={total_skip}"
     )
 
+
 if __name__ == "__main__":
-    logger.info("Initializing Sync Worker...")
-    sync_catalog()
+    logger.info("Initializing Multi-Shop Sync Worker...")
+    sync_all()

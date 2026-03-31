@@ -24,39 +24,14 @@ class ConversationSerializer(serializers.ModelSerializer):
 
 
 class BotConfigurationSerializer(serializers.ModelSerializer):
-    default_intents = serializers.SerializerMethodField()
-
     class Meta:
         model = BotConfiguration
         fields = [
-            'id', 'shop_id', 'shop_name', 'language', 'ai_agent_name', 'custom_intents',
-            'default_intents', 'created_at', 'updated_at'
+            'id', 'shop_id', 'shop_name', 'language', 'ai_agent_name',
+            'created_at', 'updated_at'
         ]
 
-    def get_default_intents(self, obj):
-        lang = obj.language if obj.language in TEMPLATES else 'FR'
-        return TEMPLATES.get(lang, TEMPLATES['FR'])
 
-    def update(self, instance, validated_data):
-        custom_intents = validated_data.pop('custom_intents', None)
-        instance = super().update(instance, validated_data)
-        if custom_intents is not None:
-            if self.partial:
-                existing_intents = instance.custom_intents or {}
-                for key, value in custom_intents.items():
-                    if value and str(value).strip():
-                        existing_intents[key] = value
-                    else:
-                        existing_intents.pop(key, None)
-                instance.custom_intents = existing_intents
-            else:
-                cleaned_intents = {
-                    key: val for key, val in custom_intents.items()
-                    if val and str(val).strip()
-                }
-                instance.custom_intents = cleaned_intents
-            instance.save()
-        return instance
 
 
 # ── ResponseTemplate ─────────────────────────────────────────────────────────
@@ -73,7 +48,7 @@ class ResponseTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ResponseTemplate
         fields = ['id', 'shop_id', 'language', 'template_type', 'intent',
-                  'text', 'is_default', 'created_at', 'updated_at']
+                  'text', 'available_variables', 'is_default', 'created_at', 'updated_at']
         read_only_fields = ['id', 'is_default', 'created_at', 'updated_at']
 
     def validate_shop_id(self, value):

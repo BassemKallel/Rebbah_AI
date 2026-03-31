@@ -2,6 +2,8 @@
 Anonymization utilities for NLU processing
 Replaces sensitive information (addresses, phone numbers) with tokens
 to match TunBERT training data format (__address__, __phone__)
+
+Optimized: regex patterns compiled once at module load, not per-call.
 """
 import re
 from typing import List
@@ -82,54 +84,48 @@ TUNISIA_ADDRESSES = [
     "قلعة الأندلس", "دوار هيشر", "التضامن", "مدينة العمال",
 ]
 
-# Tunisian phone number patterns
-PHONE_PATTERNS = [
-    r'\+216\s?[0-9]{8}',          # +216 98765432
-    r'00216\s?[0-9]{8}',          # 00216 98765432
-    r'216\s?[0-9]{8}',            # 216 98765432
-    r'(?:^|\s)[0-9]{8}(?:\s|$)',  # 98765432 (local 8-digit, with word boundaries)
+# ── Compiled patterns (built once at module load) ─────────────────────────────
+
+# Phone patterns
+_PHONE_PATTERNS = [
+    re.compile(r'\+216\s?[0-9]{8}', re.IGNORECASE),
+    re.compile(r'00216\s?[0-9]{8}', re.IGNORECASE),
+    re.compile(r'216\s?[0-9]{8}', re.IGNORECASE),
+    re.compile(r'(?:^|\s)[0-9]{8}(?:\s|$)', re.IGNORECASE),
 ]
+
+# Single compiled regex for ALL addresses (sorted longest-first, joined with |)
+_SORTED_ADDRESSES = sorted(TUNISIA_ADDRESSES, key=len, reverse=True)
+_ADDRESS_PATTERN = re.compile(
+    '|'.join(rf'\b{re.escape(addr)}\b' for addr in _SORTED_ADDRESSES),
+    flags=re.IGNORECASE,
+)
 
 
 def anonymize_phone_numbers(text: str) -> str:
     """Replace Tunisian phone numbers with __phone__ token"""
-    for pattern in PHONE_PATTERNS:
-        text = re.sub(pattern, ' __phone__ ', text, flags=re.IGNORECASE)
+    for pattern in _PHONE_PATTERNS:
+        text = pattern.sub(' __phone__ ', text)
     return text.strip()
 
 
-def anonymize_addresses(text: str, addresses: List[str] = None) -> str:
-    """Replace Tunisian addresses with __address__ token"""
-    if addresses is None:
-        addresses = TUNISIA_ADDRESSES
-    
-    # Sort by length (longest first) to avoid partial matches
-    sorted_addresses = sorted(addresses, key=len, reverse=True)
-    
-    for addr in sorted_addresses:
-        # Case-insensitive replacement with word boundaries
-        pattern = rf'\b{re.escape(addr)}\b'
-        text = re.sub(pattern, ' __address__ ', text, flags=re.IGNORECASE)
-    
-    return text.strip()
+def anonymize_addresses(text: str) -> str:
+    """Replace Tunisian addresses with __address__ token (single-pass regex)"""
+    return _ADDRESS_PATTERN.sub(' __address__ ', text).strip()
 
 
-def anonymize_message(text: str, addresses: List[str] = None) -> str:
+def anonymize_message(text: str) -> str:
     """
-    Anonymize a message by replacing sensitive information with tokens
-    
-    Args:
-        text: Message text
-        addresses: Optional list of addresses to match (defaults to TUNISIA_ADDRESSES)
-    
+    Anonymize a message by replacing sensitive information with tokens.
+
     Returns:
         Anonymized message with __phone__ and __address__ tokens
     """
     # Order matters: anonymize addresses first, then phone numbers
-    text = anonymize_addresses(text, addresses)
+    text = anonymize_addresses(text)
     text = anonymize_phone_numbers(text)
-    
+
     # Clean up extra spaces
     text = re.sub(r'\s+', ' ', text).strip()
-    
+
     return text

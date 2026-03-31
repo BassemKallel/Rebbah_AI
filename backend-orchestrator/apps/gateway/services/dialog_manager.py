@@ -136,7 +136,6 @@ def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
             extracted_entities.pop("color", None)
 
     current_context.update(extracted_entities)
-    current_context.pop("_vision_variation_id", None)
     return current_context
 
 
@@ -297,7 +296,14 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
     lang = "FR"
     if bot_config:
         if bot_config.language == "AUTO":
-            lang = detect_language(text)
+            # Sticky language: detect once, use for entire conversation
+            if "_detected_lang" in current_context:
+                lang = current_context["_detected_lang"]
+            else:
+                has_letters = sum(1 for c in text if c.isalpha()) >= 3
+                if text.strip() and has_letters:
+                    lang = detect_language(text)
+                current_context["_detected_lang"] = lang
         else:
             lang = bot_config.language
 
