@@ -87,6 +87,13 @@ CORS_ALLOW_ALL_ORIGINS = True
 NLU_SERVICE_URL    = os.getenv('NLU_SERVICE_URL',    'http://nlu-service:8001')
 NLU_PREDICT_PATH   = os.getenv('NLU_PREDICT_PATH',   '/predict')
 
+# Gemini Fallback (NLU backup when TunBERT is down or low-confidence)
+GEMINI_API_KEY                       = os.getenv('GEMINI_API_KEY', '')
+GEMINI_MODEL                         = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+GEMINI_FALLBACK_ENABLED              = os.getenv('GEMINI_FALLBACK_ENABLED', 'True') == 'True'
+GEMINI_FALLBACK_CONFIDENCE_THRESHOLD = float(os.getenv('GEMINI_FALLBACK_CONFIDENCE_THRESHOLD', '0.65'))
+GEMINI_ALWAYS_VERIFY_INTENTS         = [i.strip() for i in os.getenv('GEMINI_ALWAYS_VERIFY_INTENTS', 'CANCEL_ORDER').split(',')]
+
 # Vision Service (CLIP + pgvector)
 VISION_SERVICE_URL   = os.getenv('VISION_SERVICE_URL',   'http://vision-service:8002')
 VISION_SEARCH_PATH   = os.getenv('VISION_SEARCH_PATH',   '/search-similar')
