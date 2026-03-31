@@ -510,3 +510,54 @@ class ResponseTemplateViewSetTests(TestCase):
             status.HTTP_200_OK,
             status.HTTP_404_NOT_FOUND,
         ])
+
+
+    # -- available_variables tests ------------------------------------------
+
+    def test_list_includes_available_variables_field(self):
+        """GET list response must include 'available_variables' key."""
+        self.default_tmpl.available_variables = ["ai_agent_name"]
+        self.default_tmpl.save()
+        r = self.client_auth.get(self.URL, {"language": "FR", "template_type": "response", "intent": "GREETING"})
+        results = list(r.data)
+        self.assertTrue(any("available_variables" in item for item in results))
+
+    def test_retrieve_includes_available_variables(self):
+        self.shop_tmpl.available_variables = ["ai_agent_name"]
+        self.shop_tmpl.save()
+        r = self.client_auth.get(f"{self.URL}{self.shop_tmpl.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["available_variables"], ["ai_agent_name"])
+
+    def test_create_with_available_variables(self):
+        r = self.client_auth.post(self.URL, {
+            "shop_id":       SHOP_ID,
+            "language":      "FR",
+            "template_type": "response",
+            "intent":        "ASK_PRICE",
+            "text":          "Le {product} coute {price} TND.",
+            "available_variables": ["product", "price"],
+        }, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["available_variables"], ["product", "price"])
+
+    def test_patch_available_variables(self):
+        r = self.client_auth.patch(
+            f"{self.URL}{self.shop_tmpl.id}/",
+            {"available_variables": ["ai_agent_name", "shop_name"]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.shop_tmpl.refresh_from_db()
+        self.assertEqual(self.shop_tmpl.available_variables, ["ai_agent_name", "shop_name"])
+
+    def test_available_variables_defaults_to_empty_list(self):
+        r = self.client_auth.post(self.URL, {
+            "shop_id":       SHOP_ID,
+            "language":      "FR",
+            "template_type": "response",
+            "intent":        "ASK_DELIVERY",
+            "text":          "Livraison gratuite.",
+        }, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["available_variables"], [])
