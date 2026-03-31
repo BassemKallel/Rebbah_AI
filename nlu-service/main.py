@@ -98,8 +98,9 @@ def unload_models():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan - models loaded on first request (lazy loading)"""
-    logger.info("NLU Service starting... Models will be loaded on first request")
+    """Load models at startup — not lazily on first request."""
+    logger.info("NLU Service starting — loading models...")
+    load_models()
     yield
     logger.info("Unloading models...")
     unload_models()
@@ -262,9 +263,6 @@ async def predict(request: MessageRequest):
         NLUResponse with intent and entities
     """
     try:
-        # Lazy load models on first request
-        load_models()
-        
         # Get intent prediction (with anonymized text for TunBERT)
         intent = predict_intent(request.message)
         

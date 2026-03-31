@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 import json
-from .models import Lead, Conversation, Message, BotConfiguration, Company
+from .models import Lead, Conversation, Message, BotConfiguration, Company, NLUFallbackLog
 from apps.gateway.response_templates import TEMPLATES
 
 @admin.register(BotConfiguration)
@@ -9,14 +9,11 @@ class BotConfigurationAdmin(admin.ModelAdmin):
     list_display = ('shop_id', 'shop_name', 'language', 'created_at')
     list_filter = ('language', 'created_at')
     search_fields = ('shop_id', 'shop_name')
-    readonly_fields = ('default_intents',)
+
     
     fieldsets = (
         ('General', {
-            'fields': ('shop_id', 'shop_name', 'language','ai_agent_name')
-        }),
-        ('Custom Responses', {
-            'fields': ('custom_intents', 'default_intents')
+            'fields': ('shop_id', 'shop_name', 'language', 'ai_agent_name')
         }),
     )
 
@@ -54,9 +51,9 @@ class CompanyAdmin(admin.ModelAdmin):
 class MessageInline(admin.TabularInline):
     model = Message
     extra = 0
-    readonly_fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'created_at')
+    readonly_fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'created_at')
     can_delete = False
-    fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'created_at')
+    fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'created_at')
 
     def confidence_badge(self, obj):
         if obj.intent_confidence_score is None:
@@ -175,8 +172,8 @@ class ConversationAdmin(admin.ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ('sender', 'get_lead', 'text_preview', 'extracted_intent', 'confidence_badge', 'is_error', 'created_at')
-    list_filter = ('sender', 'is_error', 'extracted_intent', 'created_at')
+    list_display = ('sender', 'get_lead', 'text_preview', 'extracted_intent', 'confidence_badge', 'is_error', 'is_fallback', 'created_at')
+    list_filter = ('sender', 'is_error', 'is_fallback', 'extracted_intent', 'created_at')
     search_fields = ('text', 'conversation__lead__platform_id', 'extracted_intent')
     readonly_fields = ('pretty_entities', 'confidence_badge')
     date_hierarchy = 'created_at'
@@ -309,7 +306,7 @@ class ResponseTemplateAdmin(admin.ModelAdmin):
             ),
         }),
         ('Contenu', {
-            'fields': ('text',),
+            'fields': ('text', 'available_variables'),
             'description': (
                 'Placeholders disponibles : '
                 '<code>{product}</code> <code>{color}</code> <code>{size}</code> '
@@ -338,3 +335,73 @@ def invalidate_response_template_cache(sender, instance, **kwargs):
         template_type=instance.template_type,
         intent=instance.intent,
     )
+
+
+@admin.register(NLUFallbackLog)
+class NLUFallbackLogAdmin(admin.ModelAdmin):
+    list_display = ('original_text_preview', 'trigger_reason', 'tunbert_intent',
+                    'tunbert_confidence_badge', 'gemini_intent', 'gemini_confidence_badge',
+                    'intent_changed', 'reviewed', 'created_at')
+    list_filter = ('trigger_reason', 'intent_changed', 'reviewed', 'created_at')
+    search_fields = ('original_text', 'tunbert_intent', 'gemini_intent')
+    readonly_fields = ('message', 'original_text', 'tunbert_intent', 'tunbert_confidence',
+                       'pretty_tunbert_entities', 'gemini_intent', 'gemini_confidence',
+                       'pretty_gemini_entities', 'trigger_reason', 'intent_changed', 'created_at')
+    list_editable = ('reviewed',)
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+
+    fieldsets = (
+        ('Message Original', {
+            'fields': ('message', 'original_text', 'trigger_reason')
+        }),
+        ('TunBERT (avant correction)', {
+            'fields': ('tunbert_intent', 'tunbert_confidence', 'pretty_tunbert_entities')
+        }),
+        ('Gemini (correction)', {
+            'fields': ('gemini_intent', 'gemini_confidence', 'pretty_gemini_entities')
+        }),
+        ('Active Learning', {
+            'fields': ('intent_changed', 'reviewed', 'review_label')
+        }),
+    )
+
+    def original_text_preview(self, obj):
+        return obj.original_text[:60] + '...' if len(obj.original_text) > 60 else obj.original_text
+    original_text_preview.short_description = 'Texte'
+
+    def tunbert_confidence_badge(self, obj):
+        if obj.tunbert_confidence is None:
+            return '-'
+        score = obj.tunbert_confidence
+        pct = f'{score:.0%}'
+        color = '#27ae60' if score >= 0.8 else ('#e67e22' if score >= 0.5 else '#e74c3c')
+        return format_html(
+            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>',
+            color, pct
+        )
+    tunbert_confidence_badge.short_description = 'TunBERT Conf.'
+
+    def gemini_confidence_badge(self, obj):
+        if obj.gemini_confidence is None:
+            return '-'
+        score = obj.gemini_confidence
+        pct = f'{score:.0%}'
+        color = '#27ae60' if score >= 0.8 else ('#e67e22' if score >= 0.5 else '#e74c3c')
+        return format_html(
+            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>',
+            color, pct
+        )
+    gemini_confidence_badge.short_description = 'Gemini Conf.'
+
+    def pretty_tunbert_entities(self, obj):
+        if not obj.tunbert_entities:
+            return '-'
+        return format_html('<pre>{}</pre>', json.dumps(obj.tunbert_entities, indent=2, ensure_ascii=False))
+    pretty_tunbert_entities.short_description = 'Entites TunBERT'
+
+    def pretty_gemini_entities(self, obj):
+        if not obj.gemini_entities:
+            return '-'
+        return format_html('<pre>{}</pre>', json.dumps(obj.gemini_entities, indent=2, ensure_ascii=False))
+    pretty_gemini_entities.short_description = 'Entites Gemini'

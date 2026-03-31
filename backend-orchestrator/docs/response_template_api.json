@@ -1,0 +1,258 @@
+{
+  "apiName": "ResponseTemplate API",
+  "baseUrl": "/api/v1/crm/templates/",
+  "authentication": {
+    "type": "Bearer Token",
+    "header": "Authorization: Bearer <tiktak_api_token>",
+    "description": "Token d'authentification TikTak (stocké dans Company.tiktak_api_token)"
+  },
+  "endpoints": [
+    {
+      "name": "Lister les templates",
+      "method": "GET",
+      "url": "/api/v1/crm/templates/",
+      "description": "Retourne tous les templates avec filtrage optionnel",
+      "queryParams": {
+        "shop_id": {"type": "string", "required": false, "example": "shop_abc", "description": "Filtrer par shop"},
+        "language": {"type": "string", "required": false, "enum": ["FR", "AR", "EN"], "description": "Filtrer par langue"},
+        "template_type": {"type": "string", "required": false, "enum": ["response", "missing_entity", "out_of_stock", "order_confirmed", "disambiguation", "misc"], "description": "Filtrer par famille"},
+        "intent": {"type": "string", "required": false, "example": "GREETING", "description": "Filtrer par intent"}
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 1,
+            "shop_id": null,
+            "language": "FR",
+            "template_type": "response",
+            "intent": "GREETING",
+            "text": "Bonjour ! 👋 Bienvenue chez {ai_agent_name}. Comment puis-je vous aider aujourd'hui ?",
+            "available_variables": ["ai_agent_name"],
+            "is_default": true,
+            "created_at": "2026-03-30T12:00:00Z",
+            "updated_at": "2026-03-30T12:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Détails d'un template",
+      "method": "GET",
+      "url": "/api/v1/crm/templates/{id}/",
+      "description": "Retourne un template par son ID",
+      "pathParams": {
+        "id": {"type": "integer", "required": true, "description": "ID du template"}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": 2,
+          "shop_id": null,
+          "language": "FR",
+          "template_type": "response",
+          "intent": "ASK_PRICE",
+          "text": "Le {product} est au prix de {price} TND. Souhaitez-vous le commander ?",
+          "available_variables": ["product", "price"],
+          "is_default": true,
+          "created_at": "2026-03-30T12:00:00Z",
+          "updated_at": "2026-03-30T12:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "Créer un override shop",
+      "method": "POST",
+      "url": "/api/v1/crm/templates/",
+      "description": "Créer un template personnalisé pour un shop spécifique (surcharge le défaut système)",
+      "requestBody": {
+        "shop_id": {"type": "string", "required": true, "example": "shop_abc", "description": "ID du shop (obligatoire)"},
+        "language": {"type": "string", "required": true, "enum": ["FR", "AR", "EN"]},
+        "template_type": {"type": "string", "required": true, "enum": ["response", "missing_entity", "out_of_stock", "order_confirmed", "disambiguation", "misc"]},
+        "intent": {"type": "string", "required": true, "example": "GREETING"},
+        "text": {"type": "string", "required": true, "example": "Marhba bik fi {ai_agent_name} ! Chnoua tehbb ?"},
+        "available_variables": {"type": "array", "required": false, "example": ["ai_agent_name"], "description": "Variables utilisables dans le texte"}
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": 85,
+          "shop_id": "shop_abc",
+          "language": "FR",
+          "template_type": "response",
+          "intent": "GREETING",
+          "text": "Marhba bik fi {ai_agent_name} ! Chnoua tehbb ?",
+          "available_variables": ["ai_agent_name"],
+          "is_default": false,
+          "created_at": "2026-03-30T22:00:00Z",
+          "updated_at": "2026-03-30T22:00:00Z"
+        }
+      },
+      "errors": [
+        {"status": 400, "condition": "shop_id manquant", "body": {"shop_id": ["shop_id est requis. Utilisez l'Admin pour modifier les templates système."]}},
+        {"status": 400, "condition": "Template doublon", "body": {"non_field_errors": ["Un template existe déjà pour shop='shop_abc', lang='FR', type='response', intent='GREETING'. Utilisez PATCH pour le modifier."]}}
+      ]
+    },
+    {
+      "name": "Modifier un template (partiel)",
+      "method": "PATCH",
+      "url": "/api/v1/crm/templates/{id}/",
+      "description": "Modifier partiellement un template shop. Les templates système (is_default=true) sont protégés.",
+      "pathParams": {
+        "id": {"type": "integer", "required": true}
+      },
+      "requestBody": {
+        "text": {"type": "string", "required": false, "example": "Ahla ! Bienvenue chez {ai_agent_name} 🛍️"}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": 85,
+          "shop_id": "shop_abc",
+          "language": "FR",
+          "template_type": "response",
+          "intent": "GREETING",
+          "text": "Ahla ! Bienvenue chez {ai_agent_name} 🛍️",
+          "available_variables": ["ai_agent_name"],
+          "is_default": false
+        }
+      },
+      "errors": [
+        {"status": 403, "condition": "Template système", "body": {"error": "Les templates système par défaut ne peuvent pas être modifiés via l'API."}}
+      ]
+    },
+    {
+      "name": "Modifier un template (complet)",
+      "method": "PUT",
+      "url": "/api/v1/crm/templates/{id}/",
+      "description": "Remplacer entièrement un template shop. Tous les champs sont requis.",
+      "pathParams": {
+        "id": {"type": "integer", "required": true}
+      },
+      "requestBody": {
+        "shop_id": {"type": "string", "required": true},
+        "language": {"type": "string", "required": true},
+        "template_type": {"type": "string", "required": true},
+        "intent": {"type": "string", "required": true},
+        "text": {"type": "string", "required": true},
+        "available_variables": {"type": "array", "required": false}
+      },
+      "errors": [
+        {"status": 403, "condition": "Template système", "body": {"error": "Les templates système par défaut ne peuvent pas être modifiés via l'API."}}
+      ]
+    },
+    {
+      "name": "Supprimer un override shop",
+      "method": "DELETE",
+      "url": "/api/v1/crm/templates/{id}/",
+      "description": "Supprimer un override shop pour revenir au template système par défaut",
+      "pathParams": {
+        "id": {"type": "integer", "required": true}
+      },
+      "response": {
+        "status": 204,
+        "body": null
+      },
+      "errors": [
+        {"status": 403, "condition": "Template système", "body": {"error": "Les templates système par défaut ne peuvent pas être supprimés via l'API."}}
+      ]
+    },
+    {
+      "name": "Preview (résolution complète)",
+      "method": "GET",
+      "url": "/api/v1/crm/templates/preview/",
+      "description": "Retourne le texte final que le bot utilisera, résolu via la chaîne : Redis cache → DB shop override → DB système par défaut → Python fallback",
+      "queryParams": {
+        "shop_id": {"type": "string", "required": false, "example": "shop_abc"},
+        "language": {"type": "string", "required": false, "default": "FR", "enum": ["FR", "AR", "EN"]},
+        "template_type": {"type": "string", "required": true, "example": "response"},
+        "intent": {"type": "string", "required": true, "example": "GREETING"}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "shop_id": "shop_abc",
+          "language": "FR",
+          "template_type": "response",
+          "intent": "GREETING",
+          "text": "Marhba bik fi {ai_agent_name} !"
+        }
+      },
+      "errors": [
+        {"status": 400, "condition": "Paramètres manquants", "body": {"error": "Les paramètres 'template_type' et 'intent' sont requis."}},
+        {"status": 404, "condition": "Template introuvable", "body": {"error": "Aucun template trouvé pour type='response', intent='GREETING', lang='FR'."}}
+      ]
+    }
+  ],
+  "securityRules": {
+    "systemDefaults": {
+      "is_default": true,
+      "shop_id": null,
+      "GET": "allowed",
+      "POST": "not_applicable",
+      "PATCH": "forbidden_403",
+      "PUT": "forbidden_403",
+      "DELETE": "forbidden_403",
+      "management": "Django Admin uniquement"
+    },
+    "shopOverrides": {
+      "is_default": false,
+      "shop_id": "non-null",
+      "GET": "allowed",
+      "POST": "allowed",
+      "PATCH": "allowed",
+      "PUT": "allowed",
+      "DELETE": "allowed"
+    }
+  },
+  "templateVariables": {
+    "response": {
+      "GREETING": ["ai_agent_name"],
+      "ASK_PRICE": ["product", "price"],
+      "ASK_AVAILABILITY": ["product", "sizes", "colors"],
+      "ORDER_PRODUCT": ["product"],
+      "ASK_DELIVERY": [],
+      "ASK_DETAILS": ["product"],
+      "ASK_DISCOUNT": [],
+      "ASK_LOCATION": [],
+      "CANCEL_ORDER": [],
+      "CHECK_PACKAGE": [],
+      "COMPLAINT": [],
+      "CONFIRM_DENY": [],
+      "INFORM_INFO": [],
+      "TRACK_ORDER": [],
+      "UNKNOWN": [],
+      "NOISE": []
+    },
+    "missing_entity": {
+      "product": [],
+      "color": ["product"],
+      "size": ["product", "color"],
+      "quantity": ["product"],
+      "address": [],
+      "phone_number": []
+    },
+    "out_of_stock": {
+      "default": ["product", "color", "size"],
+      "available": ["avail"],
+      "sizes": ["avail"],
+      "colors": ["avail"]
+    },
+    "order_confirmed": {
+      "with_ref": ["product", "ref"],
+      "no_ref": ["product"]
+    },
+    "disambiguation": {
+      "default": ["count", "list"]
+    },
+    "misc": {
+      "missing_entity_default": ["first_missing"],
+      "inform_info_default": ["first_missing"],
+      "inform_product_default": [],
+      "ask_availability_default": [],
+      "ask_price_default": [],
+      "noise_default": [],
+      "stock_check_error": []
+    }
+  }
+}
