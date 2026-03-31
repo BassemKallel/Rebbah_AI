@@ -21,7 +21,7 @@ import logging
 from datetime import timedelta
 from django.utils import timezone
 
-from apps.crm.models import Lead, Conversation, Message, BotConfiguration
+from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog
 from .context_manager import ContextManager
 from .response_templates import FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 context_manager = ContextManager()
 
 # Grace period: how long a completed conversation stays open for corrections
-GRACE_PERIOD_MINUTES = 10
+GRACE_PERIOD_MINUTES = 2
 
 
 class MessagePipeline:
@@ -87,6 +87,7 @@ class MessagePipeline:
             )
 
         # Handle grace period expiration
+        correction_mode = False
         if conversation.state == "AWAITING_CORRECTION":
             if conversation.completed_at:
                 try:
@@ -106,9 +107,11 @@ class MessagePipeline:
                         shop_id=shop_id, state="NEW_CONVERSATION"
                     )
                 else:
-                    # Still in grace period — restore to WAITING_USER_REPLY
+                    # Still in grace period — correction mode
+                    correction_mode = True
                     conversation.state = "WAITING_USER_REPLY"
                     conversation.save()
+                    logger.info("[PIPELINE] Correction mode: will force ORDER_PRODUCT after NLU")
             else:
                 # completed_at not set — treat as expired, start fresh
                 logger.warning("[PIPELINE] AWAITING_CORRECTION but completed_at is None — starting new conversation")
@@ -120,8 +123,8 @@ class MessagePipeline:
                     shop_id=shop_id, state="NEW_CONVERSATION"
                 )
 
-        # ── 3. Hot Memory ─────────────────────────────────────────────────
-        context_manager.add_message(user_id, role="user", text=text)
+
+        # ── 3. (Hot Memory moved to step 5b — after NLU) ─────────────────
 
         # ── 4. Vision API ─────────────────────────────────────────────────
         is_error = False
@@ -150,14 +153,27 @@ class MessagePipeline:
         nlu_raw_entities = []
         extracted_intent  = "NOISE"
         intent_confidence = None
+        is_fallback = False
+        nlu_result = {}
 
         if text:
-            nlu_result = ai_service.call_nlu(text)
+            nlu_result = ai_service.call_nlu(text, user_id=user_id)
             extracted_intent    = nlu_result["intent"]
             nlu_raw_entities    = nlu_result["raw_entities"]
             intent_confidence   = nlu_result.get("confidence_score")
             is_error = is_error or nlu_result["error"]
+            is_fallback = nlu_result.get("fallback_used", False)
 
+            if is_fallback:
+                logger.warning(f"[PIPELINE] Gemini fallback used (reason={nlu_result.get('_trigger_reason')})")
+
+            # ── 5b. Hot Memory (enriched — after NLU) ─────────────────────
+            context_manager.add_message(
+                user_id, role="user", text=text,
+                intent=extracted_intent,
+                confidence=intent_confidence,
+                entities=extracted_entities,
+            )
             # Entity filtering & guards
             filtered = dialog_manager.apply_entity_guards(nlu_raw_entities, extracted_intent, conversation)
             extracted_entities.update(filtered)
@@ -181,6 +197,7 @@ class MessagePipeline:
         state_before = conversation.state
 
         # ── 6. Save User Message ──────────────────────────────────────────
+        is_fallback = is_fallback if text else False
         user_message = Message.objects.create(
             conversation=conversation,
             sender="USER",
@@ -189,13 +206,40 @@ class MessagePipeline:
             intent_confidence_score=intent_confidence if text else None,
             extracted_entities=extracted_entities,
             is_error=is_error,
+            is_fallback=is_fallback,
             conversation_state_before=state_before,
         )
+
+        # ── 6b. Save NLU Fallback Log (active learning) ───────────────────
+        if text and is_fallback:
+            tunbert_orig = nlu_result.get("_tunbert_original", {})
+            trigger = nlu_result.get("_trigger_reason", "LOW_CONFIDENCE")
+            try:
+                NLUFallbackLog.objects.create(
+                    message=user_message,
+                    original_text=text,
+                    tunbert_intent=tunbert_orig.get("intent"),
+                    tunbert_confidence=tunbert_orig.get("confidence_score"),
+                    tunbert_entities=tunbert_orig.get("raw_entities", []),
+                    gemini_intent=nlu_result["intent"],
+                    gemini_confidence=nlu_result.get("confidence_score"),
+                    gemini_entities=nlu_result.get("raw_entities", []),
+                    trigger_reason=trigger,
+                    intent_changed=(tunbert_orig.get("intent") != nlu_result["intent"]),
+                )
+            except Exception as e:
+                logger.error(f"[PIPELINE] Failed to save NLUFallbackLog: {e}")
 
         # ── 7. Context Accumulation ───────────────────────────────────────
         current_context = conversation.context_data
         current_context = dialog_manager.accumulate_context(current_context, extracted_entities)
         conversation.context_data = current_context
+
+        # Persist/restore vision_variation_id across messages
+        if vision_variation_id:
+            current_context["_vision_variation_id"] = vision_variation_id
+        else:
+            vision_variation_id = current_context.get("_vision_variation_id")
 
         # ── 8. Contextual Mapping ─────────────────────────────────────────
         previous_state = conversation.state
@@ -260,6 +304,11 @@ class MessagePipeline:
                 result.update(disambig_result)
                 return result
 
+        # ── 10b. Correction Mode Override ─────────────────────────────────
+        if correction_mode and extracted_intent in ("INFORM_INFO", "NOISE", "UNKNOWN"):
+            extracted_intent = "ORDER_PRODUCT"
+            logger.info("[PIPELINE] Correction mode → forcing ORDER_PRODUCT intent")
+
         # ── 11. State Machine ─────────────────────────────────────────────
         bot_config, _ = BotConfiguration.objects.get_or_create(shop_id=shop_id)
         current_context["shop_id"] = shop_id
@@ -273,6 +322,7 @@ class MessagePipeline:
             vision_variation_id=vision_variation_id,
             bot_config=bot_config,
             text=text,
+            shop_id=shop_id,  # ← required for shop-specific template overrides
         )
         current_context.pop("shop_id", None)
 

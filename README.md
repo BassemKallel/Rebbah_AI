@@ -23,6 +23,7 @@ Cloudflare Tunnel  ──►  backend-orchestrator :8000   (Django — Orchestra
 
 | Service | Port | Description |
 |---|---|---|
+| `api-gateway` | 80 | Point d'entrée unique. Reverse proxy Nginx. |
 | `backend-orchestrator` | 8000 | Cœur du système — NLU, dialog manager, TikTak API. |
 | `nlu-service` | interne | TunBERT (intention) + GLiNER (entités). Limite : 2 Go RAM. |
 | `vision-service` | interne | CLIP (similarité image). Limite : 4 Go RAM, GPU optionnel. |
@@ -176,6 +177,17 @@ Message reçu → NLU (intent + confiance) → Entity Guards → Accumulate Cont
     → State Machine (Dialog Manager) → TikTak API (stock, prix, commande)
     → Réponse Messenger
 ```
+
+## 🤝 Travailler en Binôme
+
+Les deux membres ont besoin de :
+
+1. **Accès Meta Developer App** (pour modifier le webhook)
+2. **Accès Page Facebook** (pour tester les messages)
+
+👉 Consulter **[guide_binome.md](.gemini/antigravity/brain/6b6c35cc-2284-4e8e-b4bc-2c8a62f61676/guide_binome.md)** pour la configuration complète.
+
+**Règle de rotation** : Meta n'autorise qu'**une seule URL webhook** à la fois. Chaque membre met à jour l'URL quand c'est son tour de tester.
 
 ## 🤝 Contribuer
 

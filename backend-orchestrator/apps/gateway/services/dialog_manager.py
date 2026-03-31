@@ -11,14 +11,8 @@ import re
 import logging
 from typing import Optional, Set
 from django.conf import settings  # pyre-ignore[21]
-from apps.gateway.response_templates import (  # pyre-ignore[21]
-    TEMPLATES, MISSING_ENTITY_TEMPLATES, REQUIRED_ORDER_ENTITIES,
-    OUT_OF_STOCK_TEMPLATE, ORDER_CONFIRMED_TEMPLATE, ORDER_CONFIRMED_NO_REF_TEMPLATE,
-    OUT_OF_STOCK_AVAILABLE, OUT_OF_STOCK_SIZES, OUT_OF_STOCK_COLORS,
-    MISSING_ENTITY_DEFAULT, INFORM_INFO_DEFAULT, INFORM_PRODUCT_DEFAULT,
-    ASK_AVAILABILITY_DEFAULT, ASK_PRICE_DEFAULT, NOISE_DEFAULT, STOCK_CHECK_ERROR,
-    DISAMBIGUATION_TEMPLATE
-)
+from apps.gateway.response_templates import REQUIRED_ORDER_ENTITIES  # pyre-ignore[21]
+from apps.gateway.services.template_service import get_template
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +136,6 @@ def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
             extracted_entities.pop("color", None)
 
     current_context.update(extracted_entities)
-    current_context.pop("_vision_variation_id", None)
     return current_context
 
 
@@ -297,12 +290,20 @@ def _auto_fill_single_color(matched_product: dict, current_context: dict) -> Non
 
 def run_state_machine(intent: str, previous_state: str, current_context: dict,
                       matched_product, lead, conversation,
-                      vision_variation_id: Optional[str] = None, bot_config = None, text: str = "") -> dict:
+                      vision_variation_id: Optional[str] = None, bot_config = None,
+                      text: str = "", shop_id: str = None) -> dict:
     
     lang = "FR"
     if bot_config:
         if bot_config.language == "AUTO":
-            lang = detect_language(text)
+            # Sticky language: detect once, use for entire conversation
+            if "_detected_lang" in current_context:
+                lang = current_context["_detected_lang"]
+            else:
+                has_letters = sum(1 for c in text if c.isalpha()) >= 3
+                if text.strip() and has_letters:
+                    lang = detect_language(text)
+                current_context["_detected_lang"] = lang
         else:
             lang = bot_config.language
 
@@ -331,7 +332,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                 "missing_list": []
             }
 
-    bot_response = TEMPLATES.get(lang, {}).get("UNKNOWN", "Je n'ai pas compris.")
+    bot_response = get_template("response", "UNKNOWN", lang, shop_id) or "Je n'ai pas compris."
     missing_list = []
     new_state    = previous_state
 
@@ -350,13 +351,13 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
             if not stock_ok:
                 display = matched_product["name"]
                 bot_response = (
-                    OUT_OF_STOCK_TEMPLATE.get(lang, "")
+                    (get_template("out_of_stock", "default", lang, shop_id) or "")
                     .replace("{product}", display)
                     .replace("{color}",   color)
                     .replace("{size}",    size)
                 )
                 if avail:
-                    bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
+                    bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                 current_context.pop("color", None)
                 current_context.pop("size",  None)
                 _auto_fill_single_color(matched_product, current_context)
@@ -364,9 +365,9 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
             else:
                 first_missing = missing_list[0]
                 display       = matched_product["name"] if matched_product else "cet article"
+                _missing_default = (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
                 bot_response  = (
-                    MISSING_ENTITY_TEMPLATES.get(lang, {})
-                    .get(first_missing, MISSING_ENTITY_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
+                    (get_template("missing_entity", first_missing, lang, shop_id) or _missing_default)
                     .replace("{product}", display)
                     .replace("{color}",   color)
                 )
@@ -374,10 +375,10 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                     variations = matched_product.get("variations", [])
                     if first_missing == "size":
                         avail = ", ".join(list(set(v["size"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                        if avail: bot_response += OUT_OF_STOCK_SIZES.get(lang, "").replace("{avail}", avail)
+                        if avail: bot_response += (get_template("out_of_stock", "sizes", lang, shop_id) or "").replace("{avail}", avail)
                     else:
                         avail = ", ".join(list(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                        if avail: bot_response += OUT_OF_STOCK_COLORS.get(lang, "").replace("{avail}", avail)
+                        if avail: bot_response += (get_template("out_of_stock", "colors", lang, shop_id) or "").replace("{avail}", avail)
         else:
             # All entities collected — create pre-order
             chosen_color = current_context.get("color", "")
@@ -387,13 +388,13 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
 
             if not stock_ok:
                 bot_response = (
-                    OUT_OF_STOCK_TEMPLATE.get(lang, "")
+                    (get_template("out_of_stock", "default", lang, shop_id) or "")
                     .replace("{product}", display)
                     .replace("{color}",   chosen_color)
                     .replace("{size}",    chosen_size)
                 )
                 if avail:
-                    bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
+                    bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                 current_context.pop("color", None)
                 current_context.pop("size",  None)
                 _auto_fill_single_color(matched_product, current_context)
@@ -422,22 +423,22 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                 if not stock_ok:
                     display = matched_product["name"]
                     bot_response = (
-                        OUT_OF_STOCK_TEMPLATE.get(lang, "")
+                        (get_template("out_of_stock", "default", lang, shop_id) or "")
                         .replace("{product}", display)
                         .replace("{color}",   color)
                         .replace("{size}",    size)
                     )
                     if avail:
-                        bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
+                        bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                     current_context.pop("color", None)
                     current_context.pop("size",  None)
                     _auto_fill_single_color(matched_product, current_context)
                     missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                 else:
                     first_missing = missing_list[0]
+                    _inform_default = (get_template("misc", "inform_info_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
                     bot_response  = (
-                        MISSING_ENTITY_TEMPLATES.get(lang, {})
-                        .get(first_missing, INFORM_INFO_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
+                        (get_template("missing_entity", first_missing, lang, shop_id) or _inform_default)
                         .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
                         .replace("{color}",   color)
                     )
@@ -448,20 +449,20 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                 display      = matched_product["name"] if matched_product else current_context.get("product", "votre article")
 
                 if not matched_product and current_context.get("product", "").startswith("Article_From_Image_"):
-                    bot_response = STOCK_CHECK_ERROR.get(lang, "")
+                    bot_response = get_template("misc", "stock_check_error", lang, shop_id) or ""
                     new_state    = "WAITING_USER_REPLY"
                     missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                 else:
                     stock_ok, avail = _check_stock(matched_product, chosen_color, chosen_size)
                     if not stock_ok:
                         bot_response = (
-                            OUT_OF_STOCK_TEMPLATE.get(lang, "")
+                            (get_template("out_of_stock", "default", lang, shop_id) or "")
                             .replace("{product}", display)
                             .replace("{color}",   chosen_color)
                             .replace("{size}",    chosen_size)
                         )
                         if avail:
-                            bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
+                            bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                         current_context.pop("color", None)
                         current_context.pop("size",  None)
                         _auto_fill_single_color(matched_product, current_context)
@@ -477,11 +478,11 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
         else:
             # INFORM_INFO outside an active flow
             if "product" not in current_context:
-                bot_response = INFORM_PRODUCT_DEFAULT.get(lang, "")
+                bot_response = get_template("misc", "inform_product_default", lang, shop_id) or ""
                 new_state    = "WAITING_USER_REPLY"
                 missing_list = ["product"]
             else:
-                bot_response = TEMPLATES.get(lang, {}).get("INFORM_INFO", "")
+                bot_response = get_template("response", "INFORM_INFO", lang, shop_id) or ""
 
     # ── ASK_PRICE / ASK_AVAILABILITY / ASK_DELIVERY ────────────────────────
     elif intent in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY"):
@@ -490,7 +491,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
 
             if intent == "ASK_PRICE" and matched_product:
                 price = matched_product.get('base_price', '0')
-                bot_response = TEMPLATES.get(lang, {}).get("ASK_PRICE", "").replace("{product}", matched_product['name']).replace("{price}", str(price)) + " "
+                bot_response = (get_template("response", "ASK_PRICE", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{price}", str(price)) + " "
             elif intent == "ASK_AVAILABILITY" and matched_product:
                 size  = current_context.get("size", "")
                 color = current_context.get("color", "")
@@ -500,13 +501,13 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                     if not stock_ok:
                         display = matched_product["name"]
                         bot_response = (
-                            OUT_OF_STOCK_TEMPLATE.get(lang, "")
+                            (get_template("out_of_stock", "default", lang, shop_id) or "")
                             .replace("{product}", display)
                             .replace("{color}", color)
                             .replace("{size}", size)
                         )
                         if avail:
-                            bot_response += OUT_OF_STOCK_AVAILABLE.get(lang, "").replace("{avail}", avail)
+                            bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                         current_context.pop("size", None)
                         _auto_fill_single_color(matched_product, current_context)
                         missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
@@ -517,15 +518,15 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                         variations = matched_product.get("variations", [])
                         sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
                         colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                        bot_response = TEMPLATES.get(lang, {}).get("ASK_AVAILABILITY", "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+                        bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
                 else:
                     # No specific size — show all available
                     variations = matched_product.get("variations", [])
                     sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
                     colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                    bot_response = TEMPLATES.get(lang, {}).get("ASK_AVAILABILITY", "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+                    bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
             else:
-                bot_response = TEMPLATES.get(lang, {}).get(intent, "")
+                bot_response = get_template("response", intent, lang, shop_id) or ""
 
             if not skip_missing_flow:
                 for req in REQUIRED_ORDER_ENTITIES:
@@ -535,22 +536,20 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                     new_state    = "WAITING_USER_REPLY"
                     first_missing = missing_list[0]
                     bot_response += (
-                        MISSING_ENTITY_TEMPLATES.get(lang, {})
-                        .get(first_missing, MISSING_ENTITY_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
-                        .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
-                        .replace("{color}",   current_context.get("color", ""))
-                    )
+                        get_template("missing_entity", first_missing, lang, shop_id)
+                        or (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
+                    ).replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article")).replace("{color}", current_context.get("color", ""))
 
         else:
             if not matched_product:
                 if intent == "ASK_AVAILABILITY":
-                    bot_response = ASK_AVAILABILITY_DEFAULT.get(lang, "")
+                    bot_response = get_template("misc", "ask_availability_default", lang, shop_id) or ""
                 elif intent == "ASK_PRICE":
-                    bot_response = ASK_PRICE_DEFAULT.get(lang, "")
+                    bot_response = get_template("misc", "ask_price_default", lang, shop_id) or ""
                 else:
-                    bot_response = TEMPLATES.get(lang, {}).get(intent, "")
+                    bot_response = get_template("response", intent, lang, shop_id) or ""
             else:
-                bot_response = TEMPLATES.get(lang, {}).get(intent, "")
+                bot_response = get_template("response", intent, lang, shop_id) or ""
                 price = matched_product.get("base_price", "0")
                 variations = matched_product.get("variations", [])
                 sizes  = ", ".join(list(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
@@ -571,18 +570,18 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
             missing_list = conversation.missing_entities
             first_missing = missing_list[0] if missing_list else None
             if intent == "ASK_LOCATION":
-                bot_response = TEMPLATES.get(lang, {}).get("ASK_LOCATION", "") + " "
+                bot_response = (get_template("response", "ASK_LOCATION", lang, shop_id) or "") + " "
             else:
-                bot_response = NOISE_DEFAULT.get(lang, "")
+                bot_response = get_template("misc", "noise_default", lang, shop_id) or ""
             if first_missing:
+                _noise_missing_default = (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
                 bot_response += (
-                    MISSING_ENTITY_TEMPLATES.get(lang, {})
-                    .get(first_missing, MISSING_ENTITY_DEFAULT.get(lang, "").replace("{first_missing}", first_missing))
+                    (get_template("missing_entity", first_missing, lang, shop_id) or _noise_missing_default)
                     .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
                     .replace("{color}",   current_context.get("color", ""))
                 )
         else:
-            bot_response = TEMPLATES.get(lang, {}).get(intent, TEMPLATES.get(lang, {}).get("UNKNOWN", ""))
+            bot_response = get_template("response", intent, lang, shop_id) or get_template("response", "UNKNOWN", lang, shop_id) or ""
 
     # If it's a custom intent that wasn't eagerly bypassed (e.g., custom ORDER_PRODUCT response after completion)
     # Note: Complex interactions like order flow still use the built-in OUT_OF_STOCK and MISSING_ENTITY templates for flow logic.
@@ -622,5 +621,5 @@ def _create_preorder_and_confirm(lead, matched_product, vision_variation_id,
         logger.error(f"[PRE-ORDER] creation error: {e}")
 
     if pre_order_ref:
-        return ORDER_CONFIRMED_TEMPLATE.get(lang, "").replace("{product}", display_name).replace("{ref}", str(pre_order_ref))
-    return ORDER_CONFIRMED_NO_REF_TEMPLATE.get(lang, "").replace("{product}", display_name)
+        return (get_template("order_confirmed", "with_ref", lang) or "").replace("{product}", display_name).replace("{ref}", str(pre_order_ref))
+    return (get_template("order_confirmed", "no_ref", lang) or "").replace("{product}", display_name)

@@ -16,7 +16,7 @@ from apps.crm.models import Conversation
 
 logger = logging.getLogger(__name__)
 
-GRACE_PERIOD_MINUTES = 10
+GRACE_PERIOD_MINUTES = 2
 
 
 class Command(BaseCommand):

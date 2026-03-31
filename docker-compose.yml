@@ -57,6 +57,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    ports:
+      - "8002:8002"
     networks:
       - internal-net
       - db-net
@@ -77,9 +79,12 @@ services:
       - .env
     environment:
       TIKTAK_API_BASE_URL: ${TIKTAK_API_BASE_URL}
-      TIKTAK_API_TOKEN:    ${TIKTAK_API_TOKEN}
-      COMPANY_SLUG:        ${COMPANY_SLUG}
       VISION_SERVICE_URL:  http://vision-service:8002/vectorize
+      POSTGRES_HOST:       db
+      POSTGRES_PORT:       5432
+      POSTGRES_DB:         ${POSTGRES_DB}
+      POSTGRES_USER:       ${POSTGRES_USER}
+      POSTGRES_PASSWORD:   ${POSTGRES_PASSWORD}
     depends_on:
       - vision-service
     networks:
@@ -102,7 +107,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database-init/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
     networks:
