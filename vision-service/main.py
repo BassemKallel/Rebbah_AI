@@ -1,211 +1,100 @@
+"""
+TikTak Vision Service — CLIP-based image search with pgvector
+
+Optimizations applied:
+- _embed_image() reused across all endpoints (no code duplication)
+- _search_similar_db() shared SQL helper
+- Connection pool with context manager (no connection leaks)
+- DB initialization at startup (CREATE TABLE + HNSW index)
+- httpx async for non-blocking image downloads
+"""
 import io
-import requests
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+
+import httpx
+import psycopg2
+from psycopg2.pool import SimpleConnectionPool
+from pgvector.psycopg2 import register_vector
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from PIL import Image
 import torch
-import psycopg2
-from pgvector.psycopg2 import register_vector
-import os
 from transformers import CLIPProcessor, CLIPModel
+import os
+import logging
+from typing import Optional
 
-# Global model instances
+logger = logging.getLogger(__name__)
+
+# Global instances
 processor = None
 model = None
+db_pool = None
 model_name = "openai/clip-vit-base-patch32"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global processor, model
-    print(f"Loading CLIP model: {model_name} on {device}")
-    processor = CLIPProcessor.from_pretrained(model_name)
-    model = CLIPModel.from_pretrained(model_name, torch_dtype=torch.float32).to(device)
-    model.eval()
-    print("CLIP model loaded successfully!")
-    yield
-    print("Shutting down vision service...")
+# Minimum cosine similarity score to consider a result as a valid match.
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.4"))
 
-app = FastAPI(title="TikTak Vision Service", lifespan=lifespan)
 
-from typing import Optional
+# ── Database ──────────────────────────────────────────────────────────────────
 
-class ImageRequest(BaseModel):
-    image_url: str
-    limit: int = 5
-    product_id: Optional[str] = None
-    variation_id: Optional[str] = None   # ID de la déclinaison exacte (couleur/taille)
-    shop_id: Optional[str] = None
-    store_image_url: Optional[str] = None  # URL Azure Blob à stocker en DB
-
-# Database connection helper
-def get_db_connection():
-    conn = psycopg2.connect(
+def _create_db_pool() -> SimpleConnectionPool:
+    """Create a connection pool at startup."""
+    return SimpleConnectionPool(
+        minconn=2,
+        maxconn=10,
         host=os.getenv("VECTOR_DB_HOST", "vector-db"),
         port=os.getenv("VECTOR_DB_PORT", "5432"),
         dbname=os.getenv("VECTOR_DB_NAME", "tiktak_vectors"),
         user=os.getenv("VECTOR_DB_USER", "tiktak_vector"),
-        password=os.getenv("VECTOR_DB_PASSWORD", "vector_pass")
+        password=os.getenv("VECTOR_DB_PASSWORD", "vector_pass"),
     )
+
+
+@contextmanager
+def get_db_connection():
+    """Context manager — always returns connection to pool, even on error."""
+    conn = db_pool.getconn()
     register_vector(conn)
-    return conn
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok", "service": "vision-service"}
-
-@app.post("/vectorize")
-async def predict_embedding(request: ImageRequest):
     try:
-        # 1. Download image
-        response = requests.get(request.image_url, stream=True)
-        response.raise_for_status()
-        image = Image.open(io.BytesIO(response.content)).convert("RGB")
+        yield conn
+    finally:
+        db_pool.putconn(conn)
 
-        # 2. Extract embedding
-        inputs = processor(images=image, return_tensors="pt").to(device)
-        with torch.no_grad():
-            # Use vision_model directly for transformers 5.x compatibility
-            pixel_values = inputs.get("pixel_values")
-            vision_outputs = model.vision_model(pixel_values=pixel_values)
-            image_features = vision_outputs.pooler_output
-            # Project through the visual projection layer
-            image_features = model.visual_projection(image_features)
-        
-        # 3. Normalize & convert to list
-        image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-        embedding = image_features.squeeze().cpu().tolist()
 
-        status_msg = "success"
-
-        # 4. Optional: Save to database if product details are provided
-        if request.product_id and request.shop_id:
-            try:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                
-                # Check if table exists, if not, create it (basic setup logic for POC)
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS products_vector (
-                        id SERIAL PRIMARY KEY,
-                        product_id   VARCHAR(255) NOT NULL,
-                        variation_id VARCHAR(255) NOT NULL,
-                        shop_id      VARCHAR(255) NOT NULL,
-                        image_url    TEXT,
-                        embedding    vector(512),
-                        UNIQUE(variation_id, shop_id)
-                    );
-                """)
-
-                # Upsert the embedding — one row per variation
-                cur.execute("""
-                    INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding)
-                    VALUES (%s, %s, %s, %s, %s::vector)
-                    ON CONFLICT (variation_id, shop_id)
-                    DO UPDATE SET
-                        embedding  = EXCLUDED.embedding,
-                        image_url  = EXCLUDED.image_url;
-                """, (request.product_id, request.variation_id, request.shop_id, request.store_image_url, embedding))
-                
-                conn.commit()
-                cur.close()
-                conn.close()
-                status_msg = "success (saved to db)"
-                
-            except psycopg2.Error as db_e:
-                status_msg = f"success but failed to save to db: {str(db_e)}"
-
-        return {
-            "status": status_msg,
-            "embedding": embedding,
-            "dimensions": len(embedding)
-        }
-        
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-
-@app.post("/search-similar")
-async def search_similar_products(request: ImageRequest):
-    try:
-        # 1. Download image
-        response = requests.get(request.image_url, stream=True)
-        response.raise_for_status()
-        image = Image.open(io.BytesIO(response.content)).convert("RGB")
-
-        # 2. Extract embedding
-        inputs = processor(images=image, return_tensors="pt").to(device)
-        with torch.no_grad():
-            pixel_values = inputs.get("pixel_values")
-            vision_outputs = model.vision_model(pixel_values=pixel_values)
-            image_features = vision_outputs.pooler_output
-            image_features = model.visual_projection(image_features)
-        
-        # 3. Normalize & convert to list
-        image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-        embedding = image_features.squeeze().cpu().tolist()
-
-        # 4. Search in pgvector database
-        conn = get_db_connection()
+def _init_database():
+    """Create table + HNSW index at startup (runs once)."""
+    with get_db_connection() as conn:
         cur = conn.cursor()
-        
-        # Uses cosine distance (<=>) for similarity
-        # Filter by shop_id if provided (multi-tenant isolation)
-        if request.shop_id:
-            cur.execute(
-                """
-                SELECT product_id, variation_id, shop_id, image_url,
-                       1 - (embedding <=> %s::vector) AS similarity
-                FROM products_vector
-                WHERE shop_id = %s
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
-                (embedding, request.shop_id, embedding, request.limit)
-            )
-        else:
-            cur.execute(
-                """
-                SELECT product_id, variation_id, shop_id, image_url,
-                       1 - (embedding <=> %s::vector) AS similarity
-                FROM products_vector
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
-                (embedding, embedding, request.limit)
-            )
-
-        results = []
-        for row in cur.fetchall():
-            results.append({
-                "product_id":    row[0],
-                "variation_id":  row[1],
-                "shop_id":       row[2],
-                "image_url":     row[3],
-                "similarity_score": float(row[4])
-            })
-            
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS products_vector (
+                id SERIAL PRIMARY KEY,
+                product_id   VARCHAR(255) NOT NULL,
+                variation_id VARCHAR(255) NOT NULL,
+                shop_id      VARCHAR(255) NOT NULL,
+                image_url    TEXT,
+                embedding    vector(512),
+                UNIQUE(variation_id, shop_id)
+            );
+        """)
+        # HNSW index for fast cosine similarity search (O(log n) instead of O(n))
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_products_vector_embedding
+                ON products_vector
+                USING hnsw (embedding vector_cosine_ops)
+                WITH (m = 16, ef_construction = 64);
+        """)
+        conn.commit()
         cur.close()
-        conn.close()
+    logger.info("[DB] Table and HNSW index initialized.")
 
-        return {
-            "status": "success",
-            "results": results
-        }
-        
-    except psycopg2.Error as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
+# ── CLIP Embedding ────────────────────────────────────────────────────────────
 
 def _embed_image(image: Image.Image) -> list:
-    """Shared helper: compute CLIP embedding for a PIL image."""
+    """Compute normalized CLIP embedding for a PIL image."""
     inputs = processor(images=image, return_tensors="pt").to(device)
     with torch.no_grad():
         pixel_values = inputs.get("pixel_values")
@@ -216,21 +105,21 @@ def _embed_image(image: Image.Image) -> list:
     return image_features.squeeze().cpu().tolist()
 
 
-@app.post("/search-similar-upload")
-async def search_similar_upload(
-    image: UploadFile = File(...),
-    shop_id: str = Form(None),
-    limit: int = Form(5),
-):
-    """Same as /search-similar but accepts a raw image file (multipart/form-data)."""
-    try:
-        contents = await image.read()
-        pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
-        embedding = _embed_image(pil_image)
+async def _download_and_embed(image_url: str) -> list:
+    """Download image async + compute embedding."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(image_url)
+        response.raise_for_status()
+    image = Image.open(io.BytesIO(response.content)).convert("RGB")
+    return _embed_image(image), image
 
-        conn = get_db_connection()
+
+# ── Database Search ───────────────────────────────────────────────────────────
+
+def _search_similar_db(embedding: list, shop_id: str = None, limit: int = 5) -> list:
+    """Search pgvector for similar product embeddings."""
+    with get_db_connection() as conn:
         cur = conn.cursor()
-
         if shop_id:
             cur.execute(
                 """
@@ -241,7 +130,7 @@ async def search_similar_upload(
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
                 """,
-                (embedding, shop_id, embedding, limit)
+                (embedding, shop_id, embedding, limit),
             )
         else:
             cur.execute(
@@ -252,23 +141,146 @@ async def search_similar_upload(
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
                 """,
-                (embedding, embedding, limit)
+                (embedding, embedding, limit),
             )
 
         results = []
         for row in cur.fetchall():
-            results.append({
-                "product_id":       row[0],
-                "variation_id":     row[1],
-                "shop_id":          row[2],
-                "image_url":        row[3],
-                "similarity_score": float(row[4])
-            })
-
+            score = float(row[4])
+            if score >= SIMILARITY_THRESHOLD:
+                results.append({
+                    "product_id":       row[0],
+                    "variation_id":     row[1],
+                    "shop_id":          row[2],
+                    "image_url":        row[3],
+                    "similarity_score": score,
+                })
         cur.close()
-        conn.close()
+    return results
 
-        return {"status": "success", "results": results}
+
+# ── App Lifespan ──────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global processor, model, db_pool
+    # Load CLIP model
+    logger.info(f"Loading CLIP model: {model_name} on {device}")
+    processor = CLIPProcessor.from_pretrained(model_name)
+    model = CLIPModel.from_pretrained(model_name, torch_dtype=torch.float32).to(device)
+    model.eval()
+    logger.info("CLIP model loaded successfully!")
+
+    # Initialize DB pool + schema
+    db_pool = _create_db_pool()
+    _init_database()
+
+    yield
+
+    # Cleanup
+    logger.info("Shutting down vision service...")
+    if db_pool:
+        db_pool.closeall()
+
+
+app = FastAPI(title="TikTak Vision Service", lifespan=lifespan)
+
+
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+class ImageRequest(BaseModel):
+    image_url: str
+    limit: int = 5
+    product_id: Optional[str] = None
+    variation_id: Optional[str] = None
+    shop_id: Optional[str] = None
+    store_image_url: Optional[str] = None
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "vision-service", "device": device}
+
+
+@app.post("/vectorize")
+async def predict_embedding(request: ImageRequest):
+    """Extract CLIP embedding from image URL and optionally save to DB."""
+    try:
+        embedding, _ = await _download_and_embed(request.image_url)
+        status_msg = "success"
+
+        # Save to database if product details provided
+        if request.product_id and request.shop_id:
+            try:
+                with get_db_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding)
+                        VALUES (%s, %s, %s, %s, %s::vector)
+                        ON CONFLICT (variation_id, shop_id)
+                        DO UPDATE SET embedding = EXCLUDED.embedding, image_url = EXCLUDED.image_url;
+                        """,
+                        (request.product_id, request.variation_id, request.shop_id,
+                         request.store_image_url, embedding),
+                    )
+                    conn.commit()
+                    cur.close()
+                status_msg = "success (saved to db)"
+            except psycopg2.Error as db_e:
+                status_msg = f"success but failed to save to db: {str(db_e)}"
+
+        return {"status": status_msg, "embedding": embedding, "dimensions": len(embedding)}
+
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.post("/search-similar")
+async def search_similar_products(request: ImageRequest):
+    """Search for similar products by image URL."""
+    try:
+        embedding, _ = await _download_and_embed(request.image_url)
+        results = _search_similar_db(embedding, request.shop_id, request.limit)
+
+        return {
+            "status": "success",
+            "results": results,
+            "threshold": SIMILARITY_THRESHOLD,
+            "total_matches": len(results),
+        }
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.post("/search-similar-upload")
+async def search_similar_upload(
+    image: UploadFile = File(...),
+    shop_id: str = Form(None),
+    limit: int = Form(5),
+):
+    """Search for similar products by uploaded image file."""
+    try:
+        contents = await image.read()
+        pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
+        embedding = _embed_image(pil_image)
+        results = _search_similar_db(embedding, shop_id, limit)
+
+        return {
+            "status": "success",
+            "results": results,
+            "threshold": SIMILARITY_THRESHOLD,
+            "total_matches": len(results),
+        }
 
     except psycopg2.Error as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

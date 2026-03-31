@@ -9,13 +9,36 @@ Responsibilities:
 """
 import re
 import logging
-from django.conf import settings
-from apps.gateway.response_templates import (
-    TEMPLATES, MISSING_ENTITY_TEMPLATES, REQUIRED_ORDER_ENTITIES,
-    OUT_OF_STOCK_TEMPLATE, ORDER_CONFIRMED_TEMPLATE, ORDER_CONFIRMED_NO_REF_TEMPLATE,
-)
+from typing import Optional, Set
+from django.conf import settings  # pyre-ignore[21]
+from apps.gateway.response_templates import REQUIRED_ORDER_ENTITIES  # pyre-ignore[21]
+from apps.gateway.services.template_service import get_template
 
 logger = logging.getLogger(__name__)
+
+def detect_language(text: str) -> str:
+    """Detect language: Arabic characters → AR, everything else → FR."""
+    if not text:
+        return "FR"
+    if re.search(r'[\u0600-\u06FF]', text):
+        return "AR"
+    return "FR"
+
+def _format_bot_response(response: str, variables: dict) -> str:
+    """Replaces {{variable}} or {variable} with its corresponding value."""
+    if not response:
+        return ""
+    
+    for key, value in variables.items():
+        if value is not None:
+            # Replace {{var}}
+            response = response.replace(f"{{{{{key}}}}}", str(value))
+            # Replace {var} for older templates compatibility
+            response = response.replace(f"{{{key}}}", str(value))
+    
+    # Clean up any remaining unresolved placeholders
+    response = re.sub(r'\{\{?[a-z_]+\}?\}', '', response).strip()
+    return response
 
 # Map intent → entity labels that GLiNER results are filtered to
 INTENT_ENTITY_FILTER = {
@@ -25,11 +48,10 @@ INTENT_ENTITY_FILTER = {
     "INFORM_INFO":     {"address", "phone_number", "color", "size"},
     "ASK_DELIVERY":    set(),
     "GREETING":        set(),
-    "UNKNOWN":         set(),
     "NOISE":           set(),
     "ASK_DETAILS":     {"product"},
-    "ASK_DISCOUNT":    set(),
-    "ASK_LOCATION":    set(),
+    "ASK_DISCOUNT":    {"product", "color", "size"},
+    "ASK_LOCATION":    {"address", "phone_number"},
     "CANCEL_ORDER":    set(),
     "CHECK_PACKAGE":   set(),
     "COMPLAINT":       set(),
@@ -45,22 +67,13 @@ _VALID_SIZES = {"S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE", "XS", "XXL
 # ─── Entity Guards ───────────────────────────────────────────────────────────
 
 def apply_entity_guards(nlu_raw_entities: list, intent: str, conversation) -> dict:
-    """
-    Filter GLiNER entities:
-    - Only keep labels relevant to the current intent / missing_entities
-    - Reject address entries that are too short, look like a size, or were also
-      labelled as phone_number by GLiNER
-    - Color correction bypass: even when color is not in relevant_entities,
-      allow it if a color is already in context (explicit user correction)
-
-    Returns extracted_entities dict.
-    """
-    if (intent == "INFORM_INFO"
-            and conversation.missing_entities
-            and conversation.state == "WAITING_USER_REPLY"):
+    relevant: Set[str] = set()
+    if (conversation.missing_entities
+            and conversation.state in ("WAITING_USER_REPLY", "NEW_CONVERSATION")
+            and intent in ("INFORM_INFO", "ASK_LOCATION", "CONFIRM_DENY")):
         relevant = set(conversation.missing_entities)
     else:
-        relevant = INTENT_ENTITY_FILTER.get(intent, set())
+        relevant = set(INTENT_ENTITY_FILTER.get(intent, set()))
 
     phone_texts = {e["text"].strip() for e in nlu_raw_entities if e["label"] == "phone_number"}
 
@@ -70,6 +83,17 @@ def apply_entity_guards(nlu_raw_entities: list, intent: str, conversation) -> di
             if ent["label"] == "address":
                 val = ent["text"].strip()
                 if len(val) < 3 or val.upper() in _VALID_SIZES or val in phone_texts:
+                    continue
+                # Reject false addresses: strip confirmation words + size tokens
+                _confirm_words = {"ok", "okay", "oui", "non", "behi", "bahi", "yes", "no",
+                                  "bien", "d'accord", "daccord", "mrigel", "ena", "ey", "ah"}
+                cleaned = val.upper()
+                for sz in sorted(_VALID_SIZES, key=len, reverse=True):
+                    cleaned = re.sub(rf'\b{sz}\b', '', cleaned)
+                for cw in _confirm_words:
+                    cleaned = re.sub(rf'\b{cw.upper()}\b', '', cleaned)
+                if len(cleaned.strip()) < 3:
+                    logger.info(f"[ADDRESS GUARD] Rejected '{val}' — confirmation/size only")
                     continue
             extracted[ent["label"]] = ent["text"]
 
@@ -87,22 +111,7 @@ def apply_entity_guards(nlu_raw_entities: list, intent: str, conversation) -> di
 # ─── Context Accumulation ────────────────────────────────────────────────────
 
 def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
-    """
-    Merge extracted_entities into the conversation context with priority rules:
-
-    - product: locked once set, EXCEPT when the new product comes from the
-      vision service (Article_From_Image_xxx) — image always wins.
-    - color: locked, EXCEPT when the ONLY entity in this message is "color"
-      (explicit correction like "Non, Bleu").
-    - address: rejected if product/color/size are not yet known (either in
-      the existing context or in the current message entities).
-      Prevents free-text noise from being mistakenly captured as an address.
-
-    Returns the updated current_context.
-    """
     # ── Address Guard ────────────────────────────────────────────────────────
-    # Merge current context with freshly extracted entities so that a full
-    # sentence like "t-shirt rouge M à Tunis" doesn't lose the address.
     if "address" in extracted_entities:
         context_plus_new = {**current_context, **extracted_entities}
         prerequisite_entities = {"product", "color", "size"}
@@ -127,7 +136,6 @@ def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
             extracted_entities.pop("color", None)
 
     current_context.update(extracted_entities)
-    current_context.pop("_vision_variation_id", None)
     return current_context
 
 
@@ -135,23 +143,13 @@ def accumulate_context(current_context: dict, extracted_entities: dict) -> dict:
 
 def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
                             nlu_raw_entities: list, current_context: dict) -> tuple:
-    """
-    When the bot is WAITING_USER_REPLY, try to extract the expected entity from
-    the user's free-text response using two strategies:
-
-    Strategy 1 — direct GLiNER label match against missing fields.
-    Strategy 2 — pattern-based validation (size, phone number, address/color).
-
-    Returns (updated_extracted_entities, contextual_match: bool).
-    """
-    _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT", "UNKNOWN"}
+    _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT"}
     previous_state = conversation.state
 
     if not (previous_state == "WAITING_USER_REPLY"
             and conversation.missing_entities):
         return extracted_entities, False
 
-    # Import here to avoid circular check — intent passed in from views
     contextual_match = False
     text_clean = text.strip().upper()
 
@@ -176,6 +174,16 @@ def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
                     extracted_entities[missing_field] = text_clean
                     current_context[missing_field]    = text_clean
                     contextual_match = True
+                    break
+                # Regex fallback: extract size from mixed text like "Behi L"
+                sizes_pattern = "|".join(sorted(valid_sizes, key=len, reverse=True))
+                size_match = re.search(rf'\b({sizes_pattern})\b', text_clean)
+                if size_match:
+                    found_size = size_match.group(1)
+                    extracted_entities[missing_field] = found_size
+                    current_context[missing_field]    = found_size
+                    contextual_match = True
+                    logger.info(f"[SIZE REGEX] Extracted '{found_size}' from '{text_clean}'")
                     break
 
             elif missing_field == "quantity":
@@ -205,16 +213,22 @@ def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
 
                 if missing_field == "address":
                     valid_sizes = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "ONE SIZE"]
+                    # Strip confirmation words + sizes to reject "Okay L", "behi XL", etc.
+                    _confirm_words = {"ok", "okay", "oui", "non", "behi", "bahi", "yes", "no",
+                                      "bien", "daccord", "mrigel", "ena", "ey", "ah"}
+                    cleaned = val.upper()
+                    for sz in sorted(valid_sizes, key=len, reverse=True):
+                        cleaned = re.sub(rf'\b{sz}\b', '', cleaned)
+                    for cw in _confirm_words:
+                        cleaned = re.sub(rf'\b{cw.upper()}\b', '', cleaned)
                     if (val and len(val) >= 3 and val.upper() not in valid_sizes
-                            and not already_labelled and not gliner_not_addr):
+                            and not already_labelled and not gliner_not_addr
+                            and len(cleaned.strip()) >= 3):
                         extracted_entities[missing_field] = val
                         current_context[missing_field]    = val
                         contextual_match = True
                         break
                 elif missing_field == "color":
-                    # Only accept color if GLiNER explicitly labeled it as such.
-                    # Prevents generic text (e.g. "nheb naadi commande") from being
-                    # captured as a color entity when the bot is waiting for one.
                     color_match = next(
                         (e["text"] for e in nlu_raw_entities if e["label"] == "color"),
                         None
@@ -231,25 +245,14 @@ def run_contextual_mapping(conversation, text: str, extracted_entities: dict,
 # ─── Stock Check Helper ──────────────────────────────────────────────────────
 
 def _check_stock(matched_product: dict, color: str, size: str) -> tuple:
-    """
-    Check stock for a given color/size combination.
-
-    Returns (stock_ok: bool, available_str: str).
-
-    - Si matched_product est None, on ne peut pas vérifier → on passe (True).
-    - Sinon, on filtre les variations selon les champs non-vides (color et/ou size).
-    - Un produit avec stock_quantity == 0 est détecté même si color est vide.
-    """
     if not matched_product:
         return True, ""
 
-    # Filtre dynamique selon les champs fournis
     def _matches(v: dict) -> bool:
         color_match = (not color) or (v.get("color", "").lower() == color.lower())
         size_match  = (not size)  or (v.get("size",  "").lower() == size.lower())
         return color_match and size_match
 
-    # Si aucun critère, vérifier le stock global du produit
     if not color and not size:
         total_stock = sum(v.get("stock_quantity", 0) for v in matched_product.get("variations", []))
         return (total_stock > 0), ""
@@ -270,22 +273,66 @@ def _check_stock(matched_product: dict, color: str, size: str) -> tuple:
     return False, avail
 
 
+def _auto_fill_single_color(matched_product: dict, current_context: dict) -> None:
+    """If only one in-stock color exists for the product, pre-fill it in context."""
+    if not matched_product:
+        return
+    in_stock_colors = list({
+        v["color"] for v in matched_product.get("variations", [])
+        if v.get("stock_quantity", 0) > 0 and v.get("color")
+    })
+    if len(in_stock_colors) == 1:
+        current_context["color"] = in_stock_colors[0]
+        logger.info(f"[AUTO COLOR] Single color available: '{in_stock_colors[0]}' — pre-filled in context")
+
+
 # ─── State Machine ───────────────────────────────────────────────────────────
 
 def run_state_machine(intent: str, previous_state: str, current_context: dict,
                       matched_product, lead, conversation,
-                      vision_variation_id: str = None) -> dict:
-    """
-    Execute the main intent→state machine.
+                      vision_variation_id: Optional[str] = None, bot_config = None,
+                      text: str = "", shop_id: str = None) -> dict:
+    
+    lang = "FR"
+    if bot_config:
+        if bot_config.language == "AUTO":
+            # Sticky language: detect once, use for entire conversation
+            if "_detected_lang" in current_context:
+                lang = current_context["_detected_lang"]
+            else:
+                has_letters = sum(1 for c in text if c.isalpha()) >= 3
+                if text.strip() and has_letters:
+                    lang = detect_language(text)
+                current_context["_detected_lang"] = lang
+        else:
+            lang = bot_config.language
 
-    Returns:
-    {
-        "bot_response": str,
-        "new_state":    str,
-        "missing_list": list,
+    # Build substitution variables
+    shop_name = bot_config.shop_name if bot_config and bot_config.shop_name else "notre boutique"
+    ai_agent_name = bot_config.ai_agent_name if bot_config and bot_config.ai_agent_name else "TikTak AI"
+    variables = {
+        "shop_name": shop_name,
+        "ai_agent_name": ai_agent_name,
+        "product": matched_product["name"] if matched_product else current_context.get("product", "cet article"),
+        "color": current_context.get("color", ""),
+        "size": current_context.get("size", ""),
+        "price": str(matched_product.get("base_price", "0")) if matched_product else "0",
     }
-    """
-    bot_response = TEMPLATES.get("UNKNOWN", "Je n'ai pas compris.")
+
+    # Custom intents override
+    custom_intents = bot_config.custom_intents if bot_config and isinstance(bot_config.custom_intents, dict) else {}
+    if intent in custom_intents and custom_intents[intent].strip():
+        # But wait, ORDER_PRODUCT and INFORM_INFO have complex state logic for missing entities.
+        # So we only override single turn intents directly if it's purely informational or if it's already fulfilled.
+        # For simplicity, we only fully return custom directly for informational intents:
+        if intent in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY", "GREETING") or (intent not in ["ORDER_PRODUCT", "INFORM_INFO", "NOISE"]):
+            return {
+                "bot_response": _format_bot_response(custom_intents[intent], variables),
+                "new_state": previous_state,
+                "missing_list": []
+            }
+
+    bot_response = get_template("response", "UNKNOWN", lang, shop_id) or "Je n'ai pas compris."
     missing_list = []
     new_state    = previous_state
 
@@ -304,22 +351,23 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
             if not stock_ok:
                 display = matched_product["name"]
                 bot_response = (
-                    OUT_OF_STOCK_TEMPLATE
+                    (get_template("out_of_stock", "default", lang, shop_id) or "")
                     .replace("{product}", display)
                     .replace("{color}",   color)
                     .replace("{size}",    size)
                 )
                 if avail:
-                    bot_response += f"\nDisponible en : {avail}"
+                    bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                 current_context.pop("color", None)
                 current_context.pop("size",  None)
+                _auto_fill_single_color(matched_product, current_context)
                 missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
             else:
                 first_missing = missing_list[0]
                 display       = matched_product["name"] if matched_product else "cet article"
+                _missing_default = (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
                 bot_response  = (
-                    MISSING_ENTITY_TEMPLATES
-                    .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
+                    (get_template("missing_entity", first_missing, lang, shop_id) or _missing_default)
                     .replace("{product}", display)
                     .replace("{color}",   color)
                 )
@@ -327,10 +375,10 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                     variations = matched_product.get("variations", [])
                     if first_missing == "size":
                         avail = ", ".join(list(set(v["size"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                        bot_response += f"\nTailles disponibles : {avail}" if avail else ""
+                        if avail: bot_response += (get_template("out_of_stock", "sizes", lang, shop_id) or "").replace("{avail}", avail)
                     else:
                         avail = ", ".join(list(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                        bot_response += f"\nCouleurs disponibles : {avail}" if avail else ""
+                        if avail: bot_response += (get_template("out_of_stock", "colors", lang, shop_id) or "").replace("{avail}", avail)
         else:
             # All entities collected — create pre-order
             chosen_color = current_context.get("color", "")
@@ -340,22 +388,23 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
 
             if not stock_ok:
                 bot_response = (
-                    OUT_OF_STOCK_TEMPLATE
+                    (get_template("out_of_stock", "default", lang, shop_id) or "")
                     .replace("{product}", display)
                     .replace("{color}",   chosen_color)
                     .replace("{size}",    chosen_size)
                 )
                 if avail:
-                    bot_response += f"\nDisponible en : {avail}"
+                    bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                 current_context.pop("color", None)
                 current_context.pop("size",  None)
+                _auto_fill_single_color(matched_product, current_context)
                 missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                 new_state    = "WAITING_USER_REPLY"
             else:
                 new_state = "COMPLETED"
                 bot_response = _create_preorder_and_confirm(
                     lead, matched_product, vision_variation_id,
-                    chosen_color, chosen_size, current_context, display
+                    chosen_color, chosen_size, current_context, display, lang=lang
                 )
 
     # ── INFORM_INFO ────────────────────────────────────────────────────────
@@ -374,22 +423,23 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                 if not stock_ok:
                     display = matched_product["name"]
                     bot_response = (
-                        OUT_OF_STOCK_TEMPLATE
+                        (get_template("out_of_stock", "default", lang, shop_id) or "")
                         .replace("{product}", display)
                         .replace("{color}",   color)
                         .replace("{size}",    size)
                     )
                     if avail:
-                        bot_response += f"\nDisponible en : {avail}"
+                        bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                     current_context.pop("color", None)
                     current_context.pop("size",  None)
+                    _auto_fill_single_color(matched_product, current_context)
                     missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                 else:
                     first_missing = missing_list[0]
+                    _inform_default = (get_template("misc", "inform_info_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
                     bot_response  = (
-                        MISSING_ENTITY_TEMPLATES
-                        .get(first_missing, f"Et pour la {first_missing} ?")
-                        .replace("{product}", current_context.get("product", "cet article"))
+                        (get_template("missing_entity", first_missing, lang, shop_id) or _inform_default)
+                        .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
                         .replace("{color}",   color)
                     )
             else:
@@ -399,22 +449,23 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                 display      = matched_product["name"] if matched_product else current_context.get("product", "votre article")
 
                 if not matched_product and current_context.get("product", "").startswith("Article_From_Image_"):
-                    bot_response = "Désolé, impossible de vérifier le stock pour le moment. Veuillez réessayer."
+                    bot_response = get_template("misc", "stock_check_error", lang, shop_id) or ""
                     new_state    = "WAITING_USER_REPLY"
                     missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                 else:
                     stock_ok, avail = _check_stock(matched_product, chosen_color, chosen_size)
                     if not stock_ok:
                         bot_response = (
-                            OUT_OF_STOCK_TEMPLATE
+                            (get_template("out_of_stock", "default", lang, shop_id) or "")
                             .replace("{product}", display)
                             .replace("{color}",   chosen_color)
                             .replace("{size}",    chosen_size)
                         )
                         if avail:
-                            bot_response += f"\nDisponible en : {avail}"
+                            bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
                         current_context.pop("color", None)
                         current_context.pop("size",  None)
+                        _auto_fill_single_color(matched_product, current_context)
                         missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                         new_state    = "WAITING_USER_REPLY"
                     else:
@@ -422,52 +473,83 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                         new_state    = "COMPLETED"
                         bot_response = _create_preorder_and_confirm(
                             lead, matched_product, vision_variation_id,
-                            chosen_color, chosen_size, current_context, display
+                            chosen_color, chosen_size, current_context, display, lang=lang
                         )
         else:
             # INFORM_INFO outside an active flow
             if "product" not in current_context:
-                bot_response = "Merci pour ces informations ! Quel article souhaitez-vous commander ?"
+                bot_response = get_template("misc", "inform_product_default", lang, shop_id) or ""
                 new_state    = "WAITING_USER_REPLY"
                 missing_list = ["product"]
             else:
-                bot_response = TEMPLATES.get("INFORM_INFO")
+                bot_response = get_template("response", "INFORM_INFO", lang, shop_id) or ""
 
     # ── ASK_PRICE / ASK_AVAILABILITY / ASK_DELIVERY ────────────────────────
     elif intent in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY"):
         if previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
-            if intent == "ASK_PRICE" and matched_product:
-                bot_response = f"Le {matched_product['name']} est au prix de {matched_product.get('base_price', '0')} TND. "
-            elif intent == "ASK_AVAILABILITY" and matched_product:
-                variations = matched_product.get("variations", [])
-                sizes  = ", ".join(list(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
-                colors = ", ".join(list(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                bot_response = f"Oui, le {matched_product['name']} est en stock. Tailles : {sizes or 'aucune'}. Couleurs : {colors or 'aucune'}. "
-            else:
-                bot_response = TEMPLATES.get(intent, "Je n'ai pas compris.")
+            skip_missing_flow = False
 
-            for req in REQUIRED_ORDER_ENTITIES:
-                if req not in current_context:
-                    missing_list.append(req)
-            if missing_list:
-                new_state    = "WAITING_USER_REPLY"
-                first_missing = missing_list[0]
-                bot_response += (
-                    MISSING_ENTITY_TEMPLATES
-                    .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
-                    .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
-                    .replace("{color}",   current_context.get("color", ""))
-                )
+            if intent == "ASK_PRICE" and matched_product:
+                price = matched_product.get('base_price', '0')
+                bot_response = (get_template("response", "ASK_PRICE", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{price}", str(price)) + " "
+            elif intent == "ASK_AVAILABILITY" and matched_product:
+                size  = current_context.get("size", "")
+                color = current_context.get("color", "")
+                if size:
+                    # User asked about a specific size — validate stock first
+                    stock_ok, avail = _check_stock(matched_product, color, size)
+                    if not stock_ok:
+                        display = matched_product["name"]
+                        bot_response = (
+                            (get_template("out_of_stock", "default", lang, shop_id) or "")
+                            .replace("{product}", display)
+                            .replace("{color}", color)
+                            .replace("{size}", size)
+                        )
+                        if avail:
+                            bot_response += (get_template("out_of_stock", "available", lang, shop_id) or "").replace("{avail}", avail)
+                        current_context.pop("size", None)
+                        _auto_fill_single_color(matched_product, current_context)
+                        missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                        new_state = "WAITING_USER_REPLY"
+                        skip_missing_flow = True  # Don't re-append missing list below
+                    else:
+                        # Size IS in stock — confirm and continue flow
+                        variations = matched_product.get("variations", [])
+                        sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
+                        colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
+                        bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+                else:
+                    # No specific size — show all available
+                    variations = matched_product.get("variations", [])
+                    sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
+                    colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
+                    bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+            else:
+                bot_response = get_template("response", intent, lang, shop_id) or ""
+
+            if not skip_missing_flow:
+                for req in REQUIRED_ORDER_ENTITIES:
+                    if req not in current_context:
+                        missing_list.append(req)
+                if missing_list:
+                    new_state    = "WAITING_USER_REPLY"
+                    first_missing = missing_list[0]
+                    bot_response += (
+                        get_template("missing_entity", first_missing, lang, shop_id)
+                        or (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
+                    ).replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article")).replace("{color}", current_context.get("color", ""))
+
         else:
             if not matched_product:
                 if intent == "ASK_AVAILABILITY":
-                    bot_response = "Sur quel article souhaitez-vous vérifier la disponibilité ?"
+                    bot_response = get_template("misc", "ask_availability_default", lang, shop_id) or ""
                 elif intent == "ASK_PRICE":
-                    bot_response = "Sur quel article souhaitez-vous connaître le prix ?"
+                    bot_response = get_template("misc", "ask_price_default", lang, shop_id) or ""
                 else:
-                    bot_response = TEMPLATES.get(intent, "Je n'ai pas compris.")
+                    bot_response = get_template("response", intent, lang, shop_id) or ""
             else:
-                bot_response = TEMPLATES.get(intent, "Je n'ai pas compris.")
+                bot_response = get_template("response", intent, lang, shop_id) or ""
                 price = matched_product.get("base_price", "0")
                 variations = matched_product.get("variations", [])
                 sizes  = ", ".join(list(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
@@ -476,29 +558,39 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                     bot_response
                     .replace("{product}", matched_product["name"])
                     .replace("{price}",   str(price))
-                    .replace("{sizes}",   sizes  or "rupture de stock")
-                    .replace("{colors}",  colors or "rupture de couleur")
+                    .replace("{sizes}",   sizes  or "-")
+                    .replace("{colors}",  colors or "-")
                 )
 
     # ── ALL OTHER INTENTS ──────────────────────────────────────────────────
     else:
-        if intent == "NOISE" and previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
+        # Preserve context for vague/confirmatory intents when entities are still missing
+        if intent in ("NOISE", "CONFIRM_DENY", "ASK_LOCATION") and conversation.missing_entities:
             new_state    = "WAITING_USER_REPLY"
             missing_list = conversation.missing_entities
             first_missing = missing_list[0] if missing_list else None
-            bot_response  = "Parlez plus clairement s'il vous plaît. "
+            if intent == "ASK_LOCATION":
+                bot_response = (get_template("response", "ASK_LOCATION", lang, shop_id) or "") + " "
+            else:
+                bot_response = get_template("misc", "noise_default", lang, shop_id) or ""
             if first_missing:
+                _noise_missing_default = (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
                 bot_response += (
-                    MISSING_ENTITY_TEMPLATES
-                    .get(first_missing, f"Pouvez-vous me dire {first_missing} ?")
-                    .replace("{product}", current_context.get("product", "cet article"))
+                    (get_template("missing_entity", first_missing, lang, shop_id) or _noise_missing_default)
+                    .replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article"))
                     .replace("{color}",   current_context.get("color", ""))
                 )
         else:
-            bot_response = TEMPLATES.get(intent, TEMPLATES.get("UNKNOWN"))
+            bot_response = get_template("response", intent, lang, shop_id) or get_template("response", "UNKNOWN", lang, shop_id) or ""
 
-    # Safety net: remove unresolved {placeholders}
-    bot_response = re.sub(r'\{[a-z_]+\}', '', bot_response).strip()
+    # If it's a custom intent that wasn't eagerly bypassed (e.g., custom ORDER_PRODUCT response after completion)
+    # Note: Complex interactions like order flow still use the built-in OUT_OF_STOCK and MISSING_ENTITY templates for flow logic.
+    if intent in custom_intents and custom_intents[intent] and new_state == "COMPLETED" and not missing_list:
+         # Optionally override the final completion message
+         pass
+
+    # Standardize output by running through format mapper
+    bot_response = _format_bot_response(bot_response, variables)
 
     return {
         "bot_response": bot_response,
@@ -510,7 +602,7 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
 # ─── Pre-order helper ────────────────────────────────────────────────────────
 
 def _create_preorder_and_confirm(lead, matched_product, vision_variation_id,
-                                  chosen_color, chosen_size, context, display_name) -> str:
+                                  chosen_color, chosen_size, context, display_name, lang="FR") -> str:
     """Create a pre-order in Lead and return the confirmation message."""
     pre_order_ref = None
     try:
@@ -529,5 +621,5 @@ def _create_preorder_and_confirm(lead, matched_product, vision_variation_id,
         logger.error(f"[PRE-ORDER] creation error: {e}")
 
     if pre_order_ref:
-        return ORDER_CONFIRMED_TEMPLATE.replace("{product}", display_name).replace("{ref}", str(pre_order_ref))
-    return ORDER_CONFIRMED_NO_REF_TEMPLATE.replace("{product}", display_name)
+        return (get_template("order_confirmed", "with_ref", lang) or "").replace("{product}", display_name).replace("{ref}", str(pre_order_ref))
+    return (get_template("order_confirmed", "no_ref", lang) or "").replace("{product}", display_name)

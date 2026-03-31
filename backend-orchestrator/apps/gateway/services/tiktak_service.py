@@ -81,17 +81,25 @@ def normalize_tiktak_products(results: list) -> list:
 
 # ─── Fetching ────────────────────────────────────────────────────────────────
 
-def get_products(shop_id: str) -> list:
+def get_products(shop_id: str, api_token: str = None) -> list:
     """
     Return the full product list for a shop, using Redis cache when available.
     Paginates through all TikTak API pages (max 10).
+    
+    Args:
+        shop_id: The shop identifier on the Tiktak platform.
+        api_token: Per-shop API token. Falls back to settings.TIKTAK_API_TOKEN if not provided.
     """
     cache_key = f"tiktak_products:{shop_id}"
     products = cache.get(cache_key)
 
     if products is None:
         logger.info(f"[TIKTAK] cache miss shop_id={shop_id}")
-        api_headers = {"Authorization": f"Bearer {settings.TIKTAK_API_TOKEN}"}
+        token = api_token
+        if not token:
+            logger.error(f"[TIKTAK] No API token for shop_id={shop_id}")
+            return []
+        api_headers = {"Authorization": f"Bearer {token}"}
         all_results = []
         next_url    = TIKTAK_API_PRODUCTS_URL
         params      = {"company": shop_id}
@@ -109,11 +117,67 @@ def get_products(shop_id: str) -> list:
                     all_results.extend(data.get("results", []))
                     next_url = data.get("next")
                     page_count += 1
-                else:
-                    logger.error(f"[TIKTAK] HTTP {resp.status_code}")
+
+                elif resp.status_code == 401:
+                    logger.error(
+                        f"[TIKTAK] 401 Unauthorized — token expired or invalid "
+                        f"for shop_id={shop_id}. Veuillez renouveler le token."
+                    )
                     break
+
+                elif resp.status_code == 403:
+                    logger.error(
+                        f"[TIKTAK] 403 Forbidden — access denied for shop_id={shop_id}. "
+                        f"Le token n'a pas les permissions requises."
+                    )
+                    break
+
+                elif resp.status_code == 400:
+                    logger.error(
+                        f"[TIKTAK] 400 Bad Request — requête invalide pour shop_id={shop_id}. "
+                        f"Réponse: {resp.text[:200]}"
+                    )
+                    break
+
+                elif resp.status_code == 404:
+                    logger.error(
+                        f"[TIKTAK] 404 Not Found — endpoint introuvable pour shop_id={shop_id}. "
+                        f"URL: {next_url}"
+                    )
+                    break
+
+                elif resp.status_code == 429:
+                    logger.warning(
+                        f"[TIKTAK] 429 Too Many Requests — rate limit atteint pour shop_id={shop_id}. "
+                        f"Réessayez plus tard."
+                    )
+                    break
+
+                elif 500 <= resp.status_code < 600:
+                    logger.error(
+                        f"[TIKTAK] {resp.status_code} Server Error — erreur serveur Tiktak "
+                        f"pour shop_id={shop_id}. Réponse: {resp.text[:200]}"
+                    )
+                    break
+
+                else:
+                    logger.error(
+                        f"[TIKTAK] HTTP {resp.status_code} inattendu pour shop_id={shop_id}. "
+                        f"Réponse: {resp.text[:200]}"
+                    )
+                    break
+
+            except requests.ConnectionError as e:
+                logger.error(f"[TIKTAK] Connection error — serveur Tiktak injoignable: {e}")
+                break
+            except requests.Timeout:
+                logger.error(
+                    f"[TIKTAK] Timeout — la requête a dépassé {REQUEST_TIMEOUT}s "
+                    f"pour shop_id={shop_id}"
+                )
+                break
             except requests.RequestException as e:
-                logger.error(f"[TIKTAK] Connection error: {e}")
+                logger.error(f"[TIKTAK] Request error pour shop_id={shop_id}: {e}")
                 break
 
         products = normalize_tiktak_products(all_results)
@@ -123,6 +187,33 @@ def get_products(shop_id: str) -> list:
         logger.debug(f"[TIKTAK] cache hit shop_id={shop_id}")
 
     return products or []
+
+
+
+# ─── Variation lookup ─────────────────────────────────────────────────────────
+
+def get_color_from_variation(variation_id, products: list) -> str | None:
+    """
+    Return the color of a specific variation by its ID.
+    Used to pre-fill the color entity when the vision service identifies a product via image.
+
+    Args:
+        variation_id: ID returned by the vision service (int or str)
+        products:     Normalized product list from get_products()
+
+    Returns:
+        color string if found and non-empty, else None
+    """
+    vid = str(variation_id)
+    for product in products:
+        for variation in product.get("variations", []):
+            if str(variation.get("id")) == vid:
+                color = variation.get("color", "").strip()
+                if color:
+                    logger.info(f"[TIKTAK] variation_id={vid} → color='{color}'")
+                    return color
+    logger.warning(f"[TIKTAK] variation_id={vid} not found in catalog — color not pre-filled")
+    return None
 
 
 # ─── Matching ────────────────────────────────────────────────────────────────

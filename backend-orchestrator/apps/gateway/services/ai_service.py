@@ -4,10 +4,13 @@ ai_service.py — Layer 1: External AI API clients
 Responsibilities:
 - Call NLU service (intent + entity extraction)
 - Call Vision service (image similarity search)
+- Gemini fallback when NLU is unavailable or low-confidence
 """
 import logging
 import requests
 from django.conf import settings
+
+from . import gemini_service
 
 logger = logging.getLogger(__name__)
 
@@ -60,25 +63,60 @@ def call_vision(shop_id: str, image_url: str = None, image_file=None) -> dict | 
     return None
 
 
-def call_nlu(text: str) -> dict:
+def _should_fallback(result: dict) -> bool:
+    """
+    Decide if Gemini fallback should be triggered.
+
+    Two conditions:
+    1. Low confidence — TunBERT confidence below threshold
+    2. Always verify — intent is in the destructive intents list (e.g. CANCEL_ORDER)
+    """
+    # Always verify destructive intents
+    if result.get("intent") in settings.GEMINI_ALWAYS_VERIFY_INTENTS:
+        return True
+    # Low confidence
+    confidence = result.get("confidence_score")
+    if confidence is not None and confidence < settings.GEMINI_FALLBACK_CONFIDENCE_THRESHOLD:
+        return True
+    return False
+
+
+def call_nlu(text: str, user_id: str = None) -> dict:
     """
     Call the NLU service (TunBERT intent + GLiNER entities).
+    Falls back to Gemini if TunBERT is unavailable or returns low-confidence.
 
     Returns a dict:
     {
-        "intent":  str,         # e.g. "ORDER_PRODUCT"
-        "entities": dict,       # {label: text} (filtered by caller)
-        "raw_entities": list,   # [{text, label, score, start, end}, ...]
-        "error": bool
+        "intent":  str,
+        "confidence_score": float | None,
+        "raw_entities": list,
+        "error": bool,
+        "fallback_used": bool,
+        "_tunbert_original": dict | None,    # Original TunBERT result (for NLUFallbackLog)
+        "_trigger_reason": str | None,       # Why fallback was triggered
     }
     """
-    result = {"intent": "UNKNOWN", "raw_entities": [], "error": False}
+    result = {"intent": "NOISE", "confidence_score": None, "raw_entities": [], "error": False}
     try:
         res = requests.post(NLU_URL, json={"message": text}, timeout=REQUEST_TIMEOUT)
         if res.status_code == 200:
             data = res.json()
-            result["intent"]       = data.get("intent", {}).get("intent", "UNKNOWN")
+            intent_data = data.get("intent", {})
+            logger.debug(f"[NLU] raw intent payload: {intent_data}")
+            result["intent"] = intent_data.get("intent", "NOISE")
+            # Extract confidence score
+            _conf = intent_data.get("confidence")
+            if _conf is None:
+                _conf = intent_data.get("score")
+            if _conf is None:
+                _conf = intent_data.get("probability")
+            if _conf is None:
+                _conf = intent_data.get("prob")
+            result["confidence_score"] = _conf
+            logger.info(f"[NLU] intent={result['intent']} confidence={_conf} | raw={intent_data}")
             result["raw_entities"] = data.get("entities", [])
+
         else:
             logger.error(f"[NLU] HTTP {res.status_code}")
             result["error"] = True
@@ -86,4 +124,37 @@ def call_nlu(text: str) -> dict:
         logger.error(f"[NLU] Connection error: {e}")
         result["error"] = True
 
+    # ── Gemini Fallback ────────────────────────────────────────────────────
+    if (result["error"] or _should_fallback(result)) and settings.GEMINI_FALLBACK_ENABLED:
+        # Determine trigger reason
+        if result["error"]:
+            trigger = "SERVICE_DOWN"
+        elif result.get("intent") in settings.GEMINI_ALWAYS_VERIFY_INTENTS:
+            trigger = "ALWAYS_VERIFY"
+        else:
+            trigger = "LOW_CONFIDENCE"
+
+        logger.info(f"[NLU] Triggering Gemini fallback (reason={trigger})")
+
+        # Fetch conversation history from Redis for contextualized LLM prompt
+        conversation_history = []
+        if user_id:
+            try:
+                from apps.gateway.context_manager import ContextManager
+                conversation_history = ContextManager().get_recent_context(user_id, n=5)
+            except Exception as ctx_err:
+                logger.warning(f"[NLU] Failed to fetch context: {ctx_err}")
+
+        gemini_result = gemini_service.call_gemini_nlu(text, conversation_history=conversation_history)
+
+        if not gemini_result["error"]:
+            gemini_result["_tunbert_original"] = result
+            gemini_result["_trigger_reason"] = trigger
+            return gemini_result
+        else:
+            logger.warning("[NLU] Gemini fallback also failed — using TunBERT result")
+
+    result["fallback_used"] = False
+    result["_tunbert_original"] = None
+    result["_trigger_reason"] = None
     return result
