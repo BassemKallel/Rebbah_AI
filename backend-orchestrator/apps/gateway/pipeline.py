@@ -72,12 +72,18 @@ class MessagePipeline:
                 result["uploaded_url"] = uploaded_url
 
         # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
-        lead, _ = Lead.objects.get_or_create(platform_id=user_id)
+        # Find an active conversation for this user (in-progress order)
         conversation = Conversation.objects.filter(
             sender_id=user_id,
             state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
         ).first()
-        if not conversation:
+
+        if conversation:
+            # Reuse the Lead tied to the active conversation
+            lead = conversation.lead
+        else:
+            # No active conversation → new order → create a fresh Lead
+            lead = Lead.objects.create(platform_id=user_id)
             conversation = Conversation.objects.create(
                 lead=lead,
                 lead_uuid=lead.uuid,
@@ -102,6 +108,7 @@ class MessagePipeline:
                     conversation.state = "COMPLETED"
                     conversation.save()
                     context_manager.clear_context(user_id)
+                    lead = Lead.objects.create(platform_id=user_id)
                     conversation = Conversation.objects.create(
                         lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
                         shop_id=shop_id, state="NEW_CONVERSATION"
@@ -118,6 +125,7 @@ class MessagePipeline:
                 conversation.state = "COMPLETED"
                 conversation.save()
                 context_manager.clear_context(user_id)
+                lead = Lead.objects.create(platform_id=user_id)
                 conversation = Conversation.objects.create(
                     lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
                     shop_id=shop_id, state="NEW_CONVERSATION"
