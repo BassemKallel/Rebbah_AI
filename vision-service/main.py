@@ -153,16 +153,45 @@ def _search_similar_db(embedding: list, shop_id: str = None, limit: int = 5) -> 
             )
 
         results = []
+        all_scores = []
         for row in cur.fetchall():
             score = float(row[4])
-            if score >= SIMILARITY_THRESHOLD:
+            product_id = row[0]
+            variation_id = row[1]
+            passed = score >= SIMILARITY_THRESHOLD
+
+            all_scores.append({
+                "product_id": product_id,
+                "variation_id": variation_id,
+                "score": score,
+                "passed": passed,
+            })
+
+            if passed:
                 results.append({
-                    "product_id":       row[0],
-                    "variation_id":     row[1],
+                    "product_id":       product_id,
+                    "variation_id":     variation_id,
                     "shop_id":          row[2],
                     "image_url":        row[3],
                     "similarity_score": score,
                 })
+
+        # ── Detailed similarity logs for threshold tuning ─────────────────
+        logger.info(
+            f"[VISION-SEARCH] shop_id={shop_id} | threshold={SIMILARITY_THRESHOLD} | "
+            f"candidates={len(all_scores)} | matches={len(results)}"
+        )
+        for i, s in enumerate(all_scores):
+            marker = "✅ MATCH" if s["passed"] else "❌ BELOW"
+            logger.info(
+                f"[VISION-SEARCH]   #{i+1} {marker} | "
+                f"score={s['score']:.4f} | "
+                f"product_id={s['product_id']} | "
+                f"variation_id={s['variation_id']}"
+            )
+        if not all_scores:
+            logger.warning(f"[VISION-SEARCH] No embeddings found in DB for shop_id={shop_id}")
+
         cur.close()
     return results
 
