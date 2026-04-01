@@ -9,7 +9,7 @@ class Lead(models.Model):
     Stores both lead info AND pending pre-order data waiting for agent confirmation.
     """
     uuid        = models.UUIDField(default=uuid_lib.uuid4, unique=True, editable=False, help_text="Stable public identifier for this lead")
-    platform_id = models.CharField(max_length=255, unique=True, help_text="e.g., PSID Meta ou whatsapp:+21612345678")
+    platform_id = models.CharField(max_length=255, db_index=True, help_text="e.g., PSID Meta ou whatsapp:+21612345678")
     name        = models.CharField(max_length=255, blank=True, null=True)
     
     # ===== PRÉ-COMMANDE (En attente de confirmation agent) =====
@@ -32,7 +32,7 @@ class Lead(models.Model):
         max_length=50, 
         blank=True, 
         null=True, 
-        unique=True,
+        db_index=True,
         help_text="e.g., PRE-1708960234567"
     )
     pending_order_created_at = models.DateTimeField(blank=True, null=True)
