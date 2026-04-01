@@ -195,5 +195,7 @@ def sync_all():
 
 
 if __name__ == "__main__":
-    logger.info("Initializing Multi-Shop Sync Worker...")
+    logger.info("Starting Multi-Shop Sync Worker (one-shot mode)...")
     sync_all()
+    logger.info("Sync complete. Exiting.")
+
