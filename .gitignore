@@ -37,3 +37,6 @@ TikTak_Templates_API.postman_collection.json
 frontend/node_modules/
 frontend/build/
 frontend/.env
+
+# Django generated static files
+backend-orchestrator/staticfiles/
