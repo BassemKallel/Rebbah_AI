@@ -106,7 +106,10 @@ services:
       POSTGRES_USER:       ${POSTGRES_USER}
       POSTGRES_PASSWORD:   ${POSTGRES_PASSWORD}
     depends_on:
-      - vision-service
+      db:
+        condition: service_healthy
+      vision-service:
+        condition: service_started
     networks:
       - internal-net
       - db-net
