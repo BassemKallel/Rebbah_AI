@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 import json
-from .models import Lead, Conversation, Message, BotConfiguration, Company, NLUFallbackLog
+from .models import Lead, Conversation, Message, BotConfiguration, Company, NLUFallbackLog, ProductVector
 from apps.gateway.response_templates import TEMPLATES
 
 @admin.register(BotConfiguration)
@@ -405,3 +405,68 @@ class NLUFallbackLogAdmin(admin.ModelAdmin):
             return '-'
         return format_html('<pre>{}</pre>', json.dumps(obj.gemini_entities, indent=2, ensure_ascii=False))
     pretty_gemini_entities.short_description = 'Entites Gemini'
+
+
+# ── ProductVector Admin (read-only, superuser only) ───────────────────────────
+
+@admin.register(ProductVector)
+class ProductVectorAdmin(admin.ModelAdmin):
+    """
+    Read-only view of the products_vector table (managed by vision-service).
+    Accessible only to Django superusers — no add/edit/delete.
+    """
+    list_display  = ('id', 'shop_id', 'product_id', 'variation_id', 'image_preview')
+    list_filter   = ('shop_id',)
+    search_fields = ('product_id', 'variation_id', 'shop_id')
+    list_per_page = 50
+    ordering      = ('shop_id', 'product_id')
+    readonly_fields = ('id', 'product_id', 'variation_id', 'shop_id', 'image_preview_large')
+
+    # ── Superuser-only access ─────────────────────────────────────────────
+    def has_module_permission(self, request):
+        return request.user.is_active and request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_active and request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    # ── Image previews ────────────────────────────────────────────────────
+    def image_preview(self, obj):
+        if obj.image_url:
+            return format_html(
+                '<img src="{}" style="height:48px;width:48px;object-fit:cover;'
+                'border-radius:4px;border:1px solid #ddd;" '
+                'onerror="this.style.display=\'none\'"/>',
+                obj.image_url,
+            )
+        return '—'
+    image_preview.short_description = 'Image'
+
+    def image_preview_large(self, obj):
+        if obj.image_url:
+            return format_html(
+                '<img src="{}" style="max-height:200px;max-width:200px;'
+                'border-radius:8px;border:1px solid #ddd;"/>'
+                '<br><small style="color:#888">{}</small>',
+                obj.image_url, obj.image_url,
+            )
+        return '—'
+    image_preview_large.short_description = 'Image'
+
+    # ── Detail view ───────────────────────────────────────────────────────
+    fieldsets = (
+        ('Identification', {
+            'fields': ('id', 'shop_id', 'product_id', 'variation_id'),
+        }),
+        ('Image', {
+            'fields': ('image_preview_large',),
+        }),
+    )
