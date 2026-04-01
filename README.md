@@ -1,4 +1,4 @@
-# 🛒 TikTak-AI
+# 🛒 TikTak-AI.
 
 TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client basée sur l'intelligence artificielle. Elle expose un **webhook Meta Messenger** qui orchestre NLU (TunBERT + GLiNER + Gemini Fallback), Vision (CLIP), Hot Memory (Redis), Cold Memory (PostgreSQL) et l'API TikTak (catalogue et commandes).
 
