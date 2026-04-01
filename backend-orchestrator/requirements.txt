@@ -6,3 +6,4 @@ redis
 requests
 azure-storage-blob
 google-genai>=1.0.0
+whitenoise
