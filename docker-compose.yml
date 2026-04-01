@@ -15,6 +15,7 @@ services:
       - .env
     command: >
       sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
              python manage.py setup_initial_data &&
              (while true; do python manage.py expire_conversations; sleep 60; done) &
              python manage.py runserver 0.0.0.0:8000"
@@ -51,6 +52,24 @@ services:
       resources:
         limits:
           memory: 2g
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-https://ai.tiktakpro.com}
+        REACT_APP_SHOP_ID: ${SHOP_ID}
+        REACT_APP_SHOP_TOKEN: ${TIKTAK_API_TOKEN}
+    container_name: tiktak-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    networks:
+      - internal-net
+    deploy:
+      resources:
+        limits:
+          memory: 256m
 
   vision-service:
     build: ./vision-service

@@ -10,7 +10,10 @@ class AutoLoginMiddleware(MiddlewareMixin):
     """Auto-login le premier superuser en mode DEBUG."""
 
     def process_request(self, request):
-        # Uniquement sur /admin/ et si DEBUG=True et pas déjà authentifié
+        from django.conf import settings
+        # ONLY in DEBUG mode — never in production
+        if not settings.DEBUG:
+            return None
         if request.path.startswith('/admin/') and not request.user.is_authenticated:
             try:
                 superuser = User.objects.filter(is_superuser=True).first()
