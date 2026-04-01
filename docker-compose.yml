@@ -95,6 +95,7 @@ services:
   sync-worker:
     build: ./sync-worker
     container_name: sync-worker
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -105,6 +106,11 @@ services:
       POSTGRES_DB:         ${POSTGRES_DB}
       POSTGRES_USER:       ${POSTGRES_USER}
       POSTGRES_PASSWORD:   ${POSTGRES_PASSWORD}
+    command: >
+      sh -c "echo '=== Sync Worker starting ===' &&
+             python sync.py &&
+             echo '=== Sync done. Next run in 24h ===' &&
+             sleep 86400"
     depends_on:
       db:
         condition: service_healthy
