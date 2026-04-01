@@ -324,3 +324,25 @@ class NLUFallbackLog(models.Model):
     def __str__(self):
         arrow = "->" if self.intent_changed else "="
         return f"[{self.trigger_reason}] {self.tunbert_intent} {arrow} {self.gemini_intent} | '{self.original_text[:40]}'"
+
+
+class ProductVector(models.Model):
+    """
+    Read-only mirror of the products_vector table (managed by vision-service).
+    Exists solely to expose embeddings metadata in the Django Admin panel.
+    The embedding column (vector(512)) is excluded — not useful for display.
+    """
+    product_id   = models.CharField(max_length=255)
+    variation_id = models.CharField(max_length=255)
+    shop_id      = models.CharField(max_length=255)
+    image_url    = models.TextField(blank=True, null=True)
+
+    class Meta:
+        managed     = False              # Django never creates/drops this table
+        db_table    = 'products_vector'   # exact table name from vision-service
+        verbose_name = 'Product Embedding'
+        verbose_name_plural = 'Product Embeddings (Vision)'
+        ordering    = ['shop_id', 'product_id']
+
+    def __str__(self):
+        return f"[{self.shop_id}] product={self.product_id} var={self.variation_id}"
