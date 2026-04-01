@@ -76,8 +76,16 @@ def _init_database():
                 shop_id      VARCHAR(255) NOT NULL,
                 image_url    TEXT,
                 embedding    vector(512),
+                created_at   TIMESTAMP DEFAULT NOW(),
                 UNIQUE(variation_id, shop_id)
             );
+        """)
+        # Add created_at column if table already exists without it
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE products_vector ADD COLUMN created_at TIMESTAMP DEFAULT NOW();
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
         """)
         # HNSW index for fast cosine similarity search (O(log n) instead of O(n))
         cur.execute("""
@@ -218,10 +226,10 @@ async def predict_embedding(request: ImageRequest):
                     cur = conn.cursor()
                     cur.execute(
                         """
-                        INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding)
-                        VALUES (%s, %s, %s, %s, %s::vector)
+                        INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding, created_at)
+                        VALUES (%s, %s, %s, %s, %s::vector, NOW())
                         ON CONFLICT (variation_id, shop_id)
-                        DO UPDATE SET embedding = EXCLUDED.embedding, image_url = EXCLUDED.image_url;
+                        DO UPDATE SET embedding = EXCLUDED.embedding, image_url = EXCLUDED.image_url, created_at = NOW();
                         """,
                         (request.product_id, request.variation_id, request.shop_id,
                          request.store_image_url, embedding),

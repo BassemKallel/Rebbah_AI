@@ -336,6 +336,7 @@ class ProductVector(models.Model):
     variation_id = models.CharField(max_length=255)
     shop_id      = models.CharField(max_length=255)
     image_url    = models.TextField(blank=True, null=True)
+    created_at   = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         managed     = False              # Django never creates/drops this table

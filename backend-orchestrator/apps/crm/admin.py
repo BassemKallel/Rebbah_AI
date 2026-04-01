@@ -415,12 +415,12 @@ class ProductVectorAdmin(admin.ModelAdmin):
     Read-only view of the products_vector table (managed by vision-service).
     Accessible only to Django superusers — no add/edit/delete.
     """
-    list_display  = ('id', 'shop_id', 'product_id', 'variation_id', 'image_preview')
+    list_display  = ('id', 'shop_id', 'product_id', 'variation_id', 'image_preview', 'created_at')
     list_filter   = ('shop_id',)
     search_fields = ('product_id', 'variation_id', 'shop_id')
     list_per_page = 50
     ordering      = ('shop_id', 'product_id')
-    readonly_fields = ('id', 'product_id', 'variation_id', 'shop_id', 'image_preview_large')
+    readonly_fields = ('id', 'product_id', 'variation_id', 'shop_id', 'created_at', 'image_preview_large')
 
     # ── Superuser-only access ─────────────────────────────────────────────
     def has_module_permission(self, request):
@@ -464,7 +464,7 @@ class ProductVectorAdmin(admin.ModelAdmin):
     # ── Detail view ───────────────────────────────────────────────────────
     fieldsets = (
         ('Identification', {
-            'fields': ('id', 'shop_id', 'product_id', 'variation_id'),
+            'fields': ('id', 'shop_id', 'product_id', 'variation_id', 'created_at'),
         }),
         ('Image', {
             'fields': ('image_preview_large',),
