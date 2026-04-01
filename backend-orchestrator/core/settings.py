@@ -114,3 +114,8 @@ EXTERNAL_REQUEST_TIMEOUT = int(os.getenv('EXTERNAL_REQUEST_TIMEOUT', '5'))
 # Token used by Meta to verify the webhook endpoint (GET request)
 META_VERIFY_TOKEN = os.getenv('META_VERIFY_TOKEN', '')
 
+# ============================================================
+# STATIC FILES
+# ============================================================
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
