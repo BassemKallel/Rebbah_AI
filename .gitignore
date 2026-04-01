@@ -32,3 +32,8 @@ TikTak_Templates_API.postman_collection.json
 
 # Patch/diff files (generated locally, never commit)
 *.patch
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.env
