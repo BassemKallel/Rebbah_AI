@@ -76,9 +76,18 @@ TIME_ZONE = 'Africa/Tunis'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Trusted origins for CSRF — must include all domains that POST to Django
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        'CSRF_TRUSTED_ORIGINS',
+        'https://chat.tiktakpro.com,https://ai.tiktakpro.com'
+    ).split(',')
+    if origin.strip()
+]
 
 # ============================================================
 # EXTERNAL SERVICES CONFIGURATION
@@ -118,6 +127,6 @@ META_VERIFY_TOKEN = os.getenv('META_VERIFY_TOKEN', '')
 # ============================================================
 # STATIC FILES
 # ============================================================
-STATIC_URL = '/static/'
+STATIC_URL = '/static/'  # single canonical declaration
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
