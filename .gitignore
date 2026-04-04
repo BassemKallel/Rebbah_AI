@@ -40,3 +40,12 @@ frontend/.env
 
 # Django generated static files
 backend-orchestrator/staticfiles/
+
+# Gestion projet (documentation PFE)
+gestion_projet/
+
+# AI Agent workflows
+.agents/
+
+# Project context
+CONTEXT.md
