@@ -7,7 +7,7 @@ import ClientChat from './pages/ClientChat/ClientChat';
 import AgentSettingsLayout from './pages/AgentSettings/AgentSettingsLayout';
 import MessengerInbox from './pages/MessengerInbox/MessengerInbox';
 import Leads from './pages/Leads/Leads';
-import './App.css';
+
 
 function App() {
   return (

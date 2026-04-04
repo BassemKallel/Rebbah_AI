@@ -42,7 +42,7 @@ const ActiveChat = ({ chat, onUpdateChat }) => {
     }, [chat.id]);
 
 
-    const messagesEndRef = useRef(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to bottom whenever messages array changes
     const scrollToBottom = () => {

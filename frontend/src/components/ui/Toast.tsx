@@ -102,7 +102,14 @@ const Toast = ({ message, type = 'info', duration = 4000, onClose }) => {
  * Toast container component for managing multiple toasts.
  * Use this to display multiple notifications stacked vertically.
  */
-export const ToastContainer = ({ toasts = [], onRemove }) => {
+interface ToastItem {
+  id?: string | number;
+  message: string;
+  type?: 'success' | 'error' | 'info';
+  duration?: number;
+}
+
+export const ToastContainer = ({ toasts = [], onRemove }: { toasts?: ToastItem[]; onRemove?: (id: string | number) => void }) => {
     return (
         <div className="fixed top-6 right-6 z-50 flex flex-col gap-3">
             {toasts.map((toast, index) => (

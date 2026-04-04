@@ -2,7 +2,12 @@ import React from 'react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 
-const MainLayout = ({ secondarySidebar, children }) => {
+interface MainLayoutProps {
+  secondarySidebar?: React.ReactNode;
+  children: React.ReactNode;
+}
+
+const MainLayout: React.FC<MainLayoutProps> = ({ secondarySidebar, children }) => {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-white text-gray-800 font-sans">
       {/* Primary Sidebar */}

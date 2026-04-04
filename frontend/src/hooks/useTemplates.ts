@@ -5,6 +5,7 @@ import {
     updateTemplate,
     deleteTemplate
 } from '../api/templatesService';
+import type { ResponseTemplate } from '../types';
 
 /**
  * Custom hook for managing response templates.
@@ -15,9 +16,9 @@ import {
  * @returns {Object} Hook state and methods
  */
 export const useTemplates = (filters = {}, token) => {
-    const [templates, setTemplates] = useState([]);
+    const [templates, setTemplates] = useState<ResponseTemplate[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [error, setError] = useState<string | null>(null);
 
     const fetchTemplates = async () => {
         if (!token) {
@@ -30,7 +31,7 @@ export const useTemplates = (filters = {}, token) => {
             setError(null);
             const data = await getTemplates(filters, token);
             setTemplates(Array.isArray(data) ? data : (data.results || []));
-        } catch (err) {
+        } catch (err: any) {
             setError(err.response?.data?.detail || err.message || 'Failed to load templates');
             console.error('Error fetching templates:', err);
         } finally {
@@ -54,7 +55,7 @@ export const useTemplates = (filters = {}, token) => {
             const newTemplate = await createTemplate(templateData, token);
             setTemplates([...templates, newTemplate]);
             return { success: true, data: newTemplate };
-        } catch (err) {
+        } catch (err: any) {
             const errorMsg = err.response?.data?.detail ||
                 err.response?.data?.error ||
                 err.message ||
@@ -77,7 +78,7 @@ export const useTemplates = (filters = {}, token) => {
             const updated = await updateTemplate(id, templateData, token);
             setTemplates(templates.map(t => t.id === id ? updated : t));
             return { success: true, data: updated };
-        } catch (err) {
+        } catch (err: any) {
             const errorMsg = err.response?.data?.detail || err.message || 'Failed to update template';
             setError(errorMsg);
             console.error('Error updating template:', err);
@@ -96,7 +97,7 @@ export const useTemplates = (filters = {}, token) => {
             await deleteTemplate(id, token);
             setTemplates(templates.filter(t => t.id !== id));
             return { success: true };
-        } catch (err) {
+        } catch (err: any) {
             const errorMsg = err.response?.data?.detail || err.message || 'Failed to delete template';
             setError(errorMsg);
             console.error('Error deleting template:', err);

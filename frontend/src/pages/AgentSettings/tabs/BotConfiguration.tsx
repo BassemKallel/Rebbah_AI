@@ -16,7 +16,7 @@ const BotConfiguration = () => {
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState<{ type: string; message: string } | null>(null);
 
   useEffect(() => {
     if (config) {

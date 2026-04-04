@@ -14,7 +14,7 @@ const crm = axios.create({
  * Fetch paginated list of conversations.
  * @param {string} [shopId] - Optional shop filter
  */
-export const fetchConversations = (shopId) =>
+export const fetchConversations = (shopId?: string) =>
   crm.get('/conversations/', { params: shopId ? { shop_id: shopId } : {} });
 
 /**
@@ -22,7 +22,7 @@ export const fetchConversations = (shopId) =>
  * @param {number} conversationId
  * @param {number} [page]
  */
-export const fetchMessages = (conversationId, page) =>
+export const fetchMessages = (conversationId: number, page?: number) =>
   crm.get(`/conversations/${conversationId}/messages/`, {
     params: page ? { page } : {},
   });
@@ -32,31 +32,31 @@ export const fetchMessages = (conversationId, page) =>
  * @param {number} conversationId
  * @param {string} text
  */
-export const sendMessage = (conversationId, text) =>
+export const sendMessage = (conversationId: number, text: string) =>
   crm.post(`/conversations/${conversationId}/messages/`, { text, sender: 'AGENT' });
 
 // ─── Leads ───────────────────────────────────────────────────────────────────
 
 /** List leads, optionally filtered by shop. */
-export const fetchLeads = (shopId) =>
+export const fetchLeads = (shopId?: string) =>
   crm.get('/leads/', { params: shopId ? { shop_id: shopId } : {} });
 
 /** Get a single lead by id. */
-export const fetchLead = (id) =>
+export const fetchLead = (id: number) =>
   crm.get(`/leads/${id}/`);
 
 /** Create a new lead. */
-export const createLead = (payload) =>
+export const createLead = (payload: Record<string, unknown>) =>
   crm.post('/leads/', payload);
 
 /** Partial update of a lead (address, phone_number, has_pending_order…). */
-export const patchLead = (id, patch) =>
+export const patchLead = (id: number, patch: Record<string, unknown>) =>
   crm.patch(`/leads/${id}/`, patch);
 
 /** Full replacement update of a lead. */
-export const updateLead = (id, payload) =>
+export const updateLead = (id: number, payload: Record<string, unknown>) =>
   crm.put(`/leads/${id}/`, payload);
 
 /** Delete a lead. */
-export const deleteLead = (id) =>
+export const deleteLead = (id: number) =>
   crm.delete(`/leads/${id}/`);

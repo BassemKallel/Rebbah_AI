@@ -21,7 +21,7 @@ export const getTemplates = async (filters = {}, token) => {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
-      params.append(key, value);
+      params.append(key, String(value));
     }
   });
   

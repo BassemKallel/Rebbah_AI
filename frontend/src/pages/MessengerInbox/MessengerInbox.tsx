@@ -1,0 +1,147 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Loader, AlertCircle } from 'lucide-react';
+import MainLayout from '../../components/layout/MainLayout';
+import MessengerSidebar from './MessengerSidebar';
+import MsgBubble from '../../components/messenger/MsgBubble';
+import ChatHeader from '../../components/messenger/ChatHeader';
+import ChatInput from '../../components/messenger/ChatInput';
+import EmptyState from '../../components/messenger/EmptyState';
+import { fetchConversations, fetchMessages } from '../../api/crmApi';
+import { SHOP_ID } from '../../constants';
+import { getConversationName, getConversationPsid } from '../../utils/messenger';
+import type { Conversation, Message } from '../../types';
+
+const MessengerInbox: React.FC = () => {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [convsLoading, setConvsLoading] = useState(true);
+  const [convsError, setConvsError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [msgsLoading, setMsgsLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [draft, setDraft] = useState('');
+  const [lastMessages, setLastMessages] = useState<Record<string, string>>({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  /* ── Load conversations ── */
+  const loadConversations = useCallback(async () => {
+    setConvsLoading(true);
+    setConvsError(null);
+    try {
+      const { data } = await fetchConversations(SHOP_ID);
+      setConversations(Array.isArray(data) ? data : (data.results ?? []));
+    } catch (err: any) {
+      setConvsError(err?.response?.data?.detail || err?.message || 'Impossible de charger les conversations.');
+    } finally {
+      setConvsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  /* ── Load messages ── */
+  const loadMessages = useCallback(async (convIds: number[]) => {
+    setMsgsLoading(true);
+    setMessages([]);
+    try {
+      const ids = Array.isArray(convIds) ? convIds : [convIds];
+      const results = await Promise.all(ids.map((id) => fetchMessages(id)));
+      const all = results.flatMap(({ data }) => Array.isArray(data) ? data : (data.results ?? []));
+      const seen = new Set<string | number>();
+      const merged = all
+        .filter((m) => { const key = m.id ?? `${m.created_at}-${m.text}`; if (seen.has(key)) return false; seen.add(key); return true; })
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      setMessages(merged);
+    } catch { setMessages([]); }
+    finally { setMsgsLoading(false); }
+  }, []);
+
+  const handleSelect = (conv: Conversation) => {
+    setSelected(conv);
+    setDraft('');
+    loadMessages(conv._convIds ?? [conv.id]);
+  };
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, msgsLoading]);
+
+  /* ── Group conversations by PSID ── */
+  const grouped = useMemo(() => {
+    const map = new Map<string, Conversation>();
+    conversations.forEach((conv) => {
+      const psid = getConversationPsid(conv);
+      if (!map.has(psid)) {
+        map.set(psid, { ...conv, _psid: psid, _convIds: [conv.id] });
+      } else {
+        const existing = map.get(psid)!;
+        existing._convIds!.push(conv.id);
+        if (new Date(conv.updated_at) > new Date(existing.updated_at)) {
+          map.set(psid, { ...conv, _psid: psid, _convIds: existing._convIds });
+        }
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  }, [conversations]);
+
+  /* ── Fetch last message per conversation ── */
+  useEffect(() => {
+    if (grouped.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled(
+        grouped.map((conv) => fetchMessages(conv.id).then(({ data }) => {
+          const msgs = Array.isArray(data) ? data : (data.results ?? []);
+          const last = msgs[msgs.length - 1];
+          const text = last ? (last.text || last.content || last.body || '') : null;
+          return { psid: conv._psid ?? String(conv.id), text };
+        }))
+      );
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      results.forEach((r) => { if (r.status === 'fulfilled' && r.value.text) map[r.value.psid] = r.value.text; });
+      setLastMessages(map);
+    })();
+    return () => { cancelled = true; };
+  }, [grouped]);
+
+  /* ── Filtered ── */
+  const filtered = grouped.filter((c) => {
+    const name = getConversationName(c);
+    return name.toLowerCase().includes(search.toLowerCase()) || c._convIds?.some((id) => String(id).includes(search));
+  });
+
+  const selectedName = selected ? getConversationName(selected) : '';
+
+  return (
+    <MainLayout secondarySidebar={
+      <MessengerSidebar conversations={filtered} selected={selected} onSelect={handleSelect}
+        search={search} setSearch={setSearch} loading={convsLoading} lastMessages={lastMessages} />
+    }>
+      {convsError && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded-xl shadow flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" />{convsError}
+        </div>
+      )}
+
+      {selected ? (
+        <div className="flex-1 flex flex-col h-full bg-[#f8fafc]">
+          <ChatHeader name={selectedName} onRefresh={() => loadMessages(selected._convIds ?? [selected.id])} />
+          <div className="flex-1 overflow-y-auto px-8 py-8 relative">
+            {msgsLoading ? (
+              <div className="flex justify-center py-10"><Loader className="w-8 h-8 animate-spin text-[#0f6885]" /></div>
+            ) : messages.length === 0 ? (
+              <p className="text-center text-gray-400 text-sm py-10">Aucun message dans cette conversation.</p>
+            ) : (
+              messages.map((msg) => <MsgBubble key={msg.id ?? msg.mid ?? Math.random()} msg={msg} />)
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+          <ChatInput draft={draft} onDraftChange={setDraft} />
+        </div>
+      ) : (
+        <EmptyState />
+      )}
+    </MainLayout>
+  );
+};
+
+export default MessengerInbox;

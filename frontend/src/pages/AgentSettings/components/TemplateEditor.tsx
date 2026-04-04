@@ -36,7 +36,7 @@ const TemplateEditor = ({
 
   const [useCustom, setUseCustom] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState<{ type: string; message: string } | null>(null);
 
   const loading = loadingSystem || loadingCustom;
 
