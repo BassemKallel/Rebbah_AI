@@ -27,11 +27,11 @@ const TemplateEditor = ({
   label = 'Response Template'
 }) => {
   // Fetch system templates (is_default=true, no shop_id filter)
-  const systemFilters = { category, language, is_default: true };
+  const systemFilters = { template_type: category, intent: subKey, language, is_default: true };
   const { templates: systemTemplates, loading: loadingSystem } = useTemplates(systemFilters, token);
 
   // Fetch custom templates (for this shop)
-  const customFilters = { category, language, shop_id: shopId };
+  const customFilters = { template_type: category, intent: subKey, language, shop_id: shopId };
   const { templates: customTemplates, loading: loadingCustom, create, update, remove } = useTemplates(customFilters, token);
 
   const [useCustom, setUseCustom] = useState(false);

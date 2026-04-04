@@ -21,10 +21,6 @@ export const useTemplates = (filters = {}, token) => {
     const [error, setError] = useState<string | null>(null);
 
     const fetchTemplates = async () => {
-        if (!token) {
-            setLoading(false);
-            return;
-        }
 
         try {
             setLoading(true);

@@ -1,10 +1,14 @@
 import axios from 'axios';
 
-const API_BASE = process.env.REACT_APP_CRM_API_URL || 'http://localhost/api/v1/crm';
+const API_BASE = process.env.REACT_APP_CRM_API_URL || 'http://localhost:8000/api/v1/crm';
+const TOKEN = process.env.REACT_APP_SHOP_TOKEN || '';
 
 const templatesApi = axios.create({
   baseURL: API_BASE,
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+  },
 });
 
 /**
