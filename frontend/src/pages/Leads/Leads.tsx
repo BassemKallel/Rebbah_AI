@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   Search, RefreshCw, X, Plus, MoreVertical,
-  Users, Clock, CheckCircle, AlertCircle, WifiOff, Trash2,
+  Users, Clock, CheckCircle, AlertCircle, WifiOff, Trash2, SlidersHorizontal,
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../types';
 import { SHOP_ID, PAGE_SIZE } from '../../constants';
@@ -14,10 +14,10 @@ import DeleteModal from '../../components/leads/DeleteModal';
 
 /* ─── Tabs ──────────────────────────────────────────────────────── */
 const TABS = [
-  { key: 'all', label: 'Tous les leads', icon: Users },
-  { key: 'pending', label: 'En attente', icon: Clock },
-  { key: 'confirmed', label: 'Confirmés', icon: CheckCircle },
-  { key: 'agent', label: 'Confirmation agent', icon: AlertCircle },
+  { key: 'all', label: 'Tous', fullLabel: 'Tous les leads', icon: Users },
+  { key: 'pending', label: 'En attente', fullLabel: 'En attente', icon: Clock },
+  { key: 'confirmed', label: 'Confirmés', fullLabel: 'Confirmés', icon: CheckCircle },
+  { key: 'agent', label: 'Agent', fullLabel: 'Confirmation agent', icon: AlertCircle },
 ];
 
 /* ─── Main Page ─────────────────────────────────────────────────── */
@@ -124,87 +124,128 @@ const Leads: React.FC = () => {
   return (
     <div className="h-full flex flex-col bg-[#f5f7fa] overflow-hidden relative">
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="flex-shrink-0 bg-white border-b border-gray-200">
-        <div className="flex items-center justify-between px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-4">
           <div>
             <h1 className="text-lg font-bold text-gray-900">Leads</h1>
             <p className="text-xs text-gray-400 mt-0.5">{total} prospect{total !== 1 ? 's' : ''} au total</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => load(page)} className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Actualiser
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => load(page)}
+              className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              <span className="hidden xs:inline">Actualiser</span>
             </button>
-            <button className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
-              <MoreVertical className="w-4 h-4" /> Actions
+            <button className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+              <SlidersHorizontal className="w-4 h-4" />
+              <span className="hidden xs:inline">Filtres</span>
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#0f6885] hover:bg-[#0d5a72] rounded-xl transition-colors shadow-sm">
-              <Plus className="w-4 h-4" /> Nouveau lead
+            <button className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 text-sm font-semibold text-white bg-[#0f6885] hover:bg-[#0d5a72] rounded-xl transition-colors shadow-sm">
+              <Plus className="w-4 h-4" />
+              <span className="hidden xs:inline">Nouveau lead</span>
             </button>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex items-center gap-0 px-6 overflow-x-auto">
+        {/* Tabs — scrollable on mobile */}
+        <div className="flex items-center px-4 sm:px-6 overflow-x-auto scrollbar-hide">
           {TABS.map((tab) => {
             const isActive = activeTab === tab.key;
             const count = tabCounts[tab.key] ?? 0;
             return (
-              <button key={tab.key}
+              <button
+                key={tab.key}
                 onClick={() => { setActiveTab(tab.key); setSelected(new Set()); }}
-                className={`relative flex items-center gap-2 px-4 py-3 text-sm font-semibold whitespace-nowrap border-b-2 transition-all ${isActive ? 'border-[#0f6885] text-[#0f6885]' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-200'}`}>
-                {tab.label}
-                <span className={`inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full text-[11px] font-bold ${isActive ? 'bg-[#0f6885] text-white' : 'bg-gray-100 text-gray-600'}`}>{count}</span>
+                className={`relative flex items-center gap-2 px-3 sm:px-4 py-3 text-sm font-semibold whitespace-nowrap border-b-2 transition-all flex-shrink-0 ${
+                  isActive ? 'border-[#0f6885] text-[#0f6885]' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-200'
+                }`}
+              >
+                <span className="hidden sm:inline">{tab.fullLabel}</span>
+                <span className="sm:hidden">{tab.label}</span>
+                <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold ${
+                  isActive ? 'bg-[#0f6885] text-white' : 'bg-gray-100 text-gray-600'
+                }`}>
+                  {count}
+                </span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Search */}
-      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-3">
+      {/* ── Search bar ── */}
+      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-3">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 flex-1 max-w-sm focus-within:border-[#0f6885] transition-colors">
             <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher (nom, téléphone, adresse…)"
-              className="bg-transparent text-sm text-gray-700 placeholder-gray-400 border-0 focus:outline-none w-full" />
-            {search && <button onClick={() => setSearch('')}><X className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600" /></button>}
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher…"
+              className="bg-transparent text-sm text-gray-700 placeholder-gray-400 border-0 focus:outline-none w-full"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} aria-label="Effacer">
+                <X className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600" />
+              </button>
+            )}
           </div>
           {selected.size > 0 && (
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-gray-500 font-medium">{selected.size} sélectionné{selected.size > 1 ? 's' : ''}</span>
+              <span className="text-xs text-gray-500 font-medium hidden sm:inline">
+                {selected.size} sélectionné{selected.size > 1 ? 's' : ''}
+              </span>
               <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors">
-                <Trash2 className="w-3.5 h-3.5" /> Supprimer
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden xs:inline">Supprimer</span>
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Body */}
+      {/* ── Body ── */}
       <div className="flex-1 flex overflow-hidden">
-        <div style={panelOpen ? { marginRight: '620px' } : {}} className="flex-1 flex flex-col overflow-hidden transition-all duration-300">
+        {/* Table area — push right when panel is open on lg+ */}
+        <div
+          style={panelOpen ? { marginRight: 0 } : {}}
+          className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${panelOpen ? 'lg:mr-[540px]' : ''}`}
+        >
           <div className="flex-1 overflow-auto">
             {error ? (
               <div className="flex flex-col items-center justify-center h-full gap-5 px-6 py-16">
-                <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center"><WifiOff className="w-8 h-8 text-red-400" /></div>
+                <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center">
+                  <WifiOff className="w-8 h-8 text-red-400" />
+                </div>
                 <div className="text-center">
                   <p className="text-sm font-semibold text-gray-700 mb-1">Impossible de charger les leads</p>
                   <p className="text-xs text-gray-400 max-w-xs">{error}</p>
                 </div>
-                <button onClick={() => load(page)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#0f6885] hover:bg-[#0d5a72] rounded-xl transition-colors">
+                <button
+                  onClick={() => load(page)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#0f6885] hover:bg-[#0d5a72] rounded-xl transition-colors"
+                >
                   <RefreshCw className="w-4 h-4" /> Réessayer
                 </button>
               </div>
             ) : leads.length === 0 && !loading ? (
               <div className="flex flex-col items-center justify-center h-full gap-5 px-6 py-16">
-                <div className="w-20 h-20 rounded-3xl bg-[#eef6f9] flex items-center justify-center"><Users className="w-10 h-10 text-[#0f6885]/40" /></div>
+                <div className="w-20 h-20 rounded-3xl bg-[#eef6f9] flex items-center justify-center">
+                  <Users className="w-10 h-10 text-[#0f6885]/40" />
+                </div>
                 <div className="text-center">
                   <p className="text-sm font-semibold text-gray-700 mb-1">Aucun lead pour le moment</p>
-                  <p className="text-xs text-gray-400 max-w-xs leading-relaxed">Les prospects détectés par le bot apparaîtront ici dès qu'une conversation démarrera.</p>
+                  <p className="text-xs text-gray-400 max-w-xs leading-relaxed">
+                    Les prospects détectés par le bot apparaîtront ici dès qu'une conversation démarrera.
+                  </p>
                 </div>
-                <button onClick={() => load(1)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#0f6885] bg-[#eef6f9] hover:bg-[#dceef5] rounded-xl transition-colors">
+                <button
+                  onClick={() => load(1)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#0f6885] bg-[#eef6f9] hover:bg-[#dceef5] rounded-xl transition-colors"
+                >
                   <RefreshCw className="w-3.5 h-3.5" /> Actualiser
                 </button>
               </div>
@@ -231,9 +272,13 @@ const Leads: React.FC = () => {
           </div>
         </div>
 
-        {/* Panel */}
+        {/* ── Lead Panel ── */}
         {panelLead && (
-          <div className="absolute right-0 top-0 bottom-0 w-[620px] z-20">
+          <div className="
+            animate-slide-in-right
+            fixed inset-0 z-30
+            lg:absolute lg:inset-auto lg:right-0 lg:top-0 lg:bottom-0 lg:w-[540px]
+          ">
             <LeadPanel
               lead={panelLead}
               onClose={() => setPanelLead(null)}
@@ -244,7 +289,7 @@ const Leads: React.FC = () => {
         )}
       </div>
 
-      {/* Delete modal */}
+      {/* ── Delete modal ── */}
       {toDelete && (
         <DeleteModal lead={toDelete} onClose={() => setToDelete(null)} onConfirm={handleDelete} deleting={deleting} />
       )}

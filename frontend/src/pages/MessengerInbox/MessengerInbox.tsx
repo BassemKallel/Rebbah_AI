@@ -21,6 +21,13 @@ const MessengerInbox: React.FC = () => {
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState('');
   const [lastMessages, setLastMessages] = useState<Record<string, string>>({});
+
+  /**
+   * Mobile: 'list' = show conversation list, 'chat' = show chat.
+   * On md+ both are always visible (sidebar + main).
+   */
+  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   /* ── Load conversations ── */
@@ -49,7 +56,12 @@ const MessengerInbox: React.FC = () => {
       const all = results.flatMap(({ data }) => Array.isArray(data) ? data : (data.results ?? []));
       const seen = new Set<string | number>();
       const merged = all
-        .filter((m) => { const key = m.id ?? `${m.created_at}-${m.text}`; if (seen.has(key)) return false; seen.add(key); return true; })
+        .filter((m) => {
+          const key = m.id ?? `${m.created_at}-${m.text}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       setMessages(merged);
     } catch { setMessages([]); }
@@ -60,9 +72,17 @@ const MessengerInbox: React.FC = () => {
     setSelected(conv);
     setDraft('');
     loadMessages(conv._convIds ?? [conv.id]);
+    setMobileView('chat'); // switch to chat on mobile
   };
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, msgsLoading]);
+  const handleBackToList = () => {
+    setMobileView('list');
+    setSelected(null);
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, msgsLoading]);
 
   /* ── Group conversations by PSID ── */
   const grouped = useMemo(() => {
@@ -79,7 +99,9 @@ const MessengerInbox: React.FC = () => {
         }
       }
     });
-    return Array.from(map.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    );
   }, [conversations]);
 
   /* ── Fetch last message per conversation ── */
@@ -88,16 +110,20 @@ const MessengerInbox: React.FC = () => {
     let cancelled = false;
     (async () => {
       const results = await Promise.allSettled(
-        grouped.map((conv) => fetchMessages(conv.id).then(({ data }) => {
-          const msgs = Array.isArray(data) ? data : (data.results ?? []);
-          const last = msgs[msgs.length - 1];
-          const text = last ? (last.text || last.content || last.body || '') : null;
-          return { psid: conv._psid ?? String(conv.id), text };
-        }))
+        grouped.map((conv) =>
+          fetchMessages(conv.id).then(({ data }) => {
+            const msgs = Array.isArray(data) ? data : (data.results ?? []);
+            const last = msgs[msgs.length - 1];
+            const text = last ? (last.text || last.content || last.body || '') : null;
+            return { psid: conv._psid ?? String(conv.id), text };
+          })
+        )
       );
       if (cancelled) return;
       const map: Record<string, string> = {};
-      results.forEach((r) => { if (r.status === 'fulfilled' && r.value.text) map[r.value.psid] = r.value.text; });
+      results.forEach((r) => {
+        if (r.status === 'fulfilled' && r.value.text) map[r.value.psid] = r.value.text;
+      });
       setLastMessages(map);
     })();
     return () => { cancelled = true; };
@@ -106,39 +132,109 @@ const MessengerInbox: React.FC = () => {
   /* ── Filtered ── */
   const filtered = grouped.filter((c) => {
     const name = getConversationName(c);
-    return name.toLowerCase().includes(search.toLowerCase()) || c._convIds?.some((id) => String(id).includes(search));
+    return (
+      name.toLowerCase().includes(search.toLowerCase()) ||
+      c._convIds?.some((id) => String(id).includes(search))
+    );
   });
 
   const selectedName = selected ? getConversationName(selected) : '';
 
+  /* ── Chat panel content ── */
+  const ChatPanel = () => (
+    <div className="flex-1 flex flex-col h-full bg-[#f8fafc]">
+      <ChatHeader
+        name={selectedName}
+        onRefresh={() => loadMessages(selected!._convIds ?? [selected!.id])}
+        onBack={handleBackToList}
+      />
+      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-8 scrollbar-thin">
+        {msgsLoading ? (
+          <div className="flex justify-center py-10">
+            <Loader className="w-8 h-8 animate-spin text-[#0f6885]" />
+          </div>
+        ) : messages.length === 0 ? (
+          <p className="text-center text-gray-400 text-sm py-10">
+            Aucun message dans cette conversation.
+          </p>
+        ) : (
+          messages.map((msg) => (
+            <MsgBubble key={msg.id ?? msg.mid ?? Math.random()} msg={msg} />
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+      <ChatInput draft={draft} onDraftChange={setDraft} />
+    </div>
+  );
+
+  /* ── Conversation list panel (for mobile content area) ── */
+  const ListPanel = () => (
+    <div className="flex-1 overflow-hidden">
+      <MessengerSidebar
+        conversations={filtered}
+        selected={selected}
+        onSelect={handleSelect}
+        search={search}
+        setSearch={setSearch}
+        loading={convsLoading}
+        lastMessages={lastMessages}
+      />
+    </div>
+  );
+
+  /* ── Sidebar for desktop (md+) ── */
+  const desktopSidebar = (
+    <MessengerSidebar
+      conversations={filtered}
+      selected={selected}
+      onSelect={handleSelect}
+      search={search}
+      setSearch={setSearch}
+      loading={convsLoading}
+      lastMessages={lastMessages}
+    />
+  );
+
   return (
-    <MainLayout secondarySidebar={
-      <MessengerSidebar conversations={filtered} selected={selected} onSelect={handleSelect}
-        search={search} setSearch={setSearch} loading={convsLoading} lastMessages={lastMessages} />
-    }>
+    <MainLayout secondarySidebar={desktopSidebar}>
+      {/* Error banner */}
       {convsError && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded-xl shadow flex items-center gap-2">
-          <AlertCircle className="w-4 h-4" />{convsError}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded-xl shadow flex items-center gap-2 w-[90%] max-w-sm">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />{convsError}
         </div>
       )}
 
+      {/*
+        On mobile (<md):
+          - secondarySidebar is HIDDEN by MainLayout (fix #1)
+          - We show either the list OR the chat inside the content area
+        On desktop (md+):
+          - secondarySidebar (conversation list) is always visible
+          - Content area shows the chat or empty state
+      */}
+
+      {/* ── Mobile: list view ── */}
+      <div className={`md:hidden h-full flex flex-col ${mobileView === 'list' ? 'block' : 'hidden'}`}>
+        <ListPanel />
+      </div>
+
+      {/* ── Mobile: chat view ── */}
+      {mobileView === 'chat' && selected && (
+        <div className="md:hidden h-full flex flex-col animate-slide-in-right">
+          <ChatPanel />
+        </div>
+      )}
+
+      {/* ── Desktop: always show chat (or empty state) ── */}
       {selected ? (
-        <div className="flex-1 flex flex-col h-full bg-[#f8fafc]">
-          <ChatHeader name={selectedName} onRefresh={() => loadMessages(selected._convIds ?? [selected.id])} />
-          <div className="flex-1 overflow-y-auto px-8 py-8 relative">
-            {msgsLoading ? (
-              <div className="flex justify-center py-10"><Loader className="w-8 h-8 animate-spin text-[#0f6885]" /></div>
-            ) : messages.length === 0 ? (
-              <p className="text-center text-gray-400 text-sm py-10">Aucun message dans cette conversation.</p>
-            ) : (
-              messages.map((msg) => <MsgBubble key={msg.id ?? msg.mid ?? Math.random()} msg={msg} />)
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-          <ChatInput draft={draft} onDraftChange={setDraft} />
+        <div className="hidden md:flex flex-1 flex-col h-full">
+          <ChatPanel />
         </div>
       ) : (
-        <EmptyState />
+        <div className="hidden md:flex flex-1 flex-col h-full">
+          <EmptyState />
+        </div>
       )}
     </MainLayout>
   );

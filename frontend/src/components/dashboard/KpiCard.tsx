@@ -8,16 +8,16 @@ interface KpiCardProps {
 }
 
 const KpiCard: React.FC<KpiCardProps> = ({ k }) => (
-  <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm flex flex-col gap-4 hover:shadow-md transition-shadow">
+  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-100 shadow-card flex flex-col gap-3 sm:gap-4 hover:shadow-md transition-shadow">
     <div className="flex items-start justify-between">
-      <div className={`w-10 h-10 rounded-xl ${k.bg} ${k.text} flex items-center justify-center`}>
+      <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${k.bg} ${k.text} flex items-center justify-center flex-shrink-0`}>
         {k.icon}
       </div>
       <Sparkline data={k.sparkline} up={k.up} />
     </div>
     <div>
       <p className="text-xs text-gray-500 font-medium">{k.label}</p>
-      <p className="text-3xl font-extrabold text-gray-900 mt-0.5 tracking-tight">{k.value}</p>
+      <p className="text-2xl sm:text-3xl font-extrabold text-gray-900 mt-0.5 tracking-tight">{k.value}</p>
     </div>
     <div className="flex items-center gap-1.5">
       <span className={`flex items-center gap-0.5 text-xs font-bold ${k.up ? 'text-emerald-600' : 'text-orange-500'}`}>

@@ -73,7 +73,7 @@ const ClientChat = () => {
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  const handleSend = (e) => {
+  const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
@@ -83,7 +83,6 @@ const ClientChat = () => {
     setInput('');
     inputRef.current?.focus();
 
-    // Simulate store typing then responding
     setIsTyping(true);
     setTimeout(() => {
       setIsTyping(false);
@@ -97,14 +96,13 @@ const ClientChat = () => {
     }, 1500 + Math.random() * 1000);
   };
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend(e);
+      handleSend(e as any);
     }
   };
 
-  /* Quick-reply suggestions */
   const suggestions = [
     'Voir les produits',
     'Délai de livraison ?',
@@ -113,27 +111,37 @@ const ClientChat = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#d6ecf3] via-[#eaf4f8] to-[#f0f7fb] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-[#d6ecf3] via-[#eaf4f8] to-[#f0f7fb] flex items-center justify-center p-0 sm:p-4">
 
-      {/* Widget Shell */}
-      <div className="w-full max-w-[420px] bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col transition-all duration-300"
-        style={{ height: isMinimized ? 'auto' : '680px' }}>
+      {/* Widget Shell - Full screen on mobile, card on sm+ */}
+      <div
+        className="
+          w-full h-screen
+          sm:w-full sm:max-w-[420px] sm:h-auto sm:rounded-3xl sm:shadow-2xl sm:overflow-hidden
+          bg-white flex flex-col transition-all duration-300 overflow-hidden
+        "
+        style={{ height: isMinimized ? 'auto' : undefined }}
+      >
 
         {/* ── Header ── */}
-        <div className="bg-[#0f6885] px-5 py-4 flex-shrink-0">
+        <div className="bg-[#0f6885] px-4 sm:px-5 py-4 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="relative">
                 <img
                   src={STORE.avatar}
                   alt={STORE.name}
-                  className="w-12 h-12 rounded-full object-cover border-2 border-white/30"
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover border-2 border-white/30"
                 />
-                <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#0f6885] ${STORE.status === 'online' ? 'bg-emerald-400' : 'bg-gray-400'}`} />
+                <span
+                  className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#0f6885] ${
+                    STORE.status === 'online' ? 'bg-emerald-400' : 'bg-gray-400'
+                  }`}
+                />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <p className="text-white font-bold text-base">{STORE.name}</p>
+                  <p className="text-white font-bold text-sm sm:text-base">{STORE.name}</p>
                   <ShoppingBag className="w-4 h-4 text-white/60" />
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -144,9 +152,10 @@ const ClientChat = () => {
                 </div>
               </div>
             </div>
+            {/* Hide minimize button on mobile full-screen */}
             <button
               onClick={() => setIsMinimized((v) => !v)}
-              className="text-white/70 hover:text-white transition-colors p-1.5 hover:bg-white/10 rounded-lg"
+              className="hidden sm:flex text-white/70 hover:text-white transition-colors p-1.5 hover:bg-white/10 rounded-lg"
             >
               <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${isMinimized ? 'rotate-180' : ''}`} />
             </button>
@@ -158,25 +167,35 @@ const ClientChat = () => {
           )}
         </div>
 
-        {/* ── Body (hidden when minimized) ── */}
-        {!isMinimized && (
+        {/* ── Body (hidden when minimized on desktop) ── */}
+        {(!isMinimized) && (
           <>
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto px-5 py-5 space-y-1 bg-[#f7fbfd]">
+            <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 sm:py-5 space-y-1 bg-[#f7fbfd] scrollbar-thin">
               {messages.map((msg) => {
                 const isClient = msg.sender === 'client';
                 return (
-                  <div key={msg.id} className={`flex w-full mb-3 items-end gap-2 ${isClient ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    key={msg.id}
+                    className={`flex w-full mb-3 items-end gap-2 ${isClient ? 'justify-end' : 'justify-start'}`}
+                  >
                     {/* Store avatar */}
                     {!isClient && (
-                      <img src={STORE.avatar} alt={STORE.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0 mb-1" />
+                      <img
+                        src={STORE.avatar}
+                        alt={STORE.name}
+                        className="w-8 h-8 rounded-full object-cover flex-shrink-0 mb-1"
+                      />
                     )}
 
                     {/* Bubble */}
-                    <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${isClient
-                      ? 'bg-[#0f6885] text-white rounded-br-sm'
-                      : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
-                      }`}>
+                    <div
+                      className={`max-w-[80%] sm:max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                        isClient
+                          ? 'bg-[#0f6885] text-white rounded-br-sm'
+                          : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
+                      }`}
+                    >
                       <p className="font-medium">{msg.text}</p>
                       <div className={`flex items-center justify-end gap-1 mt-1.5 ${isClient ? 'text-blue-100' : 'text-gray-400'}`}>
                         <span className="text-[10px]">{msg.time}</span>
@@ -211,13 +230,13 @@ const ClientChat = () => {
             )}
 
             {/* ── Input ── */}
-            <div className="px-4 pb-5 pt-3 bg-white border-t border-gray-100 flex-shrink-0">
+            <div className="px-4 pb-4 sm:pb-5 pt-3 bg-white border-t border-gray-100 flex-shrink-0 safe-bottom">
               <form
                 onSubmit={handleSend}
                 className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-[#0f6885]/30 focus-within:border-[#0f6885] transition-all"
               >
-                <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors p-1">
-                  <Paperclip className="w-4.5 h-4.5 -rotate-45" />
+                <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors p-1" aria-label="Pièce jointe">
+                  <Paperclip className="w-4 h-4 -rotate-45" />
                 </button>
 
                 <input
@@ -230,24 +249,26 @@ const ClientChat = () => {
                   className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 font-medium focus:outline-none"
                 />
 
-                <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors p-1">
-                  <Smile className="w-4.5 h-4.5" />
+                <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors p-1" aria-label="Emoji">
+                  <Smile className="w-4 h-4" />
                 </button>
 
                 <button
                   type="submit"
                   disabled={!input.trim()}
-                  className={`p-2 rounded-xl transition-all ${input.trim()
-                    ? 'bg-[#0f6885] text-white hover:bg-[#0c5973] active:scale-95 shadow-sm'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    }`}
+                  className={`p-2 rounded-xl transition-all ${
+                    input.trim()
+                      ? 'bg-[#0f6885] text-white hover:bg-[#0c5973] active:scale-95 shadow-sm'
+                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  }`}
+                  aria-label="Envoyer"
                 >
                   <Send className="w-4 h-4" />
                 </button>
               </form>
 
               {/* Branding */}
-              <p className="text-center text-[10px] text-gray-400 mt-2.5 font-medium">
+              <p className="text-center text-[10px] text-gray-400 mt-2 font-medium">
                 Propulsé par{' '}
                 <span className="text-[#0f6885] font-bold">TikTak AI</span>
               </p>

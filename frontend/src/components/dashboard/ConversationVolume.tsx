@@ -9,7 +9,7 @@ interface ConversationVolumeProps {
 const ConversationVolume: React.FC<ConversationVolumeProps> = ({ data, total }) => {
   const maxV = Math.max(...data.map((h) => h.v));
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 sm:p-6">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h3 className="font-bold text-gray-800 text-sm">Conversation Volume</h3>
