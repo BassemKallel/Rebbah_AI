@@ -1,7 +1,10 @@
 from django.db import models
+from django.core.validators import MaxLengthValidator
 from django.utils import timezone
 import uuid as uuid_lib
 import time
+
+from apps.crm.encryption import EncryptedTextField
 
 class Lead(models.Model):
     """
@@ -177,6 +180,11 @@ class Company(models.Model):
     Stores business identity + Meta platform integration details.
     BotConfiguration is for personalization; Company is for identity.
     """
+    RESPONSE_MODE_CHOICES = [
+        ('nlu', 'NLU Pipeline (TunBERT + GLiNER)'),
+        ('llm', 'LLM Direct (Gemini)'),
+    ]
+
     name = models.CharField(max_length=255, help_text="Nom de la boutique")
     shop_id = models.CharField(
         max_length=255, unique=True,
@@ -188,9 +196,9 @@ class Company(models.Model):
         max_length=100, blank=True, null=True, unique=True,
         help_text="Facebook Page ID (depuis Meta Developer → Messenger → Token d'accès)"
     )
-    meta_page_access_token = models.TextField(
+    meta_page_access_token = EncryptedTextField(
         blank=True, null=True,
-        help_text="Page Access Token pour envoyer des réponses via Meta Send API"
+        help_text="Page Access Token pour envoyer des réponses via Meta Send API (chiffré)"
     )
     instagram_page_id = models.CharField(
         max_length=100, blank=True, null=True, unique=True,
@@ -198,9 +206,24 @@ class Company(models.Model):
     )
 
     # ── Tiktak API ─────────────────────────────────────────────────────
-    tiktak_api_token = models.TextField(
+    tiktak_api_token = EncryptedTextField(
         blank=True, null=True,
-        help_text="Token d'authentification pour l'API Tiktak (Bearer token)"
+        help_text="Token d'authentification pour l'API Tiktak — chiffré en base (AES Fernet)"
+    )
+
+    # ── LLM Response Mode ──────────────────────────────────────────────
+    response_mode = models.CharField(
+        max_length=20, choices=RESPONSE_MODE_CHOICES, default='nlu',
+        help_text="Mode de réponse : 'nlu' = pipeline classique, 'llm' = Gemini direct"
+    )
+    gemini_api_key = EncryptedTextField(
+        blank=True, null=True,
+        help_text="Clé API Gemini propre à cette company — chiffré en base (AES Fernet)"
+    )
+    llm_context = models.TextField(
+        blank=True, null=True,
+        validators=[MaxLengthValidator(10000)],
+        help_text="Contexte métier injecté dans le prompt LLM (max 10 000 caractères)"
     )
 
     # ── Link to BotConfiguration ───────────────────────────────────────
@@ -220,6 +243,36 @@ class Company(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.shop_id})"
+
+
+class UserProfile(models.Model):
+    """
+    Links a Django User to a Company for dashboard authentication.
+    Uses a separate profile table (not AbstractUser) to avoid migration risks.
+    """
+    ROLE_CHOICES = [
+        ('owner', 'Owner'),
+    ]
+
+    user = models.OneToOneField(
+        'auth.User', on_delete=models.CASCADE, related_name='profile',
+        help_text="Django User account"
+    )
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, related_name='users',
+        help_text="Company this user belongs to"
+    )
+    role = models.CharField(
+        max_length=20, choices=ROLE_CHOICES, default='owner',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'User Profile'
+        verbose_name_plural = 'User Profiles'
+
+    def __str__(self):
+        return f"{self.user.username} → {self.company.name} ({self.role})"
 
 
 class ResponseTemplate(models.Model):

@@ -4,6 +4,7 @@ import MainLayout from '../../components/layout/MainLayout';
 import BotConfiguration from './tabs/BotConfiguration';
 import ResponseIntent from './tabs/ResponseIntent';
 import MissingEntities from './tabs/MissingEntities';
+import LLMSettings from './tabs/LLMSettings';
 
 import {
   Settings as GenIcon,
@@ -21,6 +22,7 @@ import {
   Info,
   SlidersHorizontal,
   X,
+  Brain,
 } from 'lucide-react';
 
 const responseIntents = [
@@ -36,6 +38,7 @@ const responseIntents = [
 
 const navItems = [
   { id: 'bot_config', label: 'Bot Configuration', icon: <GenIcon className="w-4 h-4" />, path: 'bot-configuration' },
+  { id: 'llm_settings', label: 'Mode IA (LLM)', icon: <Brain className="w-4 h-4" />, path: 'llm-settings' },
 ];
 
 const NavSection = ({ label, icon, basePath, subItems, location, onNavClick }: any) => {
@@ -179,6 +182,7 @@ const AgentSettingsLayout = () => {
                 />
               ))}
               <Route path="missing-entities" element={<MissingEntities />} />
+              <Route path="llm-settings" element={<LLMSettings />} />
             </Routes>
           </div>
         </div>

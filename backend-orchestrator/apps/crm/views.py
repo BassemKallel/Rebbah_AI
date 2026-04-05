@@ -7,7 +7,7 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, LeadSerializer,
     BotConfigurationSerializer, ResponseTemplateSerializer,
 )
-from .authentication import TikTakTokenAuthentication
+from .authentication import TikTakTokenAuthentication, JWTCompanyAuthentication
 from apps.gateway.services.template_service import get_template
 
 
@@ -18,7 +18,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     """
     queryset = Lead.objects.all().order_by('-created_at')
     serializer_class = LeadSerializer
-    authentication_classes = [TikTakTokenAuthentication]
+    authentication_classes = [JWTCompanyAuthentication, TikTakTokenAuthentication]
     permission_classes     = [IsAuthenticated]
 
     def get_queryset(self):
@@ -35,7 +35,7 @@ class ConversationViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Conversation.objects.all().order_by('-updated_at')
     serializer_class = ConversationSerializer
-    authentication_classes = [TikTakTokenAuthentication]
+    authentication_classes = [JWTCompanyAuthentication, TikTakTokenAuthentication]
     permission_classes     = [IsAuthenticated]
 
     def get_queryset(self):
@@ -69,7 +69,7 @@ class BotConfigurationViewSet(viewsets.GenericViewSet):
     queryset = BotConfiguration.objects.all().order_by('-updated_at')
     serializer_class = BotConfigurationSerializer
     lookup_field = 'shop_id'
-    authentication_classes = [TikTakTokenAuthentication]
+    authentication_classes = [JWTCompanyAuthentication, TikTakTokenAuthentication]
     permission_classes     = [IsAuthenticated]
 
     def retrieve(self, request, *args, **kwargs):
@@ -132,7 +132,7 @@ class ResponseTemplateViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ResponseTemplateSerializer
     http_method_names = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options']
-    authentication_classes = [TikTakTokenAuthentication]
+    authentication_classes = [JWTCompanyAuthentication, TikTakTokenAuthentication]
     permission_classes     = [IsAuthenticated]
 
     def get_queryset(self):

@@ -54,3 +54,46 @@ class TikTakTokenAuthentication(BaseAuthentication):
     def authenticate_header(self, request):
         return 'Bearer realm="tiktak-ai"'
 
+
+class JWTCompanyAuthentication(BaseAuthentication):
+    """
+    JWT-based authentication for dashboard users.
+
+    Validates a JWT (via simplejwt), then resolves UserProfile → Company.
+    Returns (user, company) so request.auth is always a Company instance,
+    matching the same interface as TikTakTokenAuthentication.
+
+    Usage in views:
+        authentication_classes = [JWTCompanyAuthentication, TikTakTokenAuthentication]
+        permission_classes     = [IsAuthenticated]
+    """
+
+    def authenticate(self, request):
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+
+        jwt_auth = JWTAuthentication()
+        try:
+            validated = jwt_auth.authenticate(request)
+        except (InvalidToken, TokenError):
+            return None  # Not a valid JWT — fall through to next authenticator
+        except Exception:
+            return None
+
+        if validated is None:
+            return None
+
+        user, token = validated
+
+        # Resolve UserProfile → Company
+        try:
+            profile = user.profile  # OneToOneField reverse
+            return (user, profile.company)
+        except Exception:
+            raise AuthenticationFailed(
+                'Utilisateur authentifié mais aucun profil/company associé.'
+            )
+
+    def authenticate_header(self, request):
+        return 'Bearer realm="tiktak-ai-jwt"'
+

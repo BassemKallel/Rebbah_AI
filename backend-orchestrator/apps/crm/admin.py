@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 import json
-from .models import Lead, Conversation, Message, BotConfiguration, Company, NLUFallbackLog, ProductVector
+from .models import Lead, Conversation, Message, BotConfiguration, Company, NLUFallbackLog, ProductVector, UserProfile
 from apps.gateway.response_templates import TEMPLATES
 
 @admin.register(BotConfiguration)
@@ -39,13 +39,25 @@ class CompanyAdmin(admin.ModelAdmin):
         }),
         ('Meta & Tiktak Integration', {
             'fields': ('meta_page_id', 'meta_page_access_token', 'instagram_page_id', 'tiktak_api_token'),
-            'description': 'Facebook Page ID, Token Messenger, et Token API Tiktak pour chaque shop.'
+            'description': 'Facebook Page ID, Token Messenger, et Token API Tiktak pour chaque shop. Les tokens sont chiffrés en base (AES Fernet).'
+        }),
+        ('LLM Response Mode', {
+            'fields': ('response_mode', 'gemini_api_key', 'llm_context'),
+            'description': 'Mode de réponse IA : NLU (TunBERT) ou LLM Direct (Gemini). La clé API Gemini est chiffrée en base.'
         }),
         ('Bot Configuration', {
             'fields': ('bot_config',),
             'description': 'Lier à une configuration de bot pour la personnalisation.'
         }),
     )
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'company', 'role', 'created_at')
+    list_filter = ('role', 'company')
+    search_fields = ('user__username', 'user__email', 'company__name')
+    raw_id_fields = ('user', 'company')
 
 
 class MessageInline(admin.TabularInline):

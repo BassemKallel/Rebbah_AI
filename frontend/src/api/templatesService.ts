@@ -1,14 +1,17 @@
 import axios from 'axios';
+import { getAccessToken } from '../providers/AuthProvider';
 
 const API_BASE = process.env.REACT_APP_CRM_API_URL || 'http://localhost:8000/api/v1/crm';
-const TOKEN = process.env.REACT_APP_SHOP_TOKEN || '';
 
 const templatesApi = axios.create({
   baseURL: API_BASE,
-  headers: {
-    'Content-Type': 'application/json',
-    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
-  },
+  headers: { 'Content-Type': 'application/json' },
+});
+
+templatesApi.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
 });
 
 /**

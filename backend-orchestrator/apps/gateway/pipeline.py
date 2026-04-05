@@ -21,10 +21,11 @@ import logging
 from datetime import timedelta
 from django.utils import timezone
 
-from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog
+from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company
 from .context_manager import ContextManager
 from .response_templates import FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
+from .services.llm_response_service import generate_llm_response
 from .services.dialog_manager import detect_language
 from .services.azure_storage import azure_storage_service
 from . import disambiguation
@@ -62,6 +63,12 @@ class MessagePipeline:
                             matched_image_url?, uploaded_url?
         """
         result = {}
+
+        # ── LLM Mode Branch ───────────────────────────────────────────────
+        # If the company uses LLM Direct mode, bypass the entire NLU pipeline
+        company = Company.objects.filter(shop_id=shop_id, is_active=True).first()
+        if company and company.response_mode == 'llm' and text:
+            return self._run_llm_mode(user_id, shop_id, text, company, api_token)
 
         # ── Upload image to Azure if file provided ─────────────────────────
         uploaded_url = None
@@ -425,3 +432,115 @@ class MessagePipeline:
             }
 
         return None
+
+    # ── LLM Direct Mode Pipeline ─────────────────────────────────────────
+
+    def _run_llm_mode(self, user_id, shop_id, text, company, api_token=None):
+        """
+        Simplified pipeline for LLM Direct mode.
+        Gemini generates the response using the company's context.
+        Can also create orders when all entities are collected.
+        """
+        # ── 1. Cold Memory: Lead + Conversation ──────────────────────────
+        conversation = Conversation.objects.filter(
+            sender_id=user_id,
+            state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "LLM_ACTIVE"]
+        ).first()
+
+        if not conversation:
+            lead = Lead.objects.create(platform_id=user_id)
+            conversation = Conversation.objects.create(
+                lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
+                shop_id=shop_id, state="LLM_ACTIVE"
+            )
+        else:
+            lead = conversation.lead
+
+        state_before = conversation.state
+        current_context = conversation.context_data or {}
+
+        # ── 2. Hot Memory: conversation history from Redis ───────────────
+        conversation_history = context_manager.get_messages(user_id)
+
+        # ── 3. Call LLM with company context ─────────────────────────────
+        llm_result = generate_llm_response(
+            text=text,
+            company=company,
+            conversation_history=conversation_history,
+            current_context=current_context,
+        )
+
+        bot_text = llm_result["response_text"]
+        detected_intent = llm_result.get("detected_intent", "LLM_DIRECT")
+        extracted_entities = llm_result.get("extracted_entities", {})
+
+        # ── 4. Accumulate entities into context ──────────────────────────
+        for key, value in extracted_entities.items():
+            if value:
+                current_context[key] = value
+
+        # ── 5. Save User Message (traceability) ─────────────────────────
+        user_message = Message.objects.create(
+            conversation=conversation,
+            sender="USER",
+            text=text,
+            extracted_intent=detected_intent,
+            extracted_entities=extracted_entities,
+            is_fallback=False,
+            conversation_state_before=state_before,
+        )
+
+        # ── 6. Order creation if ready ───────────────────────────────────
+        new_state = "LLM_ACTIVE"
+        if llm_result.get("order_ready"):
+            matched_product = None
+            prod_name = current_context.get("product")
+            if prod_name:
+                try:
+                    token = api_token or company.tiktak_api_token
+                    products = tiktak_service.get_products(shop_id, token)
+                    matched_product, _, _ = tiktak_service.find_product(
+                        products, prod_name
+                    )
+                except Exception as e:
+                    logger.error(f"[LLM PIPELINE] Product lookup error: {e}")
+
+            try:
+                lead.create_pending_order(
+                    shop_id=shop_id,
+                    product_id=matched_product["id"] if matched_product else None,
+                    variation_id=None,
+                    color=current_context.get("color", ""),
+                    size=current_context.get("size", ""),
+                    address=current_context.get("address", ""),
+                    phone_number=current_context.get("phone_number", ""),
+                    quantity=int(current_context.get("quantity", 1)),
+                )
+                new_state = "COMPLETED"
+                logger.info(f"[LLM PIPELINE] Order created for lead={lead.id} shop={shop_id}")
+            except Exception as e:
+                logger.error(f"[LLM PIPELINE] Order creation error: {e}")
+
+        # ── 7. Persist conversation state ────────────────────────────────
+        conversation.state = new_state
+        conversation.context_data = current_context
+        conversation.save()
+
+        # ── 8. Save Bot Message (traceability) ──────────────────────────
+        Message.objects.create(
+            conversation=conversation, sender="BOT", text=bot_text
+        )
+        context_manager.add_message(user_id, role="user", text=text, intent=detected_intent)
+        context_manager.add_message(user_id, role="bot", text=bot_text)
+
+        user_message.conversation_state_after = new_state
+        user_message.save(update_fields=["conversation_state_after"])
+
+        return {
+            "text": bot_text,
+            "intent": detected_intent,
+            "state": new_state,
+            "entities": extracted_entities,
+            "context": current_context,
+            "missing_entities": [],
+        }
