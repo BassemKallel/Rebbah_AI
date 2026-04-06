@@ -87,7 +87,13 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "https://chat.tiktakpro.com",
+    "https://ai.tiktakpro.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+
 
 # Trusted origins for CSRF — must include all domains that POST to Django
 CSRF_TRUSTED_ORIGINS = [
@@ -133,6 +139,16 @@ EXTERNAL_REQUEST_TIMEOUT = int(os.getenv('EXTERNAL_REQUEST_TIMEOUT', '5'))
 
 # Token used by Meta to verify the webhook endpoint (GET request)
 META_VERIFY_TOKEN = os.getenv('META_VERIFY_TOKEN', '')
+META_APP_SECRET   = os.getenv('META_APP_SECRET', '')
+
+
+# ============================================================
+# FIELD ENCRYPTION (Fernet AES-128-CBC)
+# ============================================================
+# Used to encrypt sensitive fields: meta_page_access_token, gemini_api_key
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY', '')
+
 
 # ============================================================
 # STATIC FILES
