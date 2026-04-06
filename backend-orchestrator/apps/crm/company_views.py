@@ -12,7 +12,6 @@ from django.shortcuts import get_object_or_404
 
 from .models import Company
 from .serializers import CompanySettingsSerializer
-from .authentication import JWTCompanyAuthentication, TikTakTokenAuthentication
 
 
 class CompanySettingsView(APIView):
@@ -23,8 +22,9 @@ class CompanySettingsView(APIView):
     - Cannot switch to LLM mode if llm_context is empty
     - Cannot switch to LLM mode if gemini_api_key is missing
     - llm_context max 10,000 characters
+
+    Auth: uses DEFAULT_AUTHENTICATION_CLASSES from settings.py
     """
-    authentication_classes = [JWTCompanyAuthentication, TikTakTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, shop_id):

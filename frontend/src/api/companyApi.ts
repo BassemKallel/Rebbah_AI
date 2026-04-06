@@ -1,18 +1,4 @@
-import axios from 'axios';
-import { getAccessToken } from '../providers/AuthProvider';
-
-const API_BASE = process.env.REACT_APP_CRM_API_URL || 'http://localhost:8000/api/v1/crm';
-
-const companyApi = axios.create({
-  baseURL: API_BASE,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-companyApi.interceptors.request.use((config) => {
-  const token = getAccessToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+import api from './axiosInstance';
 
 export interface CompanySettings {
   shop_id: string;
@@ -26,7 +12,7 @@ export interface CompanySettings {
 
 /** GET /api/v1/crm/company/{shopId}/ */
 export const getCompanySettings = async (shopId: string): Promise<CompanySettings> => {
-  const { data } = await companyApi.get<CompanySettings>(`/company/${shopId}/`);
+  const { data } = await api.get<CompanySettings>(`/api/v1/crm/company/${shopId}/`);
   return data;
 };
 
@@ -39,6 +25,6 @@ export const updateCompanySettings = async (
     llm_context: string;
   }>
 ): Promise<CompanySettings> => {
-  const { data } = await companyApi.patch<CompanySettings>(`/company/${shopId}/`, patch);
+  const { data } = await api.patch<CompanySettings>(`/api/v1/crm/company/${shopId}/`, patch);
   return data;
 };

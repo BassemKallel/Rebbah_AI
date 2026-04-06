@@ -8,9 +8,6 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-tiktak-ai-key')
 DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
-# Encryption key for sensitive DB fields (Fernet AES-128-CBC + HMAC-SHA256)
-# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY', '')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -30,8 +27,7 @@ INSTALLED_APPS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'apps.crm.authentication.JWTCompanyAuthentication',
-        'apps.crm.authentication.DashboardTokenAuthentication',
-        'apps.crm.authentication.TikTakTokenAuthentication',
+        'apps.crm.authentication.StaticTokenAuthentication',
     ],
 }
 

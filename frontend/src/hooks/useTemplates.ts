@@ -10,22 +10,19 @@ import type { ResponseTemplate } from '../types';
 /**
  * Custom hook for managing response templates.
  * Automatically fetches templates on mount and provides CRUD methods.
- * 
+ *
  * @param {Object} filters - Query filters (category, language, shop_id, is_default)
- * @param {string} token - Bearer token for authentication
- * @returns {Object} Hook state and methods
  */
-export const useTemplates = (filters = {}, token) => {
+export const useTemplates = (filters: Record<string, any> = {}) => {
     const [templates, setTemplates] = useState<ResponseTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const fetchTemplates = async () => {
-
         try {
             setLoading(true);
             setError(null);
-            const data = await getTemplates(filters, token);
+            const data = await getTemplates(filters);
             setTemplates(Array.isArray(data) ? data : (data.results || []));
         } catch (err: any) {
             setError(err.response?.data?.detail || err.message || 'Failed to load templates');
@@ -38,17 +35,13 @@ export const useTemplates = (filters = {}, token) => {
     useEffect(() => {
         fetchTemplates();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [JSON.stringify(filters), token]);
+    }, [JSON.stringify(filters)]);
 
-    /**
-     * Create a new template (shop-specific override).
-     * @param {Object} templateData - Template data
-     * @returns {Promise<Object>} Result object with success flag
-     */
-    const create = async (templateData) => {
+    /** Create a new template (shop-specific override). */
+    const create = async (templateData: Record<string, unknown>) => {
         try {
             setError(null);
-            const newTemplate = await createTemplate(templateData, token);
+            const newTemplate = await createTemplate(templateData);
             setTemplates([...templates, newTemplate]);
             return { success: true, data: newTemplate };
         } catch (err: any) {
@@ -62,16 +55,11 @@ export const useTemplates = (filters = {}, token) => {
         }
     };
 
-    /**
-     * Update an existing template.
-     * @param {number} id - Template ID
-     * @param {Object} templateData - Updated template data
-     * @returns {Promise<Object>} Result object with success flag
-     */
-    const update = async (id, templateData) => {
+    /** Update an existing template. */
+    const update = async (id: number, templateData: Record<string, unknown>) => {
         try {
             setError(null);
-            const updated = await updateTemplate(id, templateData, token);
+            const updated = await updateTemplate(id, templateData);
             setTemplates(templates.map(t => t.id === id ? updated : t));
             return { success: true, data: updated };
         } catch (err: any) {
@@ -82,15 +70,11 @@ export const useTemplates = (filters = {}, token) => {
         }
     };
 
-    /**
-     * Delete a shop-specific template.
-     * @param {number} id - Template ID
-     * @returns {Promise<Object>} Result object with success flag
-     */
-    const remove = async (id) => {
+    /** Delete a shop-specific template. */
+    const remove = async (id: number) => {
         try {
             setError(null);
-            await deleteTemplate(id, token);
+            await deleteTemplate(id);
             setTemplates(templates.filter(t => t.id !== id));
             return { success: true };
         } catch (err: any) {
@@ -101,10 +85,8 @@ export const useTemplates = (filters = {}, token) => {
         }
     };
 
-    /**
-     * Find a template by category, sub_key, and language.
-     */
-    const findTemplates = (category, subKey, language) => {
+    /** Find templates by category, sub_key, and language. */
+    const findTemplates = (category: string, subKey: string, language: string) => {
         return templates.filter(t =>
             t.template_type === category &&
             t.intent === subKey &&
@@ -116,10 +98,8 @@ export const useTemplates = (filters = {}, token) => {
         });
     };
 
-    /**
-     * Get system template for a specific category/sub_key/language.
-     */
-    const getSystemTemplate = (category, subKey, language) => {
+    /** Get system template for a specific category/sub_key/language. */
+    const getSystemTemplate = (category: string, subKey: string, language: string) => {
         return templates.find(t =>
             t.template_type === category &&
             t.intent === subKey &&
@@ -128,10 +108,8 @@ export const useTemplates = (filters = {}, token) => {
         ) || null;
     };
 
-    /**
-     * Get custom (shop-specific) template for a specific category/sub_key/language.
-     */
-    const getCustomTemplate = (category, subKey, language) => {
+    /** Get custom (shop-specific) template. */
+    const getCustomTemplate = (category: string, subKey: string, language: string) => {
         return templates.find(t =>
             t.template_type === category &&
             t.intent === subKey &&

@@ -1,21 +1,20 @@
 """
-authentication.py — TikTak per-shop token authentication for DRF endpoints.
+authentication.py — Authentication backends for DRF endpoints.
 
-Expected header:
-    Authorization: Bearer <tiktak_api_token>
+Three authentication methods, tried in order:
 
-The token must match Company.tiktak_api_token stored in the DB.
-This is the same token the shop owner receives when logging into the TikTak dashboard.
+1. JWT (dashboard login)      → Authorization: Bearer <jwt_access_token>
+2. Static token (TikTak PRO)  → Authorization: Bearer <dashboard_token>
+                                 Authorization: Token <dashboard_token>
 
-If valid   → request.user = _TikTakUser(), request.auth = Company instance
-If invalid → 401 AuthenticationFailed
+Both resolve to (user, Company) so request.auth is always a Company instance.
 """
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
 
 class _TikTakUser:
-    """Lightweight authenticated principal representing a TikTak shop owner."""
+    """Lightweight authenticated principal for static-token auth."""
     is_authenticated = True
     is_anonymous     = False
     is_active        = True
@@ -24,48 +23,12 @@ class _TikTakUser:
         return "tiktak-api-client"
 
 
-class TikTakTokenAuthentication(BaseAuthentication):
-    """
-    Validates Authorization: Bearer <tiktak_api_token> against Company.tiktak_api_token.
-
-    Usage in views:
-        authentication_classes = [TikTakTokenAuthentication]
-        permission_classes     = [IsAuthenticated]
-    """
-
-    def authenticate(self, request):
-        auth_header = request.headers.get('Authorization', '')
-
-        if not auth_header.startswith('Bearer '):
-            return None  # Not our scheme — DRF will return 401 via permission check
-
-        token = auth_header[len('Bearer '):].strip()
-        if not token:
-            raise AuthenticationFailed('Token manquant après "Bearer".')
-
-        # Lookup company by token — the only valid source of truth
-        try:
-            from apps.crm.models import Company
-            company = Company.objects.get(dashboard_token=token)
-            return (_TikTakUser(), company)
-        except Company.DoesNotExist:
-            raise AuthenticationFailed('Token invalide ou boutique introuvable.')
-
-    def authenticate_header(self, request):
-        return 'Bearer realm="tiktak-ai"'
-
-
 class JWTCompanyAuthentication(BaseAuthentication):
     """
     JWT-based authentication for dashboard users.
 
     Validates a JWT (via simplejwt), then resolves UserProfile → Company.
-    Returns (user, company) so request.auth is always a Company instance,
-    matching the same interface as TikTakTokenAuthentication.
-
-    Usage in views:
-        authentication_classes = [JWTCompanyAuthentication, TikTakTokenAuthentication]
-        permission_classes     = [IsAuthenticated]
+    Returns (user, company) so request.auth is always a Company instance.
     """
 
     def authenticate(self, request):
@@ -76,7 +39,7 @@ class JWTCompanyAuthentication(BaseAuthentication):
         try:
             validated = jwt_auth.authenticate(request)
         except (InvalidToken, TokenError):
-            return None  # Not a valid JWT — fall through to next authenticator
+            return None
         except Exception:
             return None
 
@@ -87,7 +50,7 @@ class JWTCompanyAuthentication(BaseAuthentication):
 
         # Resolve UserProfile → Company
         try:
-            profile = user.profile  # OneToOneField reverse
+            profile = user.profile
             return (user, profile.company)
         except Exception:
             raise AuthenticationFailed(
@@ -98,35 +61,41 @@ class JWTCompanyAuthentication(BaseAuthentication):
         return 'Bearer realm="tiktak-ai-jwt"'
 
 
-class DashboardTokenAuthentication(BaseAuthentication):
+class StaticTokenAuthentication(BaseAuthentication):
     """
-    Static token authentication for dashboard access.
+    Static token authentication against Company.dashboard_token.
 
-    Validates Authorization: Token <dashboard_token> against Company.dashboard_token.
-    Used by TikTak PRO platform to integrate with the dashboard API
-    without requiring JWT login flow.
+    Accepts both prefixes:
+        Authorization: Bearer <dashboard_token>
+        Authorization: Token <dashboard_token>
 
-    Usage in views:
-        authentication_classes = [JWTCompanyAuthentication, DashboardTokenAuthentication, TikTakTokenAuthentication]
+    Used by TikTak PRO platform and webhook integrations.
     """
 
     def authenticate(self, request):
         auth_header = request.headers.get('Authorization', '')
 
-        if not auth_header.startswith('Token '):
-            return None  # Not our scheme
+        # Extract token from either prefix
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:].strip()
+        elif auth_header.startswith('Token '):
+            token = auth_header[6:].strip()
+        else:
+            return None
 
-        token = auth_header[len('Token '):].strip()
         if not token:
-            raise AuthenticationFailed('Token manquant après "Token".')
+            return None
+
+        # Skip JWTs (they start with "eyJ")
+        if token.startswith('eyJ'):
+            return None
 
         try:
             from apps.crm.models import Company
             company = Company.objects.get(dashboard_token=token)
             return (_TikTakUser(), company)
         except Company.DoesNotExist:
-            raise AuthenticationFailed('Dashboard token invalide.')
+            raise AuthenticationFailed('Token invalide ou boutique introuvable.')
 
     def authenticate_header(self, request):
-        return 'Token realm="tiktak-ai-dashboard"'
-
+        return 'Bearer realm="tiktak-ai"'

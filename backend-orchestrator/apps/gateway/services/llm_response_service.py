@@ -98,7 +98,7 @@ def generate_llm_response(
     }
 
     # ── Validate API key ──────────────────────────────────────────────────
-    api_key = company.gemini_api_key  # Decrypted by EncryptedTextField
+    api_key = company.gemini_api_key
     if not api_key:
         logger.error(f"[LLM] No Gemini API key for company={company.shop_id}")
         result["response_text"] = "Service temporairement indisponible. Veuillez réessayer plus tard."

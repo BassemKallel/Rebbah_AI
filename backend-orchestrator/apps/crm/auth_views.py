@@ -13,7 +13,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .authentication import JWTCompanyAuthentication, DashboardTokenAuthentication
+from .authentication import JWTCompanyAuthentication, StaticTokenAuthentication
 
 
 class LoginView(APIView):
@@ -81,15 +81,30 @@ class MeView(APIView):
     GET /api/v1/auth/me/
 
     Returns the authenticated user info + company details.
-    Requires a valid JWT token.
+    Works with both JWT and static token authentication.
     """
-    authentication_classes = [JWTCompanyAuthentication, DashboardTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
-        company = request.auth  # Company instance (from JWTCompanyAuthentication)
+        company = request.auth  # Company instance
 
+        # Static token auth → user is _TikTakUser (no Django User)
+        if not hasattr(user, 'profile'):
+            return Response({
+                'user': None,
+                'company': {
+                    'shop_id': company.shop_id,
+                    'name': company.name,
+                    'response_mode': company.response_mode,
+                    'has_gemini_key': bool(company.gemini_api_key),
+                    'has_llm_context': bool(company.llm_context and company.llm_context.strip()),
+                    'is_active': company.is_active,
+                },
+                'role': 'owner',
+            })
+
+        # JWT auth → full user info
         return Response({
             'user': {
                 'id': user.id,

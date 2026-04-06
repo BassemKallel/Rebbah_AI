@@ -152,7 +152,7 @@ export default function LLMSettings() {
           }}
         />
         <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 4 }}>
-          Votre clé est chiffrée en base de données (AES-256). Elle n'est jamais exposée via l'API.
+          Votre clé est stockée en base de données. Elle n'est jamais exposée via l'API (write-only).
         </p>
       </div>
 

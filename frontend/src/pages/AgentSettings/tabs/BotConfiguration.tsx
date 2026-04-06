@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, Save } from 'lucide-react';
 import { useBotConfig } from '../../../hooks/useBotConfig';
+import { useAuth } from '../../../providers/AuthProvider';
 import Toast from '../../../components/ui/Toast';
 
 const BotConfiguration = () => {
-  const shopId = process.env.REACT_APP_SHOP_ID || '1LXybpj';
-  const token = process.env.REACT_APP_SHOP_TOKEN;
+  const { shopId } = useAuth();
 
-  const { config, loading, error, patchConfig } = useBotConfig(shopId, token);
+  const { config, loading, error, patchConfig } = useBotConfig(shopId || '');
 
   const [formData, setFormData] = useState({
     shop_name: '',
