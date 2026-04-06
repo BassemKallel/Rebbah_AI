@@ -221,17 +221,34 @@ class AuthViewTests(TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Company Settings endpoint
+# 4. Company Settings — LLM mode switch validation
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CompanySettingsTests(TestCase):
+    """
+    Guards for the LLM mode switch:
+      - REFUSED if no gemini_api_key
+      - REFUSED if no llm_context
+      - REFUSED if llm_context is blank/whitespace
+      - REFUSED if gemini_api_key is blank/whitespace
+      - ALLOWED  if both gemini_api_key + llm_context are present
+      - ALLOWED  if key + context already stored → can switch without re-sending key
+    """
 
     URL = f"/api/v1/crm/company/{SHOP_ID}/"
 
     def setUp(self):
-        make_company()
+        self.company = make_company()
+        # Reset to clean state
+        self.company.response_mode = "nlu"
+        self.company.gemini_api_key = ""
+        self.company.llm_context = ""
+        self.company.save()
+
         self.client_jwt, _ = jwt_client()
         self.client_static = static_bearer_client(DASHBOARD_TOKEN)
+
+    # ── Auth gate ─────────────────────────────────────────────────────────
 
     def test_get_with_jwt(self):
         r = self.client_jwt.get(self.URL)
@@ -241,20 +258,108 @@ class CompanySettingsTests(TestCase):
     def test_get_with_static_token(self):
         r = self.client_static.get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.data["shop_id"], SHOP_ID)
-
-    def test_patch_response_mode_nlu(self):
-        r = self.client_jwt.patch(self.URL, {"response_mode": "nlu"}, format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-
-    def test_patch_llm_mode_without_key_returns_400(self):
-        """Switching to LLM mode without a Gemini key must fail."""
-        r = self.client_jwt.patch(self.URL, {"response_mode": "llm"}, format="json")
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_get_without_auth_returns_401(self):
         r = anon_client().get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── NLU mode (no validation required) ────────────────────────────────
+
+    def test_switch_to_nlu_always_allowed(self):
+        r = self.client_jwt.patch(self.URL, {"response_mode": "nlu"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    # ── LLM mode — REFUSED cases ──────────────────────────────────────────
+
+    def test_llm_mode_refused_without_api_key(self):
+        """No key, no context → 400."""
+        r = self.client_jwt.patch(self.URL, {"response_mode": "llm"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_llm_mode_refused_with_key_but_no_context(self):
+        """Has API key, but llm_context is empty → 400."""
+        r = self.client_jwt.patch(self.URL, {
+            "response_mode": "llm",
+            "gemini_api_key": "AIzaSy_test_key_abc123",
+            # llm_context missing
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_llm_mode_refused_with_context_but_no_key(self):
+        """Has context, but gemini_api_key is missing → 400."""
+        r = self.client_jwt.patch(self.URL, {
+            "response_mode": "llm",
+            "llm_context": "Boutique de vêtements.",
+            # gemini_api_key missing
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_llm_mode_refused_with_blank_api_key(self):
+        """Blank key (whitespace only) → 400."""
+        r = self.client_jwt.patch(self.URL, {
+            "response_mode": "llm",
+            "gemini_api_key": "   ",
+            "llm_context": "Boutique de vêtements.",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_llm_mode_refused_with_blank_context(self):
+        """Blank context (whitespace only) → 400."""
+        r = self.client_jwt.patch(self.URL, {
+            "response_mode": "llm",
+            "gemini_api_key": "AIzaSy_test_key_abc123",
+            "llm_context": "   ",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_llm_mode_refused_with_empty_string_context(self):
+        """Empty string context → 400."""
+        r = self.client_jwt.patch(self.URL, {
+            "response_mode": "llm",
+            "gemini_api_key": "AIzaSy_test_key_abc123",
+            "llm_context": "",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # ── LLM mode — ALLOWED cases ──────────────────────────────────────────
+
+    def test_llm_mode_allowed_with_key_and_context(self):
+        """Both key and context provided → 200."""
+        r = self.client_jwt.patch(self.URL, {
+            "response_mode": "llm",
+            "gemini_api_key": "AIzaSy_test_key_abc123",
+            "llm_context": "Boutique de vêtements tunisienne.",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["response_mode"], "llm")
+
+    def test_llm_mode_allowed_if_key_and_context_already_stored(self):
+        """Key + context already in DB → can switch without re-sending them."""
+        self.company.gemini_api_key = "AIzaSy_stored_key"
+        self.company.llm_context = "Boutique existante."
+        self.company.save()
+
+        r = self.client_jwt.patch(self.URL, {"response_mode": "llm"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["response_mode"], "llm")
+
+    def test_llm_mode_allowed_via_static_token(self):
+        """Same validation works with static token auth."""
+        r = self.client_static.patch(self.URL, {
+            "response_mode": "llm",
+            "gemini_api_key": "AIzaSy_test_key_abc123",
+            "llm_context": "Boutique test static.",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_llm_mode_context_max_length(self):
+        """Context > 10,000 chars → 400."""
+        r = self.client_jwt.patch(self.URL, {
+            "response_mode": "llm",
+            "gemini_api_key": "AIzaSy_test_key_abc123",
+            "llm_context": "A" * 10001,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
