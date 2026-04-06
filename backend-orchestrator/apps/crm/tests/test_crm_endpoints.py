@@ -26,16 +26,16 @@ from apps.crm.models import (
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-TOKEN_VALID   = str(uuid.uuid4())   # generated at runtime — never stored in git
-TOKEN_INVALID = "wrong-token"
+TOKEN_VALID   = "static-" + str(uuid.uuid4()).replace("-", "")  # unique per run
+TOKEN_INVALID = "wrong-token-xyz"
 SHOP_ID       = "TEST_SHOP_01"
 
 
 def make_company(shop_id=SHOP_ID, token=TOKEN_VALID):
-    """Create a Company with a known api token."""
+    """Create a Company with a known dashboard_token."""
     return Company.objects.get_or_create(
         shop_id=shop_id,
-        defaults={"name": f"Test Shop {shop_id}", "tiktak_api_token": token},
+        defaults={"name": f"Test Shop {shop_id}", "dashboard_token": token},
     )[0]
 
 
@@ -76,9 +76,9 @@ class AuthenticationTests(TestCase):
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_malformed_bearer_returns_401(self):
-        """'Token xyz' instead of 'Bearer xyz'."""
+        """Token inconnu (ni JWT valide ni dashboard_token connu) → 401."""
         client = APIClient()
-        client.credentials(HTTP_AUTHORIZATION=f"Token {TOKEN_VALID}")
+        client.credentials(HTTP_AUTHORIZATION="Bearer completely-unknown-token-xyz")
         r = client.get("/api/v1/crm/templates/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
