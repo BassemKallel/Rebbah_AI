@@ -3,8 +3,7 @@ from django.core.validators import MaxLengthValidator
 from django.utils import timezone
 import uuid as uuid_lib
 import time
-
-from apps.crm.encryption import EncryptedTextField
+import secrets
 
 class Lead(models.Model):
     """
@@ -196,19 +195,19 @@ class Company(models.Model):
         max_length=100, blank=True, null=True, unique=True,
         help_text="Facebook Page ID (depuis Meta Developer → Messenger → Token d'accès)"
     )
-    meta_page_access_token = EncryptedTextField(
+    meta_page_access_token = models.TextField(
         blank=True, null=True,
-        help_text="Page Access Token pour envoyer des réponses via Meta Send API (chiffré)"
+        help_text="Page Access Token pour envoyer des réponses via Meta Send API"
     )
     instagram_page_id = models.CharField(
         max_length=100, blank=True, null=True, unique=True,
         help_text="Instagram Business Account ID (si différent du Page ID)"
     )
 
-    # ── Tiktak API ─────────────────────────────────────────────────────
-    tiktak_api_token = EncryptedTextField(
-        blank=True, null=True,
-        help_text="Token d'authentification pour l'API Tiktak — chiffré en base (AES Fernet)"
+    # ── Dashboard Static Token ────────────────────────────────────────
+    dashboard_token = models.CharField(
+        max_length=64, unique=True, blank=True, null=True,
+        help_text="Token statique pour l'accès dashboard (généré automatiquement)"
     )
 
     # ── LLM Response Mode ──────────────────────────────────────────────
@@ -216,9 +215,9 @@ class Company(models.Model):
         max_length=20, choices=RESPONSE_MODE_CHOICES, default='nlu',
         help_text="Mode de réponse : 'nlu' = pipeline classique, 'llm' = Gemini direct"
     )
-    gemini_api_key = EncryptedTextField(
+    gemini_api_key = models.TextField(
         blank=True, null=True,
-        help_text="Clé API Gemini propre à cette company — chiffré en base (AES Fernet)"
+        help_text="Clé API Gemini propre à cette company"
     )
     llm_context = models.TextField(
         blank=True, null=True,
@@ -243,6 +242,11 @@ class Company(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.shop_id})"
+
+    def save(self, *args, **kwargs):
+        if not self.dashboard_token:
+            self.dashboard_token = secrets.token_hex(32)
+        super().save(*args, **kwargs)
 
 
 class UserProfile(models.Model):

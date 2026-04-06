@@ -13,7 +13,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .authentication import JWTCompanyAuthentication
+from .authentication import JWTCompanyAuthentication, DashboardTokenAuthentication
 
 
 class LoginView(APIView):
@@ -72,6 +72,7 @@ class LoginView(APIView):
             'shop_id': company.shop_id,
             'company_name': company.name,
             'response_mode': company.response_mode,
+            'dashboard_token': company.dashboard_token,
         })
 
 
@@ -82,7 +83,7 @@ class MeView(APIView):
     Returns the authenticated user info + company details.
     Requires a valid JWT token.
     """
-    authentication_classes = [JWTCompanyAuthentication]
+    authentication_classes = [JWTCompanyAuthentication, DashboardTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

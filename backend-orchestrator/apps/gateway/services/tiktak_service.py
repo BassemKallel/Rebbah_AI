@@ -88,18 +88,13 @@ def get_products(shop_id: str, api_token: str = None) -> list:
     
     Args:
         shop_id: The shop identifier on the Tiktak platform.
-        api_token: Per-shop API token. Falls back to settings.TIKTAK_API_TOKEN if not provided.
+        api_token: Deprecated — TikTak PRO API is public. Kept for backward compat.
     """
     cache_key = f"tiktak_products:{shop_id}"
     products = cache.get(cache_key)
 
     if products is None:
         logger.info(f"[TIKTAK] cache miss shop_id={shop_id}")
-        token = api_token
-        if not token:
-            logger.error(f"[TIKTAK] No API token for shop_id={shop_id}")
-            return []
-        api_headers = {"Authorization": f"Bearer {token}"}
         all_results = []
         next_url    = TIKTAK_API_PRODUCTS_URL
         params      = {"company": shop_id}
@@ -108,9 +103,9 @@ def get_products(shop_id: str, api_token: str = None) -> list:
         while next_url and page_count < 10:
             try:
                 if page_count == 0:
-                    resp = requests.get(next_url, headers=api_headers, params=params, timeout=REQUEST_TIMEOUT)
+                    resp = requests.get(next_url, params=params, timeout=REQUEST_TIMEOUT)
                 else:
-                    resp = requests.get(next_url, headers=api_headers, timeout=REQUEST_TIMEOUT)
+                    resp = requests.get(next_url, timeout=REQUEST_TIMEOUT)
 
                 if resp.status_code == 200:
                     data = resp.json()

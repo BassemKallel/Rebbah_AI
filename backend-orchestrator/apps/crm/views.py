@@ -7,7 +7,7 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, LeadSerializer,
     BotConfigurationSerializer, ResponseTemplateSerializer,
 )
-from .authentication import TikTakTokenAuthentication, JWTCompanyAuthentication
+from .authentication import TikTakTokenAuthentication, JWTCompanyAuthentication, DashboardTokenAuthentication
 from apps.gateway.services.template_service import get_template
 
 

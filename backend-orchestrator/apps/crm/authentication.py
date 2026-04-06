@@ -46,10 +46,10 @@ class TikTakTokenAuthentication(BaseAuthentication):
         # Lookup company by token — the only valid source of truth
         try:
             from apps.crm.models import Company
-            company = Company.objects.get(tiktak_api_token=token)
+            company = Company.objects.get(dashboard_token=token)
             return (_TikTakUser(), company)
         except Company.DoesNotExist:
-            raise AuthenticationFailed('Token TikTak invalide ou boutique introuvable.')
+            raise AuthenticationFailed('Token invalide ou boutique introuvable.')
 
     def authenticate_header(self, request):
         return 'Bearer realm="tiktak-ai"'
@@ -96,4 +96,37 @@ class JWTCompanyAuthentication(BaseAuthentication):
 
     def authenticate_header(self, request):
         return 'Bearer realm="tiktak-ai-jwt"'
+
+
+class DashboardTokenAuthentication(BaseAuthentication):
+    """
+    Static token authentication for dashboard access.
+
+    Validates Authorization: Token <dashboard_token> against Company.dashboard_token.
+    Used by TikTak PRO platform to integrate with the dashboard API
+    without requiring JWT login flow.
+
+    Usage in views:
+        authentication_classes = [JWTCompanyAuthentication, DashboardTokenAuthentication, TikTakTokenAuthentication]
+    """
+
+    def authenticate(self, request):
+        auth_header = request.headers.get('Authorization', '')
+
+        if not auth_header.startswith('Token '):
+            return None  # Not our scheme
+
+        token = auth_header[len('Token '):].strip()
+        if not token:
+            raise AuthenticationFailed('Token manquant après "Token".')
+
+        try:
+            from apps.crm.models import Company
+            company = Company.objects.get(dashboard_token=token)
+            return (_TikTakUser(), company)
+        except Company.DoesNotExist:
+            raise AuthenticationFailed('Dashboard token invalide.')
+
+    def authenticate_header(self, request):
+        return 'Token realm="tiktak-ai-dashboard"'
 

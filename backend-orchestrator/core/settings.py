@@ -27,6 +27,14 @@ INSTALLED_APPS = [
     'apps.crm',
 ]
 
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'apps.crm.authentication.JWTCompanyAuthentication',
+        'apps.crm.authentication.DashboardTokenAuthentication',
+        'apps.crm.authentication.TikTakTokenAuthentication',
+    ],
+}
+
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',

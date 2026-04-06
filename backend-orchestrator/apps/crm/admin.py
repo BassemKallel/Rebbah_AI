@@ -35,21 +35,22 @@ class CompanyAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Identité', {
-            'fields': ('name', 'shop_id', 'is_active')
+            'fields': ('name', 'shop_id', 'is_active', 'dashboard_token')
         }),
-        ('Meta & Tiktak Integration', {
-            'fields': ('meta_page_id', 'meta_page_access_token', 'instagram_page_id', 'tiktak_api_token'),
-            'description': 'Facebook Page ID, Token Messenger, et Token API Tiktak pour chaque shop. Les tokens sont chiffrés en base (AES Fernet).'
+        ('Meta Integration', {
+            'fields': ('meta_page_id', 'meta_page_access_token', 'instagram_page_id'),
+            'description': 'Facebook Page ID et Token Messenger pour chaque shop.'
         }),
         ('LLM Response Mode', {
             'fields': ('response_mode', 'gemini_api_key', 'llm_context'),
-            'description': 'Mode de réponse IA : NLU (TunBERT) ou LLM Direct (Gemini). La clé API Gemini est chiffrée en base.'
+            'description': 'Mode de réponse IA : NLU (TunBERT) ou LLM Direct (Gemini).'
         }),
         ('Bot Configuration', {
             'fields': ('bot_config',),
             'description': 'Lier à une configuration de bot pour la personnalisation.'
         }),
     )
+    readonly_fields = ('dashboard_token',)
 
 
 @admin.register(UserProfile)
