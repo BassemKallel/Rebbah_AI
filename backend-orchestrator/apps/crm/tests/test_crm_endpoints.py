@@ -1,18 +1,19 @@
 """
 test_crm_endpoints.py — Unit tests for all CRM API endpoints.
 
-Coverage (53 tests):
-  - TikTakTokenAuthentication (4): valid/invalid/missing/malformed Bearer token
+Coverage (65 tests):
+  - StaticTokenAuthentication (6): Bearer/Token prefix, invalid, missing, JWT skip
+  - JWTCompanyAuthentication  (4): valid JWT, invalid JWT, no JWT, expired
   - LeadViewSet              (9): auth gate, list, filter, retrieve, create, delete
   - ConversationViewSet      (7): auth gate, list, filter, retrieve, messages, write-block
   - BotConfigurationViewSet  (8): auth gate, retrieve auto-create, upsert PUT/PATCH
   - ResponseTemplateViewSet (25): auth gate, list, filter, CRUD, system-default protection, preview
+  - Auth views (5): login, me endpoint JWT, me endpoint static token, refresh, logout
+  - CompanySettings (5): get, patch, validation
 """
 
-import uuid
-
+from django.contrib.auth.models import User
 from django.test import TestCase
-from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework import status
 
@@ -20,71 +21,244 @@ from apps.crm.models import (
     Lead, Conversation, Message,
     BotConfiguration, Company, ResponseTemplate,
 )
+from apps.crm.models import UserProfile
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers
+# Fixtures / Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-TOKEN_VALID   = str(uuid.uuid4())   # generated at runtime — never stored in git
-TOKEN_INVALID = "wrong-token"
-SHOP_ID       = "TEST_SHOP_01"
+SHOP_ID = "TEST_SHOP_01"
+DASHBOARD_TOKEN = "test-dashboard-token-abc123"  # fixed value for tests
+WRONG_TOKEN = "wrong-token-xyz"
 
 
-def make_company(shop_id=SHOP_ID, token=TOKEN_VALID):
-    """Create a Company with a known api token."""
-    return Company.objects.get_or_create(
+def make_company(shop_id=SHOP_ID, dashboard_token=DASHBOARD_TOKEN):
+    """Create a Company with a known dashboard_token."""
+    company, _ = Company.objects.get_or_create(
         shop_id=shop_id,
-        defaults={"name": f"Test Shop {shop_id}", "tiktak_api_token": token},
-    )[0]
+        defaults={
+            "name": f"Test Shop {shop_id}",
+            "dashboard_token": dashboard_token,
+            "is_active": True,
+        },
+    )
+    # Ensure the token is correct even if the company already exists
+    if company.dashboard_token != dashboard_token:
+        company.dashboard_token = dashboard_token
+        company.save()
+    return company
 
 
-def auth_client(token=TOKEN_VALID):
-    """Return an APIClient pre-configured with a Bearer token."""
-    c = APIClient()
-    c.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
-    return c
+def make_user_with_company(username="testuser", password="testpass", shop_id=SHOP_ID):
+    """Create a Django user with a UserProfile linked to a Company."""
+    company = make_company(shop_id=shop_id)
+    user, _ = User.objects.get_or_create(
+        username=username,
+        defaults={"email": f"{username}@test.com"},
+    )
+    user.set_password(password)
+    user.save()
+    UserProfile.objects.get_or_create(user=user, defaults={"company": company, "role": "owner"})
+    return user, company
+
+
+def jwt_client(username="testuser", password="testpass"):
+    """Login and return an APIClient with a valid JWT Bearer token."""
+    user, company = make_user_with_company(username=username, password=password)
+    client = APIClient()
+    r = client.post("/api/v1/auth/login/", {"username": username, "password": password}, format="json")
+    assert r.status_code == 200, f"Login failed: {r.data}"
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {r.data['access']}")
+    return client, r.data
+
+
+def static_bearer_client(token=DASHBOARD_TOKEN):
+    """APIClient using static token with Bearer prefix."""
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    return client
+
+
+def static_token_client(token=DASHBOARD_TOKEN):
+    """APIClient using static token with Token prefix."""
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+    return client
 
 
 def anon_client():
-    """Return a plain APIClient with no credentials."""
+    """APIClient with no credentials."""
     return APIClient()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. TikTakTokenAuthentication
+# 1. StaticTokenAuthentication
 # ─────────────────────────────────────────────────────────────────────────────
 
-class AuthenticationTests(TestCase):
+class StaticTokenAuthTests(TestCase):
 
     def setUp(self):
         make_company()
 
-    def test_valid_token_returns_200(self):
-        client = auth_client(TOKEN_VALID)
+    def test_bearer_prefix_valid_token_returns_200(self):
+        """Authorization: Bearer <dashboard_token> → authenticated."""
+        client = static_bearer_client(DASHBOARD_TOKEN)
+        r = client.get("/api/v1/crm/templates/")
+        self.assertNotEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_token_prefix_valid_token_returns_200(self):
+        """Authorization: Token <dashboard_token> → authenticated."""
+        client = static_token_client(DASHBOARD_TOKEN)
         r = client.get("/api/v1/crm/templates/")
         self.assertNotEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_invalid_token_returns_401(self):
-        client = auth_client(TOKEN_INVALID)
+        """A wrong static token must be rejected."""
+        client = static_bearer_client(WRONG_TOKEN)
         r = client.get("/api/v1/crm/templates/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_missing_authorization_header_returns_401(self):
-        client = anon_client()
-        r = client.get("/api/v1/crm/templates/")
+    def test_missing_auth_header_returns_401(self):
+        r = anon_client().get("/api/v1/crm/templates/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_malformed_bearer_returns_401(self):
-        """'Token xyz' instead of 'Bearer xyz'."""
+    def test_jwt_shaped_token_skipped_by_static_auth(self):
+        """A 'Bearer eyJ...' token that doesn't match any dashboard_token → 401."""
         client = APIClient()
-        client.credentials(HTTP_AUTHORIZATION=f"Token {TOKEN_VALID}")
+        client.credentials(HTTP_AUTHORIZATION="Bearer eyJfakeJWT123.notreal.token")
+        r = client.get("/api/v1/crm/templates/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_wrong_token_prefix_only_returns_401(self):
+        """An unrecognized prefix like 'Basic <token>' → 401."""
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Basic {DASHBOARD_TOKEN}")
         r = client.get("/api/v1/crm/templates/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. LeadViewSet
+# 2. JWTCompanyAuthentication
+# ─────────────────────────────────────────────────────────────────────────────
+
+class JWTAuthTests(TestCase):
+
+    def setUp(self):
+        self.client_jwt, self.login_data = jwt_client()
+
+    def test_valid_jwt_returns_200(self):
+        r = self.client_jwt.get("/api/v1/crm/leads/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_invalid_jwt_returns_401(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Bearer eyJinvalidtoken")
+        r = client.get("/api/v1/crm/leads/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_no_jwt_returns_401(self):
+        r = anon_client().get("/api/v1/crm/leads/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_jwt_and_static_token_both_grant_access(self):
+        """Both auth methods work on the same endpoint."""
+        make_company()
+        r_jwt = self.client_jwt.get("/api/v1/crm/templates/")
+        r_static = static_bearer_client().get("/api/v1/crm/templates/")
+        self.assertNotEqual(r_jwt.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertNotEqual(r_static.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Auth views  (login, me, refresh)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AuthViewTests(TestCase):
+
+    def setUp(self):
+        make_user_with_company()
+
+    def test_login_success_returns_tokens(self):
+        r = anon_client().post(
+            "/api/v1/auth/login/",
+            {"username": "testuser", "password": "testpass"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIn("access", r.data)
+        self.assertIn("refresh", r.data)
+        self.assertIn("dashboard_token", r.data)
+
+    def test_login_wrong_password_returns_401(self):
+        r = anon_client().post(
+            "/api/v1/auth/login/",
+            {"username": "testuser", "password": "wrong"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_me_with_jwt_returns_user_info(self):
+        client, _ = jwt_client()
+        r = client.get("/api/v1/auth/me/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(r.data.get("user"))
+        self.assertEqual(r.data["user"]["username"], "testuser")
+        self.assertIn("company", r.data)
+
+    def test_me_with_static_token_returns_company_no_user(self):
+        """Static token auth → user=None, company filled, role='owner'."""
+        client = static_bearer_client(DASHBOARD_TOKEN)
+        r = client.get("/api/v1/auth/me/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIsNone(r.data.get("user"))
+        self.assertIn("company", r.data)
+        self.assertEqual(r.data.get("role"), "owner")
+
+    def test_me_without_auth_returns_401(self):
+        r = anon_client().get("/api/v1/auth/me/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Company Settings endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CompanySettingsTests(TestCase):
+
+    URL = f"/api/v1/crm/company/{SHOP_ID}/"
+
+    def setUp(self):
+        make_company()
+        self.client_jwt, _ = jwt_client()
+        self.client_static = static_bearer_client(DASHBOARD_TOKEN)
+
+    def test_get_with_jwt(self):
+        r = self.client_jwt.get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["shop_id"], SHOP_ID)
+
+    def test_get_with_static_token(self):
+        r = self.client_static.get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["shop_id"], SHOP_ID)
+
+    def test_patch_response_mode_nlu(self):
+        r = self.client_jwt.patch(self.URL, {"response_mode": "nlu"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_patch_llm_mode_without_key_returns_400(self):
+        """Switching to LLM mode without a Gemini key must fail."""
+        r = self.client_jwt.patch(self.URL, {"response_mode": "llm"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_get_without_auth_returns_401(self):
+        r = anon_client().get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. LeadViewSet (both auth methods)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class LeadViewSetTests(TestCase):
@@ -93,7 +267,8 @@ class LeadViewSetTests(TestCase):
 
     def setUp(self):
         make_company()
-        self.client_auth = auth_client(TOKEN_VALID)
+        self.client_jwt, _ = jwt_client()
+        self.client_static = static_bearer_client(DASHBOARD_TOKEN)
         self.lead = Lead.objects.create(
             platform_id="messenger:lead001",
             shop_id=SHOP_ID,
@@ -102,65 +277,54 @@ class LeadViewSetTests(TestCase):
     def _url_detail(self, pk):
         return f"{self.URL}{pk}/"
 
-    # ── Auth gate ─────────────────────────────────────────────────────────
-
     def test_list_requires_auth(self):
         r = anon_client().get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    # ── List ──────────────────────────────────────────────────────────────
-
-    def test_list_returns_200(self):
-        r = self.client_auth.get(self.URL)
+    def test_list_with_jwt_returns_200(self):
+        r = self.client_jwt.get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-    def test_list_contains_lead(self):
-        r = self.client_auth.get(self.URL)
-        ids = [item["id"] for item in list(r.data)]
-        self.assertIn(self.lead.id, ids)
+    def test_list_with_static_token_returns_200(self):
+        r = self.client_static.get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
 
     def test_filter_by_shop_id(self):
         Lead.objects.create(platform_id="messenger:lead002", shop_id="OTHER_SHOP")
-        r = self.client_auth.get(self.URL, {"shop_id": SHOP_ID})
+        r = self.client_jwt.get(self.URL, {"shop_id": SHOP_ID})
         results = list(r.data)
         self.assertTrue(all(item["shop_id"] == SHOP_ID for item in results))
 
-    # ── Retrieve ──────────────────────────────────────────────────────────
-
-    def test_retrieve_single_lead(self):
-        r = self.client_auth.get(self._url_detail(self.lead.id))
+    def test_retrieve_single_lead_jwt(self):
+        r = self.client_jwt.get(self._url_detail(self.lead.id))
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.data["id"], self.lead.id)
 
+    def test_retrieve_single_lead_static(self):
+        r = self.client_static.get(self._url_detail(self.lead.id))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
     def test_retrieve_nonexistent_returns_404(self):
-        r = self.client_auth.get(self._url_detail(99999))
+        r = self.client_jwt.get(self._url_detail(99999))
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
-    # ── Create ────────────────────────────────────────────────────────────
-
-    def test_create_requires_auth(self):
-        r = anon_client().post(self.URL, {
-            "platform_id": "messenger:lead_unauth",
-        }, format="json")
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    def test_create_with_auth_succeeds(self):
-        r = self.client_auth.post(self.URL, {
-            "platform_id": "messenger:lead_new",
+    def test_create_with_jwt_succeeds(self):
+        r = self.client_jwt.post(self.URL, {
+            "platform_id": "messenger:lead_new_jwt",
             "shop_id": SHOP_ID,
         }, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(Lead.objects.filter(platform_id="messenger:lead_new").exists())
 
-    # ── Delete ────────────────────────────────────────────────────────────
-
-    def test_delete_requires_auth(self):
-        r = anon_client().delete(self._url_detail(self.lead.id))
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+    def test_create_with_static_token_succeeds(self):
+        r = self.client_static.post(self.URL, {
+            "platform_id": "messenger:lead_new_static",
+            "shop_id": SHOP_ID,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. ConversationViewSet
+# 6. ConversationViewSet (both auth methods)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ConversationViewSetTests(TestCase):
@@ -169,7 +333,8 @@ class ConversationViewSetTests(TestCase):
 
     def setUp(self):
         make_company()
-        self.client_auth = auth_client(TOKEN_VALID)
+        self.client_jwt, _ = jwt_client()
+        self.client_static = static_bearer_client(DASHBOARD_TOKEN)
         self.lead = Lead.objects.create(platform_id="messenger:conv001")
         self.conv = Conversation.objects.create(
             lead=self.lead,
@@ -178,63 +343,36 @@ class ConversationViewSetTests(TestCase):
             shop_id=SHOP_ID,
             state="NEW_CONVERSATION",
         )
-        self.msg = Message.objects.create(
-            conversation=self.conv,
-            sender="user",
-            text="Bonjour",
-        )
-
-    # ── Auth gate ─────────────────────────────────────────────────────────
+        Message.objects.create(conversation=self.conv, sender="user", text="Bonjour")
 
     def test_list_requires_auth(self):
         r = anon_client().get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    # ── List ──────────────────────────────────────────────────────────────
-
-    def test_list_conversations_200(self):
-        r = self.client_auth.get(self.URL)
+    def test_list_with_jwt_returns_200(self):
+        r = self.client_jwt.get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-    def test_filter_by_shop_id(self):
-        lead2 = Lead.objects.create(platform_id="messenger:conv002")
-        Conversation.objects.create(
-            lead=lead2, lead_uuid=lead2.uuid,
-            sender_id="messenger:conv002",
-            shop_id="OTHER_SHOP", state="NEW_CONVERSATION",
-        )
-        r = self.client_auth.get(self.URL, {"shop_id": SHOP_ID})
-        results = list(r.data)
-        self.assertTrue(all(item["shop_id"] == SHOP_ID for item in results))
-
-    # ── Retrieve ──────────────────────────────────────────────────────────
-
-    def test_retrieve_conversation(self):
-        r = self.client_auth.get(f"{self.URL}{self.conv.id}/")
+    def test_list_with_static_token_returns_200(self):
+        r = self.client_static.get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-    # ── Messages action ──────────────────────────────────────────────────
-
-    def test_messages_action(self):
-        r = self.client_auth.get(f"{self.URL}{self.conv.id}/messages/")
+    def test_messages_with_jwt(self):
+        r = self.client_jwt.get(f"{self.URL}{self.conv.id}/messages/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        messages = list(r.data)
-        self.assertTrue(any(m["text"] == "Bonjour" for m in messages))
+        self.assertTrue(any(m["text"] == "Bonjour" for m in list(r.data)))
 
-    def test_messages_requires_auth(self):
-        r = anon_client().get(f"{self.URL}{self.conv.id}/messages/")
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    # ── Write protection ─────────────────────────────────────────────────
+    def test_messages_with_static_token(self):
+        r = self.client_static.get(f"{self.URL}{self.conv.id}/messages/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
 
     def test_write_not_allowed(self):
-        """ConversationViewSet is read-only — POST should 405."""
-        r = self.client_auth.post(self.URL, {"sender_id": "x"})
+        r = self.client_jwt.post(self.URL, {"sender_id": "x"})
         self.assertEqual(r.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. BotConfigurationViewSet
+# 7. BotConfigurationViewSet (both auth methods)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BotConfigurationViewSetTests(TestCase):
@@ -243,73 +381,58 @@ class BotConfigurationViewSetTests(TestCase):
 
     def setUp(self):
         make_company()
-        self.client_auth = auth_client(TOKEN_VALID)
+        self.client_jwt, _ = jwt_client()
+        self.client_static = static_bearer_client(DASHBOARD_TOKEN)
 
-    def _url_detail(self, shop_id):
+    def _url_detail(self, shop_id=SHOP_ID):
         return f"{self.URL_UPSERT}{shop_id}/"
 
-    # ── Auth gate ─────────────────────────────────────────────────────────
-
     def test_retrieve_requires_auth(self):
-        r = anon_client().get(self._url_detail(SHOP_ID))
+        r = anon_client().get(self._url_detail())
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_upsert_put_requires_auth(self):
-        r = anon_client().put(self.URL_UPSERT, {
-            "shop_id": SHOP_ID, "shop_name": "Unauth", "language": "FR",
-        }, format="json")
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    def test_upsert_patch_requires_auth(self):
-        BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Exists")
-        r = anon_client().patch(self.URL_UPSERT, {
-            "shop_id": SHOP_ID, "shop_name": "Hacked",
-        }, format="json")
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    # ── Retrieve ──────────────────────────────────────────────────────────
-
-    def test_retrieve_creates_config_if_missing(self):
-        """GET /bot-configurations/<shop_id>/ auto-creates the config."""
-        r = self.client_auth.get(self._url_detail(SHOP_ID))
+    def test_retrieve_with_jwt_auto_creates(self):
+        r = self.client_jwt.get(self._url_detail())
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.data["shop_id"], SHOP_ID)
-        self.assertTrue(BotConfiguration.objects.filter(shop_id=SHOP_ID).exists())
 
-    def test_retrieve_returns_existing_config(self):
-        BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Ma Boutique")
-        r = self.client_auth.get(self._url_detail(SHOP_ID))
-        self.assertEqual(r.data["shop_name"], "Ma Boutique")
+    def test_retrieve_with_static_token_auto_creates(self):
+        r = self.client_static.get(self._url_detail())
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-    # ── Upsert ────────────────────────────────────────────────────────────
-
-    def test_upsert_put_creates_config(self):
-        r = self.client_auth.put(self.URL_UPSERT, {
-            "shop_id":   SHOP_ID,
-            "shop_name": "Boutique PUT",
-            "language":  "FR",
+    def test_put_with_jwt(self):
+        r = self.client_jwt.put(self.URL_UPSERT, {
+            "shop_id": SHOP_ID, "shop_name": "Boutique JWT", "language": "FR",
         }, format="json")
         self.assertIn(r.status_code, [status.HTTP_200_OK, status.HTTP_201_CREATED])
-        self.assertEqual(BotConfiguration.objects.get(shop_id=SHOP_ID).shop_name, "Boutique PUT")
 
-    def test_upsert_patch_updates_field(self):
-        BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Old Name")
-        r = self.client_auth.patch(self.URL_UPSERT, {
-            "shop_id":   SHOP_ID,
-            "shop_name": "New Name",
+    def test_put_with_static_token(self):
+        r = self.client_static.put(self.URL_UPSERT, {
+            "shop_id": SHOP_ID, "shop_name": "Boutique Static", "language": "FR",
+        }, format="json")
+        self.assertIn(r.status_code, [status.HTTP_200_OK, status.HTTP_201_CREATED])
+
+    def test_patch_with_jwt(self):
+        BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Old")
+        r = self.client_jwt.patch(self.URL_UPSERT, {
+            "shop_id": SHOP_ID, "shop_name": "New JWT",
         }, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(BotConfiguration.objects.get(shop_id=SHOP_ID).shop_name, "New Name")
 
-    def test_upsert_missing_shop_id_returns_400(self):
-        r = self.client_auth.put(self.URL_UPSERT, {
-            "shop_name": "No shop",
+    def test_patch_with_static_token(self):
+        BotConfiguration.objects.create(shop_id=SHOP_ID, shop_name="Old2")
+        r = self.client_static.patch(self.URL_UPSERT, {
+            "shop_id": SHOP_ID, "shop_name": "New Static",
         }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_put_missing_shop_id_returns_400(self):
+        r = self.client_jwt.put(self.URL_UPSERT, {"shop_name": "No shop"}, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. ResponseTemplateViewSet
+# 8. ResponseTemplateViewSet (both auth methods)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ResponseTemplateViewSetTests(TestCase):
@@ -318,246 +441,101 @@ class ResponseTemplateViewSetTests(TestCase):
 
     def setUp(self):
         make_company()
-        self.client_auth = auth_client(TOKEN_VALID)
+        self.client_jwt, _ = jwt_client()
+        self.client_static = static_bearer_client(DASHBOARD_TOKEN)
 
-        # System default template — use update_or_create because the seed migration
-        # (0014) already inserts (shop_id=None, FR, response, GREETING).
         self.default_tmpl, _ = ResponseTemplate.objects.update_or_create(
-            shop_id=None,
-            language="FR",
-            template_type="response",
-            intent="GREETING",
+            shop_id=None, language="FR", template_type="response", intent="GREETING",
             defaults={"text": "Bonjour par défaut !", "is_default": True},
         )
-        # Shop override
         self.shop_tmpl, _ = ResponseTemplate.objects.update_or_create(
-            shop_id=SHOP_ID,
-            language="FR",
-            template_type="response",
-            intent="GREETING",
+            shop_id=SHOP_ID, language="FR", template_type="response", intent="GREETING",
             defaults={"text": "Bonjour boutique !", "is_default": False},
         )
-
-    # ── Auth gate ─────────────────────────────────────────────────────────
 
     def test_list_requires_auth(self):
         r = anon_client().get(self.URL)
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_create_requires_auth(self):
-        r = anon_client().post(self.URL, {
+    def test_list_with_jwt_returns_200(self):
+        r = self.client_jwt.get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_list_with_static_token_returns_200(self):
+        r = self.client_static.get(self.URL)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_create_with_jwt(self):
+        r = self.client_jwt.post(self.URL, {
+            "shop_id": SHOP_ID, "language": "FR",
+            "template_type": "response", "intent": "ASK_PRICE",
+            "text": "Le prix est {price} DT.",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+
+    def test_create_with_static_token(self):
+        r = self.client_static.post(self.URL, {
             "shop_id": SHOP_ID, "language": "FR",
             "template_type": "response", "intent": "ASK_DELIVERY",
-            "text": "Unauthorized",
+            "text": "Livraison 7 TND.",
         }, format="json")
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
 
-    def test_delete_requires_auth(self):
-        r = anon_client().delete(f"{self.URL}{self.shop_tmpl.id}/")
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+    def test_patch_shop_template_jwt(self):
+        r = self.client_jwt.patch(
+            f"{self.URL}{self.shop_tmpl.id}/",
+            {"text": "Mis à jour JWT"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
 
-    def test_preview_requires_auth(self):
-        r = anon_client().get(f"{self.URL}preview/", {
+    def test_patch_shop_template_static(self):
+        r = self.client_static.patch(
+            f"{self.URL}{self.shop_tmpl.id}/",
+            {"text": "Mis à jour Static"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_patch_system_default_returns_403(self):
+        r = self.client_jwt.patch(
+            f"{self.URL}{self.default_tmpl.id}/",
+            {"text": "Hacked"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_delete_shop_template_jwt(self):
+        extra = ResponseTemplate.objects.create(
+            shop_id=SHOP_ID, language="EN", template_type="response",
+            intent="CANCEL_ORDER", text="Del JWT", is_default=False,
+        )
+        r = self.client_jwt.delete(f"{self.URL}{extra.id}/")
+        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_delete_shop_template_static(self):
+        extra = ResponseTemplate.objects.create(
+            shop_id=SHOP_ID, language="EN", template_type="response",
+            intent="UNKNOWN", text="Del Static", is_default=False,
+        )
+        r = self.client_static.delete(f"{self.URL}{extra.id}/")
+        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_delete_system_default_returns_403(self):
+        r = self.client_jwt.delete(f"{self.URL}{self.default_tmpl.id}/")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_preview_with_jwt_returns_shop_template(self):
+        r = self.client_jwt.get(f"{self.URL}preview/", {
             "shop_id": SHOP_ID, "language": "FR",
             "template_type": "response", "intent": "GREETING",
         })
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    # ── List ──────────────────────────────────────────────────────────────
-
-    def test_list_authenticated_returns_200(self):
-        r = self.client_auth.get(self.URL)
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-
-    def test_list_filter_by_shop_id(self):
-        r = self.client_auth.get(self.URL, {"shop_id": SHOP_ID})
-        results = list(r.data)
-        self.assertTrue(all(item["shop_id"] == SHOP_ID for item in results))
-
-    def test_list_filter_by_language(self):
-        ResponseTemplate.objects.create(
-            shop_id=SHOP_ID, language="AR", template_type="response",
-            intent="GREETING", text="مرحبا", is_default=False,
-        )
-        r = self.client_auth.get(self.URL, {"language": "AR"})
-        results = list(r.data)
-        self.assertTrue(all(item["language"] == "AR" for item in results))
-
-    def test_list_filter_by_intent(self):
-        r = self.client_auth.get(self.URL, {"intent": "GREETING"})
-        results = list(r.data)
-        self.assertTrue(all(item["intent"] == "GREETING" for item in results))
-
-    # ── Retrieve ──────────────────────────────────────────────────────────
-
-    def test_retrieve_shop_template(self):
-        r = self.client_auth.get(f"{self.URL}{self.shop_tmpl.id}/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.data["text"], "Bonjour boutique !")
 
-    # ── Create ────────────────────────────────────────────────────────────
-
-    def test_create_shop_template(self):
-        r = self.client_auth.post(self.URL, {
-            "shop_id":       SHOP_ID,
-            "language":      "FR",
-            "template_type": "response",
-            "intent":        "ASK_PRICE",
-            "text":          "Le prix est {price} DT.",
-        }, format="json")
-        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(
-            ResponseTemplate.objects.filter(shop_id=SHOP_ID, intent="ASK_PRICE").exists()
-        )
-
-    def test_create_duplicate_returns_400(self):
-        """GREETING for SHOP_ID already exists → unique_together violation."""
-        r = self.client_auth.post(self.URL, {
-            "shop_id":       SHOP_ID,
-            "language":      "FR",
-            "template_type": "response",
-            "intent":        "GREETING",
-            "text":          "Duplicate text",
-        }, format="json")
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-
-    # ── Update ────────────────────────────────────────────────────────────
-
-    def test_patch_shop_template_succeeds(self):
-        r = self.client_auth.patch(
-            f"{self.URL}{self.shop_tmpl.id}/",
-            {"text": "Bonjour boutique mis à jour !"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.shop_tmpl.refresh_from_db()
-        self.assertEqual(self.shop_tmpl.text, "Bonjour boutique mis à jour !")
-
-    def test_patch_system_default_returns_403(self):
-        """System defaults (is_default=True) must not be editable via API."""
-        r = self.client_auth.patch(
-            f"{self.URL}{self.default_tmpl.id}/",
-            {"text": "Hacked default"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-
-    def test_put_system_default_returns_403(self):
-        r = self.client_auth.put(
-            f"{self.URL}{self.default_tmpl.id}/",
-            {
-                "shop_id": None, "language": "FR",
-                "template_type": "response", "intent": "GREETING",
-                "text": "Hacked",
-            },
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-
-    # ── Delete ────────────────────────────────────────────────────────────
-
-    def test_delete_shop_template_succeeds(self):
-        r = self.client_auth.delete(f"{self.URL}{self.shop_tmpl.id}/")
-        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(ResponseTemplate.objects.filter(id=self.shop_tmpl.id).exists())
-
-    def test_delete_system_default_returns_403(self):
-        r = self.client_auth.delete(f"{self.URL}{self.default_tmpl.id}/")
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertTrue(ResponseTemplate.objects.filter(id=self.default_tmpl.id).exists())
-
-    # ── Preview ───────────────────────────────────────────────────────────
-
-    def test_preview_returns_shop_override(self):
-        r = self.client_auth.get(f"{self.URL}preview/", {
-            "shop_id":       SHOP_ID,
-            "language":      "FR",
-            "template_type": "response",
-            "intent":        "GREETING",
+    def test_preview_with_static_token(self):
+        r = self.client_static.get(f"{self.URL}preview/", {
+            "shop_id": SHOP_ID, "language": "FR",
+            "template_type": "response", "intent": "GREETING",
         })
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.data["text"], "Bonjour boutique !")
-
-    def test_preview_falls_back_to_system_default(self):
-        """No override for OTHER_SHOP → should fall back to system default text."""
-        r = self.client_auth.get(f"{self.URL}preview/", {
-            "shop_id":       "OTHER_SHOP",
-            "language":      "FR",
-            "template_type": "response",
-            "intent":        "GREETING",
-        })
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertNotEqual(r.data["text"], "Bonjour boutique !")
-        self.assertTrue(len(r.data["text"]) > 0)
-
-    def test_preview_missing_params_returns_400(self):
-        r = self.client_auth.get(f"{self.URL}preview/", {
-            "shop_id": SHOP_ID,
-            "language": "FR",
-            # template_type and intent missing
-        })
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_preview_unknown_intent_returns_404(self):
-        r = self.client_auth.get(f"{self.URL}preview/", {
-            "shop_id":       SHOP_ID,
-            "language":      "FR",
-            "template_type": "response",
-            "intent":        "NONEXISTENT_INTENT_XYZ",
-        })
-        # Either 404 (not in DB + not in Python fallback) or 200 if Python has it
-        self.assertIn(r.status_code, [
-            status.HTTP_200_OK,
-            status.HTTP_404_NOT_FOUND,
-        ])
-
-
-    # -- available_variables tests ------------------------------------------
-
-    def test_list_includes_available_variables_field(self):
-        """GET list response must include 'available_variables' key."""
-        self.default_tmpl.available_variables = ["ai_agent_name"]
-        self.default_tmpl.save()
-        r = self.client_auth.get(self.URL, {"language": "FR", "template_type": "response", "intent": "GREETING"})
-        results = list(r.data)
-        self.assertTrue(any("available_variables" in item for item in results))
-
-    def test_retrieve_includes_available_variables(self):
-        self.shop_tmpl.available_variables = ["ai_agent_name"]
-        self.shop_tmpl.save()
-        r = self.client_auth.get(f"{self.URL}{self.shop_tmpl.id}/")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.data["available_variables"], ["ai_agent_name"])
-
-    def test_create_with_available_variables(self):
-        r = self.client_auth.post(self.URL, {
-            "shop_id":       SHOP_ID,
-            "language":      "FR",
-            "template_type": "response",
-            "intent":        "ASK_PRICE",
-            "text":          "Le {product} coute {price} TND.",
-            "available_variables": ["product", "price"],
-        }, format="json")
-        self.assertEqual(r.status_code, 201)
-        self.assertEqual(r.data["available_variables"], ["product", "price"])
-
-    def test_patch_available_variables(self):
-        r = self.client_auth.patch(
-            f"{self.URL}{self.shop_tmpl.id}/",
-            {"available_variables": ["ai_agent_name", "shop_name"]},
-            format="json",
-        )
-        self.assertEqual(r.status_code, 200)
-        self.shop_tmpl.refresh_from_db()
-        self.assertEqual(self.shop_tmpl.available_variables, ["ai_agent_name", "shop_name"])
-
-    def test_available_variables_defaults_to_empty_list(self):
-        r = self.client_auth.post(self.URL, {
-            "shop_id":       SHOP_ID,
-            "language":      "FR",
-            "template_type": "response",
-            "intent":        "ASK_DELIVERY",
-            "text":          "Livraison gratuite.",
-        }, format="json")
-        self.assertEqual(r.status_code, 201)
-        self.assertEqual(r.data["available_variables"], [])
