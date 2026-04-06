@@ -1,7 +1,9 @@
 from django.db import models
 from django.utils import timezone
+from apps.crm.encryption import EncryptedTextField
 import uuid as uuid_lib
 import time
+import secrets
 
 class Lead(models.Model):
     """
@@ -347,3 +349,89 @@ class ProductVector(models.Model):
 
     def __str__(self):
         return f"[{self.shop_id}] product={self.product_id} var={self.variation_id}"
+
+
+class Company(models.Model):
+    """
+    Represents a client company / shop connected to the platform.
+    Stores business identity + Meta platform integration details.
+    BotConfiguration is for personalization; Company is for identity.
+    """
+    name = models.CharField(max_length=255, help_text="Nom de la boutique")
+    shop_id = models.CharField(
+        max_length=255, unique=True,
+        help_text="UUID du shop sur la plateforme Tiktak"
+    )
+
+    # ── Meta Platform Integration ──────────────────────────────────────────────
+    meta_page_id = models.CharField(
+        max_length=100, blank=True, null=True, unique=True,
+        help_text="Facebook Page ID (depuis Meta Developer → Messenger → Token d'accès)"
+    )
+    meta_page_access_token = EncryptedTextField(
+        blank=True, null=True,
+        help_text="Page Access Token pour envoyer des réponses via Meta Send API (chiffré Fernet)"
+    )
+    instagram_page_id = models.CharField(
+        max_length=100, blank=True, null=True, unique=True,
+        help_text="Instagram Business Account ID (si différent du Page ID)"
+    )
+
+    # ── Dashboard Static Token ─────────────────────────────────────────────────
+    dashboard_token = models.CharField(
+        max_length=64, unique=True, blank=True, null=True,
+        help_text="Token statique pour l'accès dashboard (généré automatiquement)"
+    )
+
+    # ── Link to BotConfiguration ───────────────────────────────────────────────
+    bot_config = models.OneToOneField(
+        BotConfiguration, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='company',
+        help_text="Configuration du bot IA associée"
+    )
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "Companies"
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.shop_id})"
+
+    def save(self, *args, **kwargs):
+        if not self.dashboard_token:
+            self.dashboard_token = secrets.token_hex(32)
+        super().save(*args, **kwargs)
+
+
+class UserProfile(models.Model):
+    """
+    Links a Django User to a Company for dashboard authentication.
+    Uses a separate profile table (not AbstractUser) to avoid migration risks.
+    """
+    ROLE_CHOICES = [
+        ('owner', 'Owner'),
+    ]
+
+    user = models.OneToOneField(
+        'auth.User', on_delete=models.CASCADE, related_name='profile',
+        help_text="Django User account"
+    )
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, related_name='users',
+        help_text="Company this user belongs to"
+    )
+    role = models.CharField(
+        max_length=20, choices=ROLE_CHOICES, default='owner',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'User Profile'
+        verbose_name_plural = 'User Profiles'
+
+    def __str__(self):
+        return f"{self.user.username} → {self.company.name} ({self.role})"

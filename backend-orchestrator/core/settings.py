@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -16,10 +17,18 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'rest_framework_simplejwt',
     # Our apps
     'apps.gateway',
     'apps.crm',
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'apps.crm.authentication.JWTCompanyAuthentication',
+        'apps.crm.authentication.StaticTokenAuthentication',
+    ],
+}
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -130,3 +139,25 @@ META_VERIFY_TOKEN = os.getenv('META_VERIFY_TOKEN', '')
 STATIC_URL = '/static/'  # single canonical declaration
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# ============================================================
+# JWT AUTHENTICATION (simplejwt)
+# ============================================================
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+}
+
+# ============================================================
+# FIELD ENCRYPTION (Fernet AES-128-CBC)
+# ============================================================
+# Used to encrypt sensitive fields: meta_page_access_token
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY', '')
+
+# Meta App Secret (for HMAC webhook signature)
+META_APP_SECRET = os.getenv('META_APP_SECRET', '')

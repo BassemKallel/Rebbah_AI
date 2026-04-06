@@ -1,6 +1,8 @@
 Django>=4.2.0
 djangorestframework
 django-cors-headers
+djangorestframework-simplejwt
+cryptography
 psycopg2-binary
 redis
 requests

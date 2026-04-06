@@ -8,6 +8,7 @@ router.register(r'leads', LeadViewSet, basename='lead')
 router.register(r'templates', ResponseTemplateViewSet, basename='template')
 
 urlpatterns = [
+    path('auth/', include('apps.crm.auth_urls')),
     path('bot-configurations/', BotConfigurationViewSet.as_view({
         'put': 'upsert',
         'patch': 'upsert'
