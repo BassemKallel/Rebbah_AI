@@ -131,7 +131,7 @@ const TopBar: React.FC<TopBarProps> = ({ onToggleSidebar }) => {
               <div className="py-1.5">
                 <button
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-gray-600 hover:bg-gray-50 hover:text-[#0f6885] transition-colors group"
-                  onClick={() => setIsDropdownOpen(false)}
+                  onClick={() => { setIsDropdownOpen(false); navigate('/profile'); }}
                 >
                   <User className="w-4 h-4 text-gray-400 group-hover:text-[#0f6885]" />
                   Mon profil

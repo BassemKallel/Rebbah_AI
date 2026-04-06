@@ -10,6 +10,7 @@ import AgentSettingsLayout from './pages/AgentSettings/AgentSettingsLayout';
 import MessengerInbox from './pages/MessengerInbox/MessengerInbox';
 import Leads from './pages/Leads/Leads';
 import Login from './pages/Login/Login';
+import Profile from './pages/Profile/Profile';
 
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/inbox" element={<Inbox />} />
                     <Route path="/leads" element={<Leads />} />
+                    <Route path="/profile" element={<Profile />} />
                   </Routes>
                 </MainLayout>
               }

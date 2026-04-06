@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../providers/AuthProvider';
 import './Login.css';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Already authenticated → redirect to dashboard
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
