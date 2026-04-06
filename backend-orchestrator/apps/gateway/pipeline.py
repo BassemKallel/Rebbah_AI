@@ -19,7 +19,9 @@ Steps:
 """
 import logging
 from datetime import timedelta
+from django.conf import settings
 from django.utils import timezone
+
 
 from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company
 from .context_manager import ContextManager
@@ -46,17 +48,19 @@ class MessagePipeline:
 
     def run(self, user_id, shop_id, text,
             image_url=None, image_file=None,
-            api_token=None) -> dict:
+            mode_override=None) -> dict:
         """
         Process one incoming message through the full pipeline.
 
         Args:
-            user_id:    Unique user identifier (e.g. "messenger:123456")
-            shop_id:    Shop identifier for product/config lookup
-            text:       Message text (may be empty if image-only)
-            image_url:  URL of an image attachment (optional)
-            image_file: Uploaded image file object (optional, POC only)
-            api_token:  Per-shop API token for TikTak API (optional)
+            user_id:       Unique user identifier (e.g. "messenger:123456")
+            shop_id:       Shop identifier for product/config lookup
+            text:          Message text (may be empty if image-only)
+            image_url:     URL of an image attachment (optional)
+            image_file:    Uploaded image file object (optional, POC only)
+            api_token:     (supprimé) — l'API TikTak est publique, aucun token requis.
+            mode_override: Force 'nlu' or 'llm' for this request only (optional)
+                           If None, uses Company.response_mode from DB.
 
         Returns:
             dict with keys: text, intent, state, entities, context,
@@ -67,8 +71,16 @@ class MessagePipeline:
         # ── LLM Mode Branch ───────────────────────────────────────────────
         # If the company uses LLM Direct mode, bypass the entire NLU pipeline
         company = Company.objects.filter(shop_id=shop_id, is_active=True).first()
-        if company and company.response_mode == 'llm' and text:
-            return self._run_llm_mode(user_id, shop_id, text, company, api_token)
+
+        # Determine effective mode: override > company setting > default 'nlu'
+        effective_mode = (
+            mode_override if mode_override in ('nlu', 'llm')
+            else (company.response_mode if company else 'nlu')
+        )
+
+        if company and effective_mode == 'llm' and text:
+            return self._run_llm_mode(user_id, shop_id, text, company)
+
 
         # ── Upload image to Azure if file provided ─────────────────────────
         uploaded_url = None
@@ -156,7 +168,7 @@ class MessagePipeline:
 
                 # Pre-fill color from variation (size is left for the user to provide)
                 if vision_variation_id:
-                    products = tiktak_service.get_products(shop_id, api_token)
+                    products = tiktak_service.get_products(shop_id)
                     detected_color = tiktak_service.get_color_from_variation(vision_variation_id, products)
                     if detected_color:
                         extracted_entities["color"] = detected_color
@@ -280,7 +292,7 @@ class MessagePipeline:
 
         if prod_name:
             try:
-                products = tiktak_service.get_products(shop_id, api_token=api_token)
+                products = tiktak_service.get_products(shop_id)
                 matched_product, color_from_vision, candidates = tiktak_service.find_product(
                     products, prod_name, vision_variation_id
                 )
@@ -435,7 +447,7 @@ class MessagePipeline:
 
     # ── LLM Direct Mode Pipeline ─────────────────────────────────────────
 
-    def _run_llm_mode(self, user_id, shop_id, text, company, api_token=None):
+    def _run_llm_mode(self, user_id, shop_id, text, company):
         """
         Simplified pipeline for LLM Direct mode.
         Gemini generates the response using the company's context.
@@ -497,8 +509,8 @@ class MessagePipeline:
             prod_name = current_context.get("product")
             if prod_name:
                 try:
-                    token = api_token or company.tiktak_api_token
-                    products = tiktak_service.get_products(shop_id, token)
+                    token = None
+                    products = tiktak_service.get_products(shop_id)
                     matched_product, _, _ = tiktak_service.find_product(
                         products, prod_name
                     )
