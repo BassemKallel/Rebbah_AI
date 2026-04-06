@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import {
   User, Building2, Key, Shield, Clock,
-  CheckCircle, Loader2, Copy, Check
+  CheckCircle, Copy, Check
 } from 'lucide-react';
 import { useAuth } from '../../providers/AuthProvider';
-import { getCompanySettings } from '../../api/companyApi';
 
 const Profile: React.FC = () => {
   const { username, companyName, shopId, responseMode } = useAuth();

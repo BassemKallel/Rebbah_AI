@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MaxLengthValidator
 from django.utils import timezone
+from apps.crm.encryption import EncryptedTextField
 import uuid as uuid_lib
 import time
 import secrets
@@ -195,9 +196,9 @@ class Company(models.Model):
         max_length=100, blank=True, null=True, unique=True,
         help_text="Facebook Page ID (depuis Meta Developer → Messenger → Token d'accès)"
     )
-    meta_page_access_token = models.TextField(
+    meta_page_access_token = EncryptedTextField(
         blank=True, null=True,
-        help_text="Page Access Token pour envoyer des réponses via Meta Send API"
+        help_text="Page Access Token pour envoyer des réponses via Meta Send API (chiffré Fernet)"
     )
     instagram_page_id = models.CharField(
         max_length=100, blank=True, null=True, unique=True,
@@ -215,9 +216,9 @@ class Company(models.Model):
         max_length=20, choices=RESPONSE_MODE_CHOICES, default='nlu',
         help_text="Mode de réponse : 'nlu' = pipeline classique, 'llm' = Gemini direct"
     )
-    gemini_api_key = models.TextField(
+    gemini_api_key = EncryptedTextField(
         blank=True, null=True,
-        help_text="Clé API Gemini propre à cette company"
+        help_text="Clé API Gemini propre à cette company (chiffré Fernet)"
     )
     llm_context = models.TextField(
         blank=True, null=True,

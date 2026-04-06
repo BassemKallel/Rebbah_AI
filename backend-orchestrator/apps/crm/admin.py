@@ -1,8 +1,52 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django import forms
 import json
 from .models import Lead, Conversation, Message, BotConfiguration, Company, NLUFallbackLog, ProductVector, UserProfile
 from apps.gateway.response_templates import TEMPLATES
+
+
+class MaskedTokenWidget(forms.Textarea):
+    """Widget qui masque les tokens sensibles dans l'admin Django."""
+    
+    def format_value(self, value):
+        if value and len(value) > 20:
+            # Affiche seulement les 8 premiers et 4 derniers caractères
+            return f"{value[:8]}{'*' * 20}...{value[-4:]}"
+        return value
+    
+    def value_from_datadict(self, data, files, name):
+        value = super().value_from_datadict(data, files, name)
+        # Si la valeur contient des astérisques, c'est la valeur masquée → ne pas modifier
+        if value and '***' in value:
+            return None  # Retourne None pour ne pas écraser
+        return value
+
+
+class CompanyAdminForm(forms.ModelForm):
+    """Formulaire personnalisé pour masquer les tokens sensibles."""
+    
+    class Meta:
+        model = Company
+        fields = '__all__'
+        widgets = {
+            'meta_page_access_token': MaskedTokenWidget(attrs={'rows': 2, 'cols': 80}),
+            'gemini_api_key': MaskedTokenWidget(attrs={'rows': 2, 'cols': 80}),
+        }
+    
+    def clean_meta_page_access_token(self):
+        value = self.cleaned_data.get('meta_page_access_token')
+        # Si masqué ou vide, garder l'ancienne valeur
+        if not value or '***' in value:
+            return self.instance.meta_page_access_token
+        return value
+    
+    def clean_gemini_api_key(self):
+        value = self.cleaned_data.get('gemini_api_key')
+        if not value or '***' in value:
+            return self.instance.gemini_api_key
+        return value
+
 
 @admin.register(BotConfiguration)
 class BotConfigurationAdmin(admin.ModelAdmin):
@@ -28,10 +72,12 @@ class BotConfigurationAdmin(admin.ModelAdmin):
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ('name', 'shop_id', 'meta_page_id', 'is_active', 'created_at')
+    form = CompanyAdminForm  # Utilise le formulaire avec masquage
+    list_display = ('name', 'shop_id', 'meta_page_id', 'is_active', 'sync_button', 'created_at')
     list_filter = ('is_active', 'created_at')
     search_fields = ('name', 'shop_id', 'meta_page_id')
     list_editable = ('is_active',)
+    actions = ['sync_selected_companies']
     
     fieldsets = (
         ('Identité', {
@@ -51,6 +97,97 @@ class CompanyAdmin(admin.ModelAdmin):
         }),
     )
     readonly_fields = ('dashboard_token',)
+    
+    def sync_button(self, obj):
+        """Affiche un bouton Sync dans la liste."""
+        from django.urls import reverse
+        from django.utils.safestring import mark_safe
+        
+        url = reverse('admin:crm_company_sync', args=[obj.pk])
+        return mark_safe(
+            f'<a class="button" href="{url}" style="padding: 5px 10px; background: #417690; color: white; '
+            f'text-decoration: none; border-radius: 4px;">🔄 Sync</a>'
+        )
+    sync_button.short_description = 'Actions'
+    sync_button.allow_tags = True
+    
+    def sync_selected_companies(self, request, queryset):
+        """Action admin : Sync les companies sélectionnées."""
+        from apps.gateway.sync_views import sync_shop
+        
+        total_success = 0
+        total_failed = 0
+        total_skipped = 0
+        
+        for company in queryset:
+            if not company.is_active:
+                self.message_user(request, f"⚠️ {company.name} est inactif - ignoré", level='warning')
+                continue
+            
+            result = sync_shop(company)
+            total_success += result.get('success', 0)
+            total_failed += result.get('failed', 0)
+            total_skipped += result.get('skipped', 0)
+            
+            self.message_user(
+                request,
+                f"✅ {company.name}: {result.get('success', 0)} vectorized, "
+                f"{result.get('failed', 0)} failed, {result.get('skipped', 0)} skipped",
+                level='success'
+            )
+        
+        self.message_user(
+            request,
+            f"🎉 Sync complet: {total_success} images vectorisées, "
+            f"{total_failed} erreurs, {total_skipped} ignorées",
+            level='success'
+        )
+    sync_selected_companies.short_description = "🔄 Synchroniser les produits (Vision)"
+    
+    def get_urls(self):
+        """Ajoute l'URL pour le bouton sync individuel."""
+        from django.urls import path
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:company_id>/sync/',
+                self.admin_site.admin_view(self.sync_single_company),
+                name='crm_company_sync',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def sync_single_company(self, request, company_id):
+        """Vue pour sync une company individuelle."""
+        from django.shortcuts import redirect
+        from django.contrib import messages
+        from apps.gateway.sync_views import sync_shop
+        
+        try:
+            company = Company.objects.get(pk=company_id)
+        except Company.DoesNotExist:
+            messages.error(request, f"Company {company_id} not found")
+            return redirect('admin:crm_company_changelist')
+        
+        if not company.is_active:
+            messages.warning(request, f"{company.name} est inactif - sync annulé")
+            return redirect('admin:crm_company_changelist')
+        
+        result = sync_shop(company)
+        
+        if 'error' in result:
+            messages.error(
+                request,
+                f"❌ Erreur lors du sync de {company.name}: {result['error']}"
+            )
+        else:
+            messages.success(
+                request,
+                f"✅ {company.name} synchronisé: {result['success']} images vectorisées, "
+                f"{result['failed']} erreurs, {result['skipped']} ignorées"
+            )
+        
+        return redirect('admin:crm_company_changelist')
 
 
 @admin.register(UserProfile)

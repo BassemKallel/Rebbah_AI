@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../providers/AuthProvider';
+import logoTiktak from '../../assets/images/logoTiktak.png';
 import './Login.css';
 
 export default function Login() {
@@ -39,7 +41,7 @@ export default function Login() {
       <div className="login-left">
         <div className="login-left-content">
           <div className="login-brand">
-            <span className="login-brand-icon">🤖</span>
+            <img src={logoTiktak} alt="TikTak AI" className="login-brand-logo" />
             <span className="login-brand-name">TikTak AI</span>
           </div>
 
@@ -98,7 +100,7 @@ export default function Login() {
                   onClick={() => setShowPassword(!showPassword)}
                   tabIndex={-1}
                 >
-                  {showPassword ? '🙈' : '👁️'}
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </div>

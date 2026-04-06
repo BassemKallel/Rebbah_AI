@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Phone, MapPin, Package, Hash,
+  Phone, MapPin,
   User, Edit3, CheckCircle, Trash2, MoreVertical, SearchX, X,
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../types';
@@ -36,7 +36,7 @@ const LeadTable: React.FC<LeadTableProps> = ({
   // Skeleton loader
   if (loading && leads.length === 0) {
     return (
-      <div className="overflow-x-auto scrollbar-thin">
+      <div className="scrollbar-thin">
         <table className="w-full text-sm border-collapse min-w-[600px]">
           <thead className="sticky top-0 z-10 bg-white border-b border-gray-200">
             <tr>
@@ -96,7 +96,7 @@ const LeadTable: React.FC<LeadTableProps> = ({
   }
 
   return (
-    <div className="overflow-x-auto scrollbar-thin">
+    <div className="scrollbar-thin">
       <table className="w-full text-sm border-collapse min-w-[560px]">
         <thead className="sticky top-0 z-10 bg-white border-b border-gray-200">
           <tr>
@@ -126,10 +126,9 @@ const LeadTable: React.FC<LeadTableProps> = ({
               <tr
                 key={lead.id}
                 onClick={() => onRowClick(lead)}
-                className={`group transition-colors cursor-pointer ${
-                  isActive ? 'bg-[#eef6f9] border-l-2 border-l-[#0f6885]' :
+                className={`group transition-colors cursor-pointer ${isActive ? 'bg-[#eef6f9] border-l-2 border-l-[#0f6885]' :
                   isChecked ? 'bg-[#f5fafc]' : 'bg-white hover:bg-gray-50'
-                }`}
+                  }`}
               >
                 {/* Checkbox */}
                 <td className="pl-4 sm:pl-6 py-3.5" onClick={(e) => e.stopPropagation()}>
