@@ -64,6 +64,8 @@ services:
         REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-https://ai.tiktakpro.com}
     container_name: tiktak-frontend
     restart: unless-stopped
+    depends_on:
+      - backend-orchestrator
     ports:
       - "3000:3000"
     networks:
