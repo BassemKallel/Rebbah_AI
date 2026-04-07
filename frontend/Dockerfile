@@ -14,9 +14,6 @@ ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 ARG REACT_APP_SHOP_ID=
 ENV REACT_APP_SHOP_ID=$REACT_APP_SHOP_ID
 
-ARG REACT_APP_SHOP_TOKEN=
-ENV REACT_APP_SHOP_TOKEN=$REACT_APP_SHOP_TOKEN
-
 RUN npm run build
 
 # ── Stage 2: Serve ────────────────────────────────────────────────────────────
