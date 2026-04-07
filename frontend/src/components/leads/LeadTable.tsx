@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Phone, MapPin, Package, Hash,
+  Phone, MapPin,
   User, Edit3, CheckCircle, Trash2, MoreVertical, SearchX, X,
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../types';
