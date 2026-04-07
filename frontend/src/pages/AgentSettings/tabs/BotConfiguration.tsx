@@ -4,10 +4,9 @@ import { useBotConfig } from '../../../hooks/useBotConfig';
 import Toast from '../../../components/ui/Toast';
 
 const BotConfiguration = () => {
-  const shopId = process.env.REACT_APP_SHOP_ID || '1LXybpj';
-  const token = process.env.REACT_APP_SHOP_TOKEN;
+  const shopId = process.env.REACT_APP_SHOP_ID || '';
 
-  const { config, loading, error, patchConfig } = useBotConfig(shopId, token);
+  const { config, loading, error, patchConfig } = useBotConfig(shopId);
 
   const [formData, setFormData] = useState({
     shop_name: '',

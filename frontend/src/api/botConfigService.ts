@@ -1,54 +1,34 @@
-import axios from 'axios';
+/**
+ * botConfigService.ts — Bot Configuration API client using the shared JWT axiosInstance.
+ */
+import api from './axiosInstance';
 
-const API_BASE = process.env.REACT_APP_CRM_API_URL || 'http://localhost:8000/api/v1/crm';
-
-const botConfigApi = axios.create({
-  baseURL: API_BASE,
-  headers: { 'Content-Type': 'application/json' },
-});
+const CRM = '/api/v1/crm';
 
 /**
  * Get bot configuration for a specific shop.
  * Automatically creates a default config if none exists.
- * @param {string} shopId - Shop identifier
- * @param {string} token - Bearer token for authentication
- * @returns {Promise} Bot configuration object
  */
-export const getBotConfig = async (shopId, token) => {
-  const response = await botConfigApi.get(`/bot-configurations/${shopId}/`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+export const getBotConfig = async (shopId: string) => {
+  const response = await api.get(`${CRM}/bot-configurations/${shopId}/`);
   return response.data;
 };
 
 /**
  * Create or fully replace bot configuration.
- * @param {Object} data - Configuration data (must include shop_id)
- * @param {string} data.shop_id - Shop identifier
- * @param {string} [data.shop_name] - Display name for shop
- * @param {string} [data.language] - Language mode (AUTO/FR/AR/EN)
- * @param {string} [data.ai_agent_name] - Bot display name
- * @param {string} token - Bearer token
- * @returns {Promise} Updated configuration
+ * @param data - Configuration data (must include shop_id)
  */
-export const updateBotConfig = async (data, token) => {
-  const response = await botConfigApi.put('/bot-configurations/', data, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+export const updateBotConfig = async (data: Record<string, unknown>) => {
+  const response = await api.put(`${CRM}/bot-configurations/`, data);
   return response.data;
 };
 
 /**
  * Partially update bot configuration.
  * Only updates provided fields, leaves others unchanged.
- * @param {Object} data - Partial configuration data (must include shop_id)
- * @param {string} data.shop_id - Shop identifier
- * @param {string} token - Bearer token
- * @returns {Promise} Updated configuration
+ * @param data - Partial configuration data (must include shop_id)
  */
-export const patchBotConfig = async (data, token) => {
-  const response = await botConfigApi.patch('/bot-configurations/', data, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+export const patchBotConfig = async (data: Record<string, unknown>) => {
+  const response = await api.patch(`${CRM}/bot-configurations/`, data);
   return response.data;
 };

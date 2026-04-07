@@ -15,7 +15,7 @@ import type { ResponseTemplate } from '../types';
  * @param {string} token - Bearer token for authentication
  * @returns {Object} Hook state and methods
  */
-export const useTemplates = (filters = {}, token) => {
+export const useTemplates = (filters = {}) => {
     const [templates, setTemplates] = useState<ResponseTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -25,7 +25,7 @@ export const useTemplates = (filters = {}, token) => {
         try {
             setLoading(true);
             setError(null);
-            const data = await getTemplates(filters, token);
+            const data = await getTemplates(filters);
             setTemplates(Array.isArray(data) ? data : (data.results || []));
         } catch (err: any) {
             setError(err.response?.data?.detail || err.message || 'Failed to load templates');
@@ -38,7 +38,7 @@ export const useTemplates = (filters = {}, token) => {
     useEffect(() => {
         fetchTemplates();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [JSON.stringify(filters), token]);
+    }, [JSON.stringify(filters)]);
 
     /**
      * Create a new template (shop-specific override).
@@ -48,7 +48,7 @@ export const useTemplates = (filters = {}, token) => {
     const create = async (templateData) => {
         try {
             setError(null);
-            const newTemplate = await createTemplate(templateData, token);
+            const newTemplate = await createTemplate(templateData);
             setTemplates([...templates, newTemplate]);
             return { success: true, data: newTemplate };
         } catch (err: any) {
@@ -71,7 +71,7 @@ export const useTemplates = (filters = {}, token) => {
     const update = async (id, templateData) => {
         try {
             setError(null);
-            const updated = await updateTemplate(id, templateData, token);
+            const updated = await updateTemplate(id, templateData);
             setTemplates(templates.map(t => t.id === id ? updated : t));
             return { success: true, data: updated };
         } catch (err: any) {
@@ -90,7 +90,7 @@ export const useTemplates = (filters = {}, token) => {
     const remove = async (id) => {
         try {
             setError(null);
-            await deleteTemplate(id, token);
+            await deleteTemplate(id);
             setTemplates(templates.filter(t => t.id !== id));
             return { success: true };
         } catch (err: any) {

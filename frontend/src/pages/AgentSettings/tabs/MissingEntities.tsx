@@ -20,8 +20,7 @@ const LANGUAGES = [
 ];
 
 const MissingEntities = () => {
-    const shopId = process.env.REACT_APP_SHOP_ID || '1LXybpj';
-    const token = process.env.REACT_APP_SHOP_TOKEN;
+    const shopId = process.env.REACT_APP_SHOP_ID || '';
 
     const [activeEntity, setActiveEntity] = useState(ENTITIES[0].key);
     const [selectedLanguage, setSelectedLanguage] = useState('FR');
@@ -138,7 +137,6 @@ const MissingEntities = () => {
                         subKey={activeEntity}
                         language={selectedLanguage}
                         shopId={shopId}
-                        token={token}
                         availableVariables={current.vars}
                         label={`${current.label} Question`}
                     />

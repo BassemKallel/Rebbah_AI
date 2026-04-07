@@ -9,13 +9,13 @@ import { getBotConfig, updateBotConfig, patchBotConfig } from '../api/botConfigS
  * @param {string} token - Bearer token for authentication
  * @returns {Object} Hook state and methods
  */
-export const useBotConfig = (shopId, token) => {
+export const useBotConfig = (shopId) => {
     const [config, setConfig] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
     const fetchConfig = async () => {
-        if (!shopId || !token) {
+        if (!shopId) {
             setLoading(false);
             return;
         }
@@ -23,7 +23,7 @@ export const useBotConfig = (shopId, token) => {
         try {
             setLoading(true);
             setError(null);
-            const data = await getBotConfig(shopId, token);
+            const data = await getBotConfig(shopId);
             setConfig(data);
         } catch (err) {
             setError(err.response?.data?.detail || err.message || 'Failed to load configuration');
@@ -36,7 +36,7 @@ export const useBotConfig = (shopId, token) => {
     useEffect(() => {
         fetchConfig();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [shopId, token]);
+    }, [shopId]);
 
     /**
      * Fully replace bot configuration.
@@ -47,7 +47,7 @@ export const useBotConfig = (shopId, token) => {
         try {
             setLoading(true);
             setError(null);
-            const updated = await updateBotConfig({ ...newData, shop_id: shopId }, token);
+            const updated = await updateBotConfig({ ...newData, shop_id: shopId });
             setConfig(updated);
             return { success: true, data: updated };
         } catch (err) {
@@ -69,7 +69,7 @@ export const useBotConfig = (shopId, token) => {
         try {
             setLoading(true);
             setError(null);
-            const updated = await patchBotConfig({ ...partialData, shop_id: shopId }, token);
+            const updated = await patchBotConfig({ ...partialData, shop_id: shopId });
             setConfig(updated);
             return { success: true, data: updated };
         } catch (err) {

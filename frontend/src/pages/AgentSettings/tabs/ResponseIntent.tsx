@@ -12,8 +12,7 @@ const LANGUAGES = [
  * ResponseIntent — Per-intent response template editor.
  */
 const ResponseIntent = ({ intentKey, intentConfig }) => {
-  const shopId = process.env.REACT_APP_SHOP_ID || '1LXybpj';
-  const token = process.env.REACT_APP_SHOP_TOKEN;
+  const shopId = process.env.REACT_APP_SHOP_ID || '';
 
   const [selectedLanguage, setSelectedLanguage] = useState('FR');
 
@@ -78,7 +77,6 @@ const ResponseIntent = ({ intentKey, intentConfig }) => {
         subKey={apiSubKey}
         language={selectedLanguage}
         shopId={shopId}
-        token={token}
         availableVariables={intentConfig.vars || []}
         label={`${intentConfig.label} Response`}
       />

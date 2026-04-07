@@ -7,4 +7,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/gateway/', include('apps.gateway.urls')),
     path('api/v1/crm/', include('apps.crm.urls')),
+    # Auth endpoints also exposed at /api/v1/auth/ (matches frontend authApi.ts)
+    path('api/v1/auth/', include('apps.crm.auth_urls')),
 ]
