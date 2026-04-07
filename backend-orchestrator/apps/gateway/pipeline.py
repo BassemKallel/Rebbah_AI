@@ -44,8 +44,7 @@ class MessagePipeline:
     """
 
     def run(self, user_id, shop_id, text,
-            image_url=None, image_file=None,
-            api_token=None) -> dict:
+            image_url=None, image_file=None) -> dict:
         """
         Process one incoming message through the full pipeline.
 
@@ -55,7 +54,6 @@ class MessagePipeline:
             text:       Message text (may be empty if image-only)
             image_url:  URL of an image attachment (optional)
             image_file: Uploaded image file object (optional, POC only)
-            api_token:  Per-shop API token for TikTak API (optional)
 
         Returns:
             dict with keys: text, intent, state, entities, context,
@@ -149,7 +147,7 @@ class MessagePipeline:
 
                 # Pre-fill color from variation (size is left for the user to provide)
                 if vision_variation_id:
-                    products = tiktak_service.get_products(shop_id, api_token)
+                    products = tiktak_service.get_products(shop_id)
                     detected_color = tiktak_service.get_color_from_variation(vision_variation_id, products)
                     if detected_color:
                         extracted_entities["color"] = detected_color
@@ -273,7 +271,7 @@ class MessagePipeline:
 
         if prod_name:
             try:
-                products = tiktak_service.get_products(shop_id, api_token=api_token)
+                products = tiktak_service.get_products(shop_id)
                 matched_product, color_from_vision, candidates = tiktak_service.find_product(
                     products, prod_name, vision_variation_id
                 )

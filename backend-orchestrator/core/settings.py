@@ -117,10 +117,9 @@ GEMINI_ALWAYS_VERIFY_INTENTS         = [i.strip() for i in os.getenv('GEMINI_ALW
 VISION_SERVICE_URL   = os.getenv('VISION_SERVICE_URL',   'http://vision-service:8002')
 VISION_SEARCH_PATH   = os.getenv('VISION_SEARCH_PATH',   '/search-similar')
 
-# TikTak Real API (External product catalog)
+# TikTak Real API (External product catalog — no auth required, public API)
 TIKTAK_API_BASE_URL      = os.getenv('TIKTAK_API_BASE_URL',     'https://api.tiktakpro.com')
 TIKTAK_API_PRODUCTS_PATH = os.getenv('TIKTAK_API_PRODUCTS_PATH', '/api/v1/products-read/')
-TIKTAK_API_TOKEN         = os.getenv('TIKTAK_API_TOKEN',         '')
 PRODUCTS_CACHE_TTL       = int(os.getenv('PRODUCTS_CACHE_TTL',   '600'))  # 10 min
 
 # Request timeouts (seconds)

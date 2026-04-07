@@ -83,7 +83,6 @@ class MetaWebhookView(APIView):
                 continue
 
             shop_id = company.shop_id
-            api_token = company.tiktak_api_token
 
             for messaging_event in entry.get("messaging", []):
                 sender_psid = messaging_event.get("sender", {}).get("id", "")
@@ -103,7 +102,7 @@ class MetaWebhookView(APIView):
                         break
 
                 # ── Delegate to pipeline ───────────────────────────────
-                result = pipeline.run(user_id, shop_id, text, image_url=image_url, api_token=api_token)
+                result = pipeline.run(user_id, shop_id, text, image_url=image_url)
                 result["platform"] = platform
                 result["sender_psid"] = sender_psid
 
@@ -168,13 +167,10 @@ class MessengerWebhookPOC(APIView):
         image_file = request.FILES.get("image")
 
         # ── 2. Delegate to pipeline ───────────────────────────────────────
-        company = Company.objects.filter(shop_id=shop_id, is_active=True).first()
-        api_token = company.tiktak_api_token if company else None
         result = pipeline.run(
             user_id, shop_id, text,
             image_url=image_url,
             image_file=image_file,
-            api_token=api_token,
         )
 
         # ── 3. Build HTTP Response ────────────────────────────────────────

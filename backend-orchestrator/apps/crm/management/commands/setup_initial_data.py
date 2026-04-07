@@ -14,7 +14,6 @@ Required env vars:
     DJANGO_SUPERUSER_PASSWORD  (required for creation)
     SHOP_ID                    (required for Company creation)
     SHOP_NAME                  (default: TikTak Shop)
-    TIKTAK_API_TOKEN           (required for Company creation)
 """
 import os
 import logging
@@ -60,20 +59,18 @@ class Command(BaseCommand):
 
         shop_id   = os.getenv("SHOP_ID", "")
         shop_name = os.getenv("SHOP_NAME", "TikTak Shop")
-        token     = os.getenv("TIKTAK_API_TOKEN", "")
 
-        if not shop_id or not token:
+        if not shop_id:
             self.stdout.write(self.style.WARNING(
-                "[setup] SHOP_ID or TIKTAK_API_TOKEN not set — skipping Company creation."
+                "[setup] SHOP_ID not set — skipping Company creation."
             ))
             return
 
         company, created = Company.objects.get_or_create(
             shop_id=shop_id,
             defaults={
-                "name":             shop_name,
-                "tiktak_api_token": token,
-                "is_active":        True,
+                "name":      shop_name,
+                "is_active": True,
             },
         )
 

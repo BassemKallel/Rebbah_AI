@@ -59,7 +59,6 @@ services:
       args:
         REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-https://ai.tiktakpro.com}
         REACT_APP_SHOP_ID: ${SHOP_ID}
-        REACT_APP_SHOP_TOKEN: ${TIKTAK_API_TOKEN}
     container_name: tiktak-frontend
     restart: unless-stopped
     ports:
