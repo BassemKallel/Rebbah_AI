@@ -1,62 +1,43 @@
-import axios from 'axios';
+import api from './axiosInstance';
 
-const TOKEN = process.env.REACT_APP_SHOP_TOKEN || '';
+// ─── Conversations ──────────────────────────────────────────────────────────
 
-const crm = axios.create({
-  baseURL: process.env.REACT_APP_CRM_API_URL || 'http://localhost:8000/api/v1/crm',
-  headers: {
-    'Content-Type': 'application/json',
-    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
-  },
-});
-
-/**
- * Fetch paginated list of conversations.
- * @param {string} [shopId] - Optional shop filter
- */
+/** Fetch paginated list of conversations. */
 export const fetchConversations = (shopId?: string) =>
-  crm.get('/conversations/', { params: shopId ? { shop_id: shopId } : {} });
+  api.get('/api/v1/crm/conversations/', { params: shopId ? { shop_id: shopId } : {} });
 
-/**
- * Fetch message history for a given conversation.
- * @param {number} conversationId
- * @param {number} [page]
- */
+/** Fetch message history for a given conversation. */
 export const fetchMessages = (conversationId: number, page?: number) =>
-  crm.get(`/conversations/${conversationId}/messages/`, {
+  api.get(`/api/v1/crm/conversations/${conversationId}/messages/`, {
     params: page ? { page } : {},
   });
 
-/**
- * Send a message as AGENT in a conversation.
- * @param {number} conversationId
- * @param {string} text
- */
+/** Send a message as AGENT in a conversation. */
 export const sendMessage = (conversationId: number, text: string) =>
-  crm.post(`/conversations/${conversationId}/messages/`, { text, sender: 'AGENT' });
+  api.post(`/api/v1/crm/conversations/${conversationId}/messages/`, { text, sender: 'AGENT' });
 
 // ─── Leads ───────────────────────────────────────────────────────────────────
 
 /** List leads, optionally filtered by shop. */
 export const fetchLeads = (shopId?: string) =>
-  crm.get('/leads/', { params: shopId ? { shop_id: shopId } : {} });
+  api.get('/api/v1/crm/leads/', { params: shopId ? { shop_id: shopId } : {} });
 
 /** Get a single lead by id. */
 export const fetchLead = (id: number) =>
-  crm.get(`/leads/${id}/`);
+  api.get(`/api/v1/crm/leads/${id}/`);
 
 /** Create a new lead. */
 export const createLead = (payload: Record<string, unknown>) =>
-  crm.post('/leads/', payload);
+  api.post('/api/v1/crm/leads/', payload);
 
-/** Partial update of a lead (address, phone_number, has_pending_order…). */
+/** Partial update of a lead. */
 export const patchLead = (id: number, patch: Record<string, unknown>) =>
-  crm.patch(`/leads/${id}/`, patch);
+  api.patch(`/api/v1/crm/leads/${id}/`, patch);
 
 /** Full replacement update of a lead. */
 export const updateLead = (id: number, payload: Record<string, unknown>) =>
-  crm.put(`/leads/${id}/`, payload);
+  api.put(`/api/v1/crm/leads/${id}/`, payload);
 
 /** Delete a lead. */
 export const deleteLead = (id: number) =>
-  crm.delete(`/leads/${id}/`);
+  api.delete(`/api/v1/crm/leads/${id}/`);

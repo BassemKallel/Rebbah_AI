@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import ConversationViewSet, LeadViewSet, BotConfigurationViewSet, ResponseTemplateViewSet
+from .company_views import CompanySettingsView
 
 router = DefaultRouter()
 router.register(r'conversations', ConversationViewSet, basename='conversation')
@@ -15,5 +16,7 @@ urlpatterns = [
     path('bot-configurations/<shop_id>/', BotConfigurationViewSet.as_view({
         'get': 'retrieve'
     }), name='bot-configuration-detail'),
+    path('company/<str:shop_id>/', CompanySettingsView.as_view(), name='company-settings'),
     path('', include(router.urls)),
 ]
+

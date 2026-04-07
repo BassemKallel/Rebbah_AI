@@ -3,6 +3,7 @@ import {
     ShoppingBag, Palette, Ruler, Hash, MapPin, Phone
 } from 'lucide-react';
 import TemplateEditor from '../components/TemplateEditor';
+import { useAuth } from '../../../providers/AuthProvider';
 
 const ENTITIES = [
     { key: 'product', label: 'Product', Icon: ShoppingBag, vars: ['product'] },
@@ -20,8 +21,7 @@ const LANGUAGES = [
 ];
 
 const MissingEntities = () => {
-    const shopId = process.env.REACT_APP_SHOP_ID || '1LXybpj';
-    const token = process.env.REACT_APP_SHOP_TOKEN;
+    const { shopId } = useAuth();
 
     const [activeEntity, setActiveEntity] = useState(ENTITIES[0].key);
     const [selectedLanguage, setSelectedLanguage] = useState('FR');
@@ -137,8 +137,7 @@ const MissingEntities = () => {
                         category="missing_entity"
                         subKey={activeEntity}
                         language={selectedLanguage}
-                        shopId={shopId}
-                        token={token}
+                        shopId={shopId || ''}
                         availableVariables={current.vars}
                         label={`${current.label} Question`}
                     />

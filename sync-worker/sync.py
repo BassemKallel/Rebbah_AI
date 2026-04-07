@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def get_active_companies():
     """
     Read all active companies from crm_company table.
-    Returns list of dicts: [{shop_id, name, tiktak_api_token}, ...]
+    Returns list of dicts: [{shop_id, name}, ...]
     """
     try:
         conn = psycopg2.connect(
@@ -39,15 +39,13 @@ def get_active_companies():
         )
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT shop_id, name, tiktak_api_token
+            SELECT shop_id, name
             FROM crm_company
             WHERE is_active = TRUE
               AND shop_id IS NOT NULL
-              AND tiktak_api_token IS NOT NULL
-              AND tiktak_api_token != ''
         """)
         companies = [
-            {"shop_id": row[0], "name": row[1], "token": row[2]}
+            {"shop_id": row[0], "name": row[1]}
             for row in cursor.fetchall()
         ]
         cursor.close()
@@ -61,10 +59,9 @@ def get_active_companies():
 
 # ── TikTak API ───────────────────────────────────────────────────────────────
 
-def fetch_products(shop_id, token):
-    """Fetch all products for a shop with pagination."""
+def fetch_products(shop_id):
+    """Fetch all products for a shop with pagination. TikTak API is public."""
     url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
-    headers = {"Authorization": f"Bearer {token}"}
     all_results = []
     params = {"company": shop_id}
     page_count = 0
@@ -72,9 +69,9 @@ def fetch_products(shop_id, token):
     while url and page_count < 10:
         try:
             if page_count == 0:
-                resp = requests.get(url, headers=headers, params=params, timeout=10)
+                resp = requests.get(url, params=params, timeout=10)
             else:
-                resp = requests.get(url, headers=headers, timeout=10)
+                resp = requests.get(url, timeout=10)
             resp.raise_for_status()
             data = resp.json()
             all_results.extend(data.get("results", []))
@@ -107,11 +104,11 @@ def vectorize_image(image_url, product_id, shop_id, variation_id):
 
 # ── Sync Logic ───────────────────────────────────────────────────────────────
 
-def sync_shop(shop_id, token, shop_name):
+def sync_shop(shop_id, shop_name):
     """Sync a single shop's catalog."""
     logger.info(f"── Syncing [{shop_name}] (shop_id={shop_id}) ──")
 
-    raw_results = fetch_products(shop_id, token)
+    raw_results = fetch_products(shop_id)
     if not raw_results:
         logger.warning(f"  No products for {shop_name}")
         return 0, 0, 0
@@ -180,7 +177,6 @@ def sync_all():
     for company in companies:
         ok, fail, skip = sync_shop(
             shop_id=company["shop_id"],
-            token=company["token"],
             shop_name=company["name"],
         )
         total_ok   += ok

@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  Search, RefreshCw, X, Plus, MoreVertical,
+  Search, RefreshCw, X, Plus,
   Users, Clock, CheckCircle, AlertCircle, WifiOff, Trash2, SlidersHorizontal,
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../types';
-import { SHOP_ID, PAGE_SIZE } from '../../constants';
+import { SHOP_ID } from '../../constants';
 import { STATUS_OPTIONS } from '../../constants/leads';
 import { matchTab } from '../../utils/leads';
 import { fetchLeads, patchLead as updateLeadApi, deleteLead as deleteLeadApi } from '../../api/crmApi';
@@ -26,7 +26,7 @@ const Leads: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [page] = useState(1);
   const [total, setTotal] = useState(0);
   const [activeTab, setActiveTab] = useState('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
