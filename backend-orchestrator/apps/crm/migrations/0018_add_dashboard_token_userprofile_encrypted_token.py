@@ -32,9 +32,11 @@ class Migration(migrations.Migration):
                 'managed': False,
             },
         ),
-        migrations.RemoveField(
-            model_name='company',
-            name='tiktak_api_token',
+        # Use raw SQL with IF EXISTS — the column may not exist physically
+        # even though migration 0007 is recorded as applied in django_migrations.
+        migrations.RunSQL(
+            sql="ALTER TABLE crm_company DROP COLUMN IF EXISTS tiktak_api_token;",
+            reverse_sql="ALTER TABLE crm_company ADD COLUMN IF NOT EXISTS tiktak_api_token TEXT NULL;",
         ),
         migrations.AddField(
             model_name='company',
