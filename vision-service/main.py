@@ -42,7 +42,7 @@ model_name = "openai/clip-vit-base-patch32"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Minimum cosine similarity score to consider a result as a valid match.
-SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.8"))
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.75"))
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
