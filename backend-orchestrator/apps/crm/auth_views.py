@@ -114,3 +114,53 @@ class MeView(APIView):
             },
             'role': user.profile.role,
         })
+
+
+class ChangePasswordView(APIView):
+    """
+    POST /api/v1/auth/change-password/
+
+    Body: { "current_password": "...", "new_password": "...", "confirm_password": "..." }
+    Requires JWT authentication.
+    """
+    authentication_classes = [JWTCompanyAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        current_password = request.data.get('current_password', '')
+        new_password = request.data.get('new_password', '')
+        confirm_password = request.data.get('confirm_password', '')
+
+        if not current_password or not new_password or not confirm_password:
+            return Response(
+                {'error': 'Tous les champs sont requis.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {'error': 'Les nouveaux mots de passe ne correspondent pas.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Le nouveau mot de passe doit contenir au moins 8 caractères.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not user.check_password(current_password):
+            return Response(
+                {'error': 'Le mot de passe actuel est incorrect.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.save()
+
+        return Response(
+            {'message': 'Mot de passe modifié avec succès.'},
+            status=status.HTTP_200_OK,
+        )
+
