@@ -66,7 +66,7 @@ def fetch_products(shop_id):
     params = {"company": shop_id}
     page_count = 0
 
-    while url and page_count < 10:
+    while url and page_count < 50:
         try:
             if page_count == 0:
                 resp = requests.get(url, params=params, timeout=10)
@@ -123,6 +123,7 @@ def sync_shop(shop_id, shop_name):
             continue
 
         product_id = product.get("id")
+        product_vectorized = False
 
         # Products with variations
         for decl in product.get("declinaisons", []):
@@ -141,12 +142,13 @@ def sync_shop(shop_id, shop_name):
             seen_images.add(dedup_key)
             if vectorize_image(image_url, product_id, shop_id, variation_id):
                 success_count += 1
+                product_vectorized = True
             else:
                 failure_count += 1
             time.sleep(0.5)
 
-        # Simple product (no variations)
-        if not product.get("declinaisons") and product.get("photo"):
+        # Fallback: use parent photo when no variation had an image
+        if not product_vectorized and product.get("photo"):
             image_url = product["photo"]
             dedup_key = (str(product_id), image_url)
             if dedup_key not in seen_images:
