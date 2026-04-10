@@ -21,7 +21,13 @@ class ContextManager:
     def __init__(self):
         redis_host = os.getenv("REDIS_HOST", "redis")
         redis_port = int(os.getenv("REDIS_PORT", 6379))
-        self.redis_client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+        # ConnectionPool shared across Django threads — avoids connection
+        # contention when multiple requests run concurrently under Gunicorn.
+        pool = redis.ConnectionPool(
+            host=redis_host, port=redis_port, db=0,
+            decode_responses=True, max_connections=20
+        )
+        self.redis_client = redis.Redis(connection_pool=pool)
         self.ttl = 3600   # 1 hour
         self.max_history = 10
 

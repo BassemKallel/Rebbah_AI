@@ -19,6 +19,7 @@ Steps:
 """
 import logging
 from datetime import timedelta
+from django.db import transaction
 from django.utils import timezone
 
 from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog
@@ -70,25 +71,30 @@ class MessagePipeline:
                 result["uploaded_url"] = uploaded_url
 
         # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
-        # Find an active conversation for this user (in-progress order)
-        conversation = Conversation.objects.filter(
-            sender_id=user_id,
-            state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
-        ).first()
-
-        if conversation:
-            # Reuse the Lead tied to the active conversation
-            lead = conversation.lead
-        else:
-            # No active conversation → new order → create a fresh Lead
-            lead = Lead.objects.create(platform_id=user_id)
-            conversation = Conversation.objects.create(
-                lead=lead,
-                lead_uuid=lead.uuid,
-                sender_id=user_id,
-                shop_id=shop_id,
-                state="NEW_CONVERSATION"
+        # Atomic block prevents race conditions when two messages arrive simultaneously
+        # for the same user (e.g. Meta retransmission or rapid double-tap).
+        # select_for_update() acquires a PostgreSQL FOR UPDATE lock so concurrent
+        # threads wait instead of each creating a duplicate Lead + Conversation.
+        with transaction.atomic():
+            lead, _ = Lead.objects.get_or_create(platform_id=user_id)
+            conversation = (
+                Conversation.objects
+                .select_for_update()
+                .filter(
+                    sender_id=user_id,
+                    state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
+                )
+                .first()
             )
+            if not conversation:
+                # No active conversation → start a fresh one
+                conversation = Conversation.objects.create(
+                    lead=lead,
+                    lead_uuid=lead.uuid,
+                    sender_id=user_id,
+                    shop_id=shop_id,
+                    state="NEW_CONVERSATION"
+                )
 
         # Handle grace period expiration
         correction_mode = False
