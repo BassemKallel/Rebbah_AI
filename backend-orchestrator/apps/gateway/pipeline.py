@@ -28,6 +28,7 @@ from .response_templates import FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
 from .services.dialog_manager import detect_language
 from .services.azure_storage import azure_storage_service
+from .services.template_service import prewarm_order_templates
 from . import disambiguation
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,18 @@ class MessagePipeline:
                     shop_id=shop_id,
                     state="NEW_CONVERSATION"
                 )
+                is_new_conversation = True
+            else:
+                is_new_conversation = False
+
+        # Pre-warm ORDER_PRODUCT / INFORM_INFO templates for new conversations.
+        # Runs outside the transaction to avoid coupling Redis I/O to the DB lock.
+        # A failure here is non-blocking — get_template() will fall back normally.
+        if is_new_conversation:
+            try:
+                prewarm_order_templates(shop_id)
+            except Exception as exc:
+                logger.warning(f"[PIPELINE] Template pre-warm failed (non-blocking): {exc}")
 
         # Handle grace period expiration
         correction_mode = False
