@@ -15,10 +15,10 @@ TIKTAK_API_BASE_URL = os.getenv("TIKTAK_API_BASE_URL", "https://api.tiktakpro.co
 VISION_SERVICE_URL  = os.getenv("VISION_SERVICE_URL",  "http://vision-service:8002/vectorize")
 
 # Django DB — same env vars as backend-orchestrator
-DB_HOST     = os.getenv("POSTGRES_HOST", "db")
+DB_HOST     = os.getenv("POSTGRES_HOST", "")
 DB_PORT     = os.getenv("POSTGRES_PORT", "5432")
-DB_NAME     = os.getenv("POSTGRES_DB",   "tiktak_db")
-DB_USER     = os.getenv("POSTGRES_USER", "tiktak_user")
+DB_NAME     = os.getenv("POSTGRES_DB",   "")
+DB_USER     = os.getenv("POSTGRES_USER", "")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
