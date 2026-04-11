@@ -42,44 +42,21 @@ model_name = "openai/clip-vit-base-patch32"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Minimum cosine similarity score to consider a result as a valid match.
-SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.7"))
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.75"))
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
-_REQUIRED_DB_ENV_VARS = [
-    "VECTOR_DB_HOST",
-    "VECTOR_DB_NAME",
-    "VECTOR_DB_USER",
-    "VECTOR_DB_PASSWORD",
-]
-
-
-def _validate_db_env() -> None:
-    """Fail fast at startup if any required DB env vars are missing."""
-    missing = [var for var in _REQUIRED_DB_ENV_VARS if not os.getenv(var)]
-    if missing:
-        raise EnvironmentError(
-            f"[vision-service] Missing required environment variables: {', '.join(missing)}. "
-            "Set them in your .env file before starting the service."
-        )
-
-
 def _create_db_pool() -> SimpleConnectionPool:
-    """Create a connection pool at startup.
-
-    All connection parameters MUST be provided via environment variables.
-    No credential defaults — the service will refuse to start if they are missing.
-    """
-    _validate_db_env()
+    """Create a connection pool at startup."""
     return SimpleConnectionPool(
         minconn=2,
         maxconn=10,
-        host=os.getenv("VECTOR_DB_HOST"),
+        host=os.getenv("VECTOR_DB_HOST", "vector-db"),
         port=os.getenv("VECTOR_DB_PORT", "5432"),
-        dbname=os.getenv("VECTOR_DB_NAME"),
-        user=os.getenv("VECTOR_DB_USER"),
-        password=os.getenv("VECTOR_DB_PASSWORD"),
+        dbname=os.getenv("VECTOR_DB_NAME", "tiktak_vectors"),
+        user=os.getenv("VECTOR_DB_USER", "tiktak_vector"),
+        password=os.getenv("VECTOR_DB_PASSWORD", "vector_pass"),
     )
 
 
