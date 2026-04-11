@@ -341,8 +341,9 @@ class NLUFallbackLog(models.Model):
     ]
 
     message = models.OneToOneField(
-        'Message', on_delete=models.CASCADE, related_name='fallback_log',
-        help_text="Message utilisateur qui a declenche le fallback"
+        'Message', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='fallback_log',
+        help_text="Message utilisateur qui a declenche le fallback (NULL si message supprime)"
     )
 
     # Texte original
