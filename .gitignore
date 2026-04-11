@@ -49,3 +49,7 @@ gestion_projet/
 
 # Project context
 CONTEXT.md
+
+# Local Python venvs
+.venv/
+backend-orchestrator/.venv/

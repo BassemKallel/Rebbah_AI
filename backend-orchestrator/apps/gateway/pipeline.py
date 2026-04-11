@@ -339,6 +339,43 @@ class MessagePipeline:
             extracted_intent = "ORDER_PRODUCT"
             logger.info("[PIPELINE] Correction mode → forcing ORDER_PRODUCT intent")
 
+        # ── 10c. Progressive Lead Update ──────────────────────────────────
+        # Update lead fields as soon as entities are collected, without waiting
+        # for the full order to be confirmed.
+        _lead_dirty = []
+
+        if matched_product:
+            _pid = str(matched_product.get("id", ""))
+            if _pid and lead.product_id != _pid:
+                lead.product_id = _pid
+                _lead_dirty.append("product_id")
+
+        if vision_variation_id and lead.variation_id != str(vision_variation_id):
+            lead.variation_id = str(vision_variation_id)
+            _lead_dirty.append("variation_id")
+
+        if not lead.shop_id and shop_id:
+            lead.shop_id = shop_id
+            _lead_dirty.append("shop_id")
+
+        _ctx_to_lead = {
+            "color":        "color",
+            "size":         "size",
+            "address":      "address",
+            "phone_number": "phone_number",
+            "quantity":     "quantity",
+        }
+        for ctx_key, lead_field in _ctx_to_lead.items():
+            ctx_val = current_context.get(ctx_key)
+            if ctx_val is not None and getattr(lead, lead_field) != ctx_val:
+                setattr(lead, lead_field, ctx_val)
+                _lead_dirty.append(lead_field)
+
+        if _lead_dirty:
+            _lead_dirty.append("updated_at")
+            lead.save(update_fields=_lead_dirty)
+            logger.info(f"[PIPELINE] Lead progressive update: {_lead_dirty}")
+
         # ── 11. State Machine ─────────────────────────────────────────────
         bot_config, _ = BotConfiguration.objects.get_or_create(shop_id=shop_id)
         current_context["shop_id"] = shop_id
