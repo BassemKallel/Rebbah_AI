@@ -328,6 +328,72 @@ async def search_similar_upload(
         }
 
     except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.delete("/vectors/")
+def clear_vectors(shop_id: Optional[str] = None):
+    """
+    Delete vectors from the DB.
+    - shop_id provided → delete only that shop's vectors
+    - no shop_id       → delete ALL vectors (full reset)
+    """
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if shop_id:
+                cur.execute(
+                    "DELETE FROM products_vector WHERE shop_id = %s RETURNING id;",
+                    (shop_id,),
+                )
+            else:
+                cur.execute("DELETE FROM products_vector RETURNING id;")
+            deleted = cur.rowcount
+            conn.commit()
+            cur.close()
+
+        scope = f"shop_id={shop_id}" if shop_id else "ALL shops"
+        logger.info(f"[VECTORS] Cleared {deleted} vectors ({scope})")
+        return {"status": "success", "deleted": deleted, "scope": scope}
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.get("/vectors/stats/")
+def vectors_stats(shop_id: Optional[str] = None):
+    """
+    Return count of vectors in DB, optionally filtered by shop_id.
+    Used by Django admin to display current state.
+    """
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if shop_id:
+                cur.execute(
+                    "SELECT COUNT(*) FROM products_vector WHERE shop_id = %s;",
+                    (shop_id,),
+                )
+            else:
+                cur.execute(
+                    "SELECT shop_id, COUNT(*) FROM products_vector GROUP BY shop_id ORDER BY shop_id;"
+                )
+                rows = cur.fetchall()
+                cur.close()
+                return {
+                    "status": "success",
+                    "shops": [{"shop_id": r[0], "count": r[1]} for r in rows],
+                    "total": sum(r[1] for r in rows),
+                }
+            count = cur.fetchone()[0]
+            cur.close()
+        return {"status": "success", "shop_id": shop_id, "count": count}
+
+    except psycopg2.Error as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")

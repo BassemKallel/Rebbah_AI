@@ -450,13 +450,20 @@ class NLUFallbackLogAdmin(admin.ModelAdmin):
     pretty_gemini_entities.short_description = 'Entites Gemini'
 
 
-# ── ProductVector Admin (read-only, superuser only) ───────────────────────────
+# ── ProductVector Admin (superuser only) ──────────────────────────────────────
+import requests as _requests
+from django.conf import settings as _settings
+from django.contrib import messages as _messages
+
+def _vision_base():
+    return _settings.VISION_SERVICE_URL.rstrip('/')
+
 
 @admin.register(ProductVector)
 class ProductVectorAdmin(admin.ModelAdmin):
     """
-    Read-only view of the products_vector table (managed by vision-service).
-    Accessible only to Django superusers — no add/edit/delete.
+    View of the products_vector table (managed by vision-service).
+    Superusers can clear all vectors or shop-specific vectors via actions.
     """
     list_display  = ('id', 'shop_id', 'product_id', 'variation_id', 'image_preview', 'created_at')
     list_filter   = ('shop_id',)
@@ -464,6 +471,7 @@ class ProductVectorAdmin(admin.ModelAdmin):
     list_per_page = 50
     ordering      = ('shop_id', 'product_id')
     readonly_fields = ('id', 'product_id', 'variation_id', 'shop_id', 'created_at', 'image_preview_large')
+    actions = ['clear_vectors_by_shop', 'clear_all_vectors']
 
     # ── Superuser-only access ─────────────────────────────────────────────
     def has_module_permission(self, request):
@@ -480,6 +488,49 @@ class ProductVectorAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    # ── Actions ───────────────────────────────────────────────────────────
+    @admin.action(description="🗑️ Vider les vecteurs des boutiques sélectionnées")
+    def clear_vectors_by_shop(self, request, queryset):
+        """Call DELETE /vectors/?shop_id=X for each unique shop in selection."""
+        shop_ids = queryset.values_list('shop_id', flat=True).distinct()
+        total_deleted = 0
+        for shop_id in shop_ids:
+            try:
+                resp = _requests.delete(
+                    f"{_vision_base()}/vectors/",
+                    params={"shop_id": shop_id},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                deleted = resp.json().get("deleted", "?")
+                total_deleted += int(deleted) if str(deleted).isdigit() else 0
+                self.message_user(
+                    request,
+                    f"✅ Boutique {shop_id} : {deleted} vecteurs supprimés.",
+                    level=_messages.SUCCESS,
+                )
+            except Exception as e:
+                self.message_user(
+                    request,
+                    f"❌ Erreur pour {shop_id} : {e}",
+                    level=_messages.ERROR,
+                )
+
+    @admin.action(description="⚠️ VIDER TOUTE LA BASE VECTORIELLE (toutes boutiques)")
+    def clear_all_vectors(self, request, queryset):
+        """Call DELETE /vectors/ with no filter — clears everything."""
+        try:
+            resp = _requests.delete(f"{_vision_base()}/vectors/", timeout=10)
+            resp.raise_for_status()
+            deleted = resp.json().get("deleted", "?")
+            self.message_user(
+                request,
+                f"✅ Base vectorielle vidée : {deleted} vecteurs supprimés (toutes boutiques).",
+                level=_messages.SUCCESS,
+            )
+        except Exception as e:
+            self.message_user(request, f"❌ Erreur : {e}", level=_messages.ERROR)
 
     # ── Image previews ────────────────────────────────────────────────────
     def image_preview(self, obj):
@@ -513,3 +564,4 @@ class ProductVectorAdmin(admin.ModelAdmin):
             'fields': ('image_preview_large',),
         }),
     )
+
