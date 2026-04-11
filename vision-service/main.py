@@ -80,19 +80,46 @@ def _init_database():
             CREATE TABLE IF NOT EXISTS products_vector (
                 id SERIAL PRIMARY KEY,
                 product_id   VARCHAR(255) NOT NULL,
-                variation_id VARCHAR(255) NOT NULL,
+                variation_id VARCHAR(255),
                 shop_id      VARCHAR(255) NOT NULL,
                 image_url    TEXT,
                 embedding    vector(512),
                 created_at   TIMESTAMP DEFAULT NOW(),
-                UNIQUE(variation_id, shop_id)
+                UNIQUE(product_id, image_url, shop_id)
             );
         """)
-        # Add created_at column if table already exists without it
+        # ── Migrations for existing tables ────────────────────────────────
+        # Add created_at if missing
         cur.execute("""
             DO $$ BEGIN
                 ALTER TABLE products_vector ADD COLUMN created_at TIMESTAMP DEFAULT NOW();
             EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+        # Drop old UNIQUE(variation_id, shop_id) constraint if it exists,
+        # replace with UNIQUE(product_id, image_url, shop_id).
+        cur.execute("""
+            DO $$ DECLARE
+                c TEXT;
+            BEGIN
+                SELECT conname INTO c
+                FROM pg_constraint
+                WHERE conrelid = 'products_vector'::regclass
+                  AND contype = 'u'
+                  AND conname LIKE '%variation%';
+                IF c IS NOT NULL THEN
+                    EXECUTE 'ALTER TABLE products_vector DROP CONSTRAINT ' || c;
+                END IF;
+            EXCEPTION WHEN others THEN NULL;
+            END $$;
+        """)
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE products_vector
+                    ADD CONSTRAINT products_vector_product_image_shop_unique
+                    UNIQUE (product_id, image_url, shop_id);
+            EXCEPTION WHEN duplicate_table THEN NULL;
+                     WHEN duplicate_object THEN NULL;
             END $$;
         """)
         # HNSW index for fast cosine similarity search (O(log n) instead of O(n))
@@ -265,8 +292,11 @@ async def predict_embedding(request: ImageRequest):
                         """
                         INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding, created_at)
                         VALUES (%s, %s, %s, %s, %s::vector, NOW())
-                        ON CONFLICT (variation_id, shop_id)
-                        DO UPDATE SET embedding = EXCLUDED.embedding, image_url = EXCLUDED.image_url, created_at = NOW();
+                        ON CONFLICT (product_id, image_url, shop_id)
+                        DO UPDATE SET
+                            variation_id = EXCLUDED.variation_id,
+                            embedding    = EXCLUDED.embedding,
+                            created_at   = NOW();
                         """,
                         (request.product_id, request.variation_id, request.shop_id,
                          request.store_image_url, embedding),
