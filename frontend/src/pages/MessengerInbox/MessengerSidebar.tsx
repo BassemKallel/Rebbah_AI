@@ -1,14 +1,6 @@
 import React from 'react';
 import { Search, MessageCircle } from 'lucide-react';
 
-const UserIcon = () => (
-    <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 border border-gray-200">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#9ca3af" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-        </svg>
-    </div>
-);
 
 const MessengerSidebar = ({ conversations, selected, onSelect, search, setSearch, loading, lastMessages = {} }) => {
     return (
