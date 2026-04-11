@@ -6,16 +6,31 @@ from apps.gateway.response_templates import TEMPLATES
 
 @admin.register(BotConfiguration)
 class BotConfigurationAdmin(admin.ModelAdmin):
-    list_display = ('shop_id', 'shop_name', 'language', 'created_at')
-    list_filter = ('language', 'created_at')
+    list_display = ('shop_id', 'shop_name', 'language', 'bot_status_badge', 'created_at')
+    list_filter = ('language', 'bot_enabled', 'created_at')
     search_fields = ('shop_id', 'shop_name')
 
-    
     fieldsets = (
         ('General', {
             'fields': ('shop_id', 'shop_name', 'language', 'ai_agent_name')
         }),
+        ('Bot Handoff Global', {
+            'fields': ('bot_enabled', 'bot_disabled_at'),
+            'description': 'Desactiver le bot pour que le marchand gere toutes les conversations manuellement.',
+        }),
     )
+    readonly_fields = ('bot_disabled_at',)
+
+    def bot_status_badge(self, obj):
+        if obj.bot_enabled:
+            return format_html(
+                '<span style="background:#27ae60;color:#fff;padding:2px 10px;border-radius:4px;font-weight:bold;font-size:11px">Actif</span>'
+            )
+        return format_html(
+            '<span style="background:#e74c3c;color:#fff;padding:2px 10px;border-radius:4px;font-weight:bold;font-size:11px">Desactive</span>'
+        )
+    bot_status_badge.short_description = 'Statut Bot'
+
 
     def default_intents(self, obj):
         if not obj or not getattr(obj, 'language', None):
@@ -94,9 +109,10 @@ class UserProfileAdmin(admin.ModelAdmin):
 class MessageInline(admin.TabularInline):
     model = Message
     extra = 0
-    readonly_fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'created_at')
+    readonly_fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'is_human_agent', 'agent_badge', 'created_at')
     can_delete = False
-    fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'created_at')
+    fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'agent_badge', 'created_at')
+
 
     def confidence_badge(self, obj):
         if obj.intent_confidence_score is None:
@@ -128,6 +144,14 @@ class MessageInline(admin.TabularInline):
             return "-"
         return format_html("<pre>{}</pre>", json.dumps(obj.extracted_entities, indent=2, ensure_ascii=False))
     pretty_entities.short_description = "Entités Extraites"
+
+    def agent_badge(self, obj):
+        if obj.is_human_agent:
+            return format_html(
+                '<span style="background:#f39c12;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:10px">Agent</span>'
+            )
+        return ""
+    agent_badge.short_description = "Agent"
 
 class ConversationInline(admin.TabularInline):
     model = Conversation
@@ -180,10 +204,10 @@ class LeadAdmin(admin.ModelAdmin):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display  = ('sender_id', 'lead', 'shop_id', 'state', 'created_at')
-    list_filter   = ('state', 'shop_id')
+    list_display  = ('sender_id', 'lead', 'shop_id', 'state', 'handoff_badge', 'human_agent', 'updated_at')
+    list_filter   = ('state', 'shop_id', 'is_human_controlled')
     search_fields = ('sender_id', 'lead__platform_id', 'lead__name', 'lead_uuid')
-    readonly_fields = ('lead_uuid', 'sender_id', 'created_at', 'updated_at', 'pretty_context', 'pretty_missing')
+    readonly_fields = ('lead_uuid', 'sender_id', 'created_at', 'updated_at', 'pretty_context', 'pretty_missing', 'human_takeover_at')
     inlines = [MessageInline]
     date_hierarchy = 'created_at'
     ordering = ('-updated_at',)
@@ -191,6 +215,10 @@ class ConversationAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Identification', {
             'fields': ('sender_id', 'lead', 'lead_uuid', 'shop_id', 'state')
+        }),
+        ('Human Handoff', {
+            'fields': ('is_human_controlled', 'human_agent', 'human_takeover_at'),
+            'description': 'Gerer manuellement le handoff pour cette conversation.',
         }),
         ('Contexte & État', {
             'fields': ('pretty_context', 'pretty_missing')
@@ -200,6 +228,16 @@ class ConversationAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+    def handoff_badge(self, obj):
+        if obj.is_human_controlled:
+            return format_html(
+                '<span style="background:#e67e22;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:10px">En direct</span>'
+            )
+        return format_html(
+            '<span style="background:#27ae60;color:#fff;padding:2px 8px;border-radius:4px;font-size:10px">Bot</span>'
+        )
+    handoff_badge.short_description = 'Controle'
 
     def pretty_context(self, obj):
         if not obj.context_data:
@@ -213,10 +251,11 @@ class ConversationAdmin(admin.ModelAdmin):
         return format_html("<pre>{}</pre>", json.dumps(obj.missing_entities, indent=2, ensure_ascii=False))
     pretty_missing.short_description = "Missing Entities (JSON)"
 
+
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ('sender', 'get_lead', 'text_preview', 'extracted_intent', 'confidence_badge', 'is_error', 'is_fallback', 'created_at')
-    list_filter = ('sender', 'is_error', 'is_fallback', 'extracted_intent', 'created_at')
+    list_display = ('sender', 'agent_badge', 'get_lead', 'text_preview', 'extracted_intent', 'confidence_badge', 'is_error', 'is_fallback', 'created_at')
+    list_filter = ('sender', 'is_error', 'is_fallback', 'is_human_agent', 'extracted_intent', 'created_at')
     search_fields = ('text', 'conversation__lead__platform_id', 'extracted_intent')
     readonly_fields = ('pretty_entities', 'confidence_badge')
     date_hierarchy = 'created_at'
@@ -249,6 +288,14 @@ class MessageAdmin(admin.ModelAdmin):
             return "-"
         return format_html("<pre>{}</pre>", json.dumps(obj.extracted_entities, indent=2, ensure_ascii=False))
     pretty_entities.short_description = "Extraction Data"
+
+    def agent_badge(self, obj):
+        if obj.is_human_agent:
+            return format_html(
+                '<span style="background:#f39c12;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:10px">Agent Humain</span>'
+            )
+        return ""
+    agent_badge.short_description = "Type"
 
 
 # ── ResponseTemplate Admin ────────────────────────────────────────────────────
