@@ -101,22 +101,39 @@ class Conversation(models.Model):
     lead_uuid = models.UUIDField(null=True, blank=True, help_text="Denormalized lead UUID for direct querying")
     sender_id = models.CharField(max_length=255, null=True, blank=True, help_text="Denormalized platform_id of the sender")
     shop_id   = models.CharField(max_length=255, help_text="Which shop context is this happening in?")
-    
+
     # Simple state machine for the POC (e.g., NEW, ASKING_SIZE, ASKING_COLOR, COMPLETED)
     state = models.CharField(max_length=50, default="NEW_CONVERSATION")
-    
+
     # Store currently needed info (e.g., {"product": "t-shirt"}, remaining: ["size"])
     context_data = models.JSONField(default=dict, blank=True, help_text="JSON storing extracted entities across messages")
     missing_entities = models.JSONField(default=list, blank=True, help_text="List of entities still needed to complete the intent")
-    
+
     # Grace period tracking
     completed_at = models.DateTimeField(blank=True, null=True, help_text="Timestamp when order was confirmed — used for AWAITING_CORRECTION grace period")
+
+    # ── Human Handoff ─────────────────────────────────────────────────────────────
+    is_human_controlled = models.BooleanField(
+        default=False,
+        help_text="True si un agent humain a pris le relais sur cette conversation"
+    )
+    human_takeover_at = models.DateTimeField(
+        blank=True, null=True,
+        help_text="Timestamp du handoff humain"
+    )
+    human_agent = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='controlled_conversations',
+        help_text="Agent humain qui a pris le relais"
+    )
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Conv {self.id} with {self.lead.platform_id} (State: {self.state})"
+
 
 class Message(models.Model):
     """
@@ -130,7 +147,7 @@ class Message(models.Model):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     sender = models.CharField(max_length=10, choices=SENDER_CHOICES)
     text = models.TextField()
-    
+
     # NLU debug info
     extracted_intent = models.CharField(max_length=50, blank=True, null=True)
     intent_confidence_score = models.FloatField(
@@ -140,6 +157,12 @@ class Message(models.Model):
     extracted_entities = models.JSONField(default=dict, blank=True)
     is_error = models.BooleanField(default=False, help_text="True if NLU failed or fallback was triggered")
     is_fallback = models.BooleanField(default=False, help_text="True si Gemini fallback a ete utilise")
+
+    # ── Human Handoff ─────────────────────────────────────────────────────────────
+    is_human_agent = models.BooleanField(
+        default=False,
+        help_text="True si ce message a été envoyé par un agent humain (pas le bot IA)"
+    )
 
     # Conversation state tracking
     conversation_state_before = models.CharField(
@@ -154,6 +177,7 @@ class Message(models.Model):
 
     def __str__(self):
         return f"[{self.sender}] {self.text[:30]}..."
+
 
 
 class BotConfiguration(models.Model):
@@ -189,6 +213,16 @@ class BotConfiguration(models.Model):
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # ── Human Handoff — Global Bot Toggle ──────────────────────────────────────────
+    bot_enabled = models.BooleanField(
+        default=True,
+        help_text="Si False, le bot ne répond plus pour cette boutique (handoff global)"
+    )
+    bot_disabled_at = models.DateTimeField(
+        blank=True, null=True,
+        help_text="Timestamp de la désactivation du bot"
+    )
 
     def __str__(self):
         return f"Config for Django {self.shop_id} ({self.language})"

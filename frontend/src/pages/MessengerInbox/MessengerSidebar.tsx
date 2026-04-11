@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, MessageCircle } from 'lucide-react';
+import { Search, MessageCircle, UserCheck } from 'lucide-react';
 
 const UserIcon = () => (
     <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 border border-gray-200">
@@ -74,26 +74,50 @@ const MessengerSidebar = ({ conversations, selected, onSelect, search, setSearch
                         <button
                             key={conv.id}
                             onClick={() => onSelect(conv)}
-                            className={`w-full flex items-center gap-3 px-6 py-3 text-left transition-colors relative border-l-4 ${isSelected
-                                ? 'bg-gray-50/80 border-[#0f6885]'
-                                : 'bg-transparent border-transparent hover:bg-gray-50'
-                                }`}
+                            className={`w-full flex items-center gap-3 px-6 py-3 text-left transition-colors relative border-l-4 ${
+                                isSelected
+                                    ? 'bg-gray-50/80 border-[#0f6885]'
+                                    : conv.is_human_controlled
+                                        ? 'bg-amber-50/50 border-amber-300 hover:bg-amber-50'
+                                        : 'bg-transparent border-transparent hover:bg-gray-50'
+                            }`}
                         >
-                            <UserIcon />
+                            {/* Avatar — amber tint if human controlled */}
+                            <div className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 border ${
+                                conv.is_human_controlled
+                                    ? 'bg-amber-50 border-amber-200'
+                                    : 'bg-gray-100 border-gray-200'
+                            }`}>
+                                {conv.is_human_controlled ? (
+                                    <UserCheck className="w-5 h-5 text-amber-500" />
+                                ) : (
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#9ca3af" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                        <circle cx="12" cy="7" r="4" />
+                                    </svg>
+                                )}
+                            </div>
                             <div className="flex-1 min-w-0">
                                 <div className="flex justify-between items-baseline mb-1">
                                     <span className="font-semibold text-sm text-gray-800 truncate pr-2">{name}</span>
                                     <span className="text-[10px] text-gray-400 font-medium flex-shrink-0">{time}</span>
                                 </div>
-                                <div className="flex justify-between items-center">
-                                    <span className={`text-xs truncate ${unread ? 'text-gray-800 font-semibold' : 'text-gray-500 font-medium'}`}>
+                                <div className="flex justify-between items-center gap-2">
+                                    <span className={`text-xs truncate ${
+                                        unread ? 'text-gray-800 font-semibold' : 'text-gray-500 font-medium'
+                                    }`}>
                                         {preview}
                                     </span>
-                                    {unread && (
+                                    {conv.is_human_controlled ? (
+                                        <span className="ml-auto flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-full text-[9px] font-bold">
+                                            <UserCheck className="w-2.5 h-2.5" />
+                                            En direct
+                                        </span>
+                                    ) : unread ? (
                                         <span className="ml-2 flex-shrink-0 w-4 h-4 rounded-full bg-[#f97316] text-white flex items-center justify-center text-[9px] font-bold">
                                             {unread}
                                         </span>
-                                    )}
+                                    ) : null}
                                 </div>
                             </div>
                         </button>

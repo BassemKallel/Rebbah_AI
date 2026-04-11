@@ -109,6 +109,32 @@ class MessagePipeline:
             except Exception as exc:
                 logger.warning(f"[PIPELINE] Template pre-warm failed (non-blocking): {exc}")
 
+        # ── HANDOFF GUARD 1 : Bot désactivé globalement pour la boutique ──────────
+        from apps.crm.models import BotConfiguration
+        bot_config = BotConfiguration.objects.filter(shop_id=shop_id).first()
+        if bot_config and not bot_config.bot_enabled:
+            logger.info(f"[PIPELINE] Bot DISABLED for shop={shop_id} — saving message, skipping AI")
+            Message.objects.create(
+                conversation=conversation,
+                sender='USER',
+                text=text or '[image]',
+                conversation_state_before=conversation.state,
+                conversation_state_after=conversation.state,
+            )
+            return {"text": None, "handoff": True, "reason": "bot_disabled", "intent": "HANDOFF"}
+
+        # ── HANDOFF GUARD 2 : Conversation sous contrôle humain ───────────────────
+        if conversation.is_human_controlled:
+            logger.info(f"[PIPELINE] Conv {conversation.id} is HUMAN-CONTROLLED — saving message, skipping AI")
+            Message.objects.create(
+                conversation=conversation,
+                sender='USER',
+                text=text or '[image]',
+                conversation_state_before=conversation.state,
+                conversation_state_after=conversation.state,
+            )
+            return {"text": None, "handoff": True, "reason": "human_controlled", "intent": "HANDOFF"}
+
         # Handle grace period expiration
         correction_mode = False
         if conversation.state == "AWAITING_CORRECTION":
