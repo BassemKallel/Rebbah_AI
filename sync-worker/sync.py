@@ -59,10 +59,10 @@ def get_active_companies():
 
 def get_existing_vectors(shop_id):
     """
-    Return the set of (variation_id, image_url) already indexed in pgvector
-    for a given shop. Used to skip re-vectorization on incremental syncs.
-    If both variation_id AND image_url match → already up-to-date, skip.
-    If image_url changed for same variation_id → re-vectorize (UPSERT).
+    Return the set of (product_id, image_url) already indexed in pgvector
+    for a given shop. Using product_id (= parent_id for children) + image_url
+    as the uniqueness key avoids re-vectorizing the same image if the API
+    returns children in a different order across sync cycles.
     """
     try:
         conn = psycopg2.connect(
@@ -71,7 +71,7 @@ def get_existing_vectors(shop_id):
         )
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT variation_id, image_url
+            SELECT product_id, image_url
             FROM products_vector
             WHERE shop_id = %s
         """, (str(shop_id),))
@@ -161,8 +161,9 @@ def sync_shop(shop_id, shop_name):
             image_url = product.get("photo")
             if image_url:
                 variation_id = product.get("id")
-                # Skip if already indexed with the same image URL
-                if (str(variation_id), image_url) in existing_vectors:
+                # Skip if parent+image already indexed (regardless of which child
+                # arrived first — API order may vary between cycles)
+                if (str(parent_id), image_url) in existing_vectors:
                     skipped_count += 1
                     continue
                 dedup_key = (str(parent_id), image_url)
@@ -170,6 +171,7 @@ def sync_shop(shop_id, shop_name):
                     seen_images.add(dedup_key)
                     if vectorize_image(image_url, parent_id, shop_id, variation_id):
                         success_count += 1
+                        existing_vectors.add(dedup_key)  # prevent re-send this cycle
                     else:
                         failure_count += 1
                     time.sleep(0.5)
@@ -190,8 +192,8 @@ def sync_shop(shop_id, shop_name):
                 skipped_count += 1
                 continue
 
-            # Skip if already indexed with the same image URL
-            if (str(variation_id), image_url) in existing_vectors:
+            # Skip if product+image already indexed
+            if (str(product_id), image_url) in existing_vectors:
                 skipped_count += 1
                 continue
 
