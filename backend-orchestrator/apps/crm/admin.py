@@ -139,8 +139,8 @@ class ConversationInline(admin.TabularInline):
 
 @admin.register(Lead)
 class LeadAdmin(admin.ModelAdmin):
-    list_display  = ('name', 'platform_id', 'uuid', 'shop_id', 'pending_order_reference', 'product_id', 'color', 'size', 'agent_confirmation_pending', 'created_at')
-    list_filter   = ('agent_confirmation_pending', 'has_pending_order', 'shop_id', 'created_at')
+    list_display  = ('name', 'platform_id', 'uuid', 'shop_id', 'lead_status', 'pending_order_reference', 'product_id', 'color', 'size', 'agent_confirmation_pending', 'created_at')
+    list_filter   = ('lead_status', 'agent_confirmation_pending', 'has_pending_order', 'shop_id', 'created_at')
     search_fields = ('name', 'platform_id', 'pending_order_reference', 'phone_number', 'product_id')
     readonly_fields = ('uuid', 'pending_order_created_at', 'created_at', 'updated_at', 'pending_order_reference')
     list_editable = ('agent_confirmation_pending',)
@@ -149,7 +149,7 @@ class LeadAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Info Client', {
-            'fields': ('uuid', 'platform_id', 'name'),
+            'fields': ('uuid', 'platform_id', 'name', 'lead_status'),
             'classes': ('wide',)
         }),
         ('Pré-Commande (En Attente)', {

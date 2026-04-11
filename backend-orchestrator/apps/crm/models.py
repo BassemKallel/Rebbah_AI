@@ -10,6 +10,17 @@ class Lead(models.Model):
     Represents a potential customer identified via Messenger.
     Stores both lead info AND pending pre-order data waiting for agent confirmation.
     """
+
+    # ===== LEAD STATUS (Funnel de qualification) =====
+    LEAD_STATUS_PROSPECT  = "PROSPECT"
+    LEAD_STATUS_ENGAGED   = "ENGAGED"
+    LEAD_STATUS_QUALIFIED = "QUALIFIED"
+    LEAD_STATUS_CHOICES   = [
+        (LEAD_STATUS_PROSPECT,  "Prospect — conversation démarrée, pas d'intention d'achat"),
+        (LEAD_STATUS_ENGAGED,   "Engagé — produit identifié, entités en cours de collecte"),
+        (LEAD_STATUS_QUALIFIED, "Qualifié — pré-commande créée, en attente agent"),
+    ]
+
     uuid        = models.UUIDField(default=uuid_lib.uuid4, unique=True, editable=False, help_text="Stable public identifier for this lead")
     platform_id = models.CharField(max_length=255, db_index=True, help_text="e.g., PSID Meta ou whatsapp:+21612345678")
     name        = models.CharField(max_length=255, blank=True, null=True)
@@ -28,6 +39,15 @@ class Lead(models.Model):
     address = models.TextField(blank=True, null=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
     
+    # Lead qualification status
+    lead_status = models.CharField(
+        max_length=20,
+        choices=LEAD_STATUS_CHOICES,
+        default=LEAD_STATUS_PROSPECT,
+        db_index=True,
+        help_text="Funnel : PROSPECT → ENGAGED (produit détecté) → QUALIFIED (pré-commande créée)",
+    )
+
     # Pre-order tracking
     has_pending_order = models.BooleanField(default=False, help_text="True si pré-commande en attente")
     pending_order_reference = models.CharField(
@@ -62,6 +82,7 @@ class Lead(models.Model):
         self.phone_number = phone_number
         self.has_pending_order = True
         self.agent_confirmation_pending = True
+        self.lead_status = Lead.LEAD_STATUS_QUALIFIED
         
         # Generate reference if not exists
         if not self.pending_order_reference:

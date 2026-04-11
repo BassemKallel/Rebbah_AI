@@ -26,6 +26,9 @@ class LeadViewSet(viewsets.ModelViewSet):
         shop_id = self.request.query_params.get('shop_id')
         if shop_id:
             queryset = queryset.filter(shop_id=shop_id)
+        status = self.request.query_params.get('status')
+        if status:
+            queryset = queryset.filter(lead_status=status)
         return queryset
 
 

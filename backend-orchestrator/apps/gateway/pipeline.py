@@ -260,6 +260,11 @@ class MessagePipeline:
         current_context = dialog_manager.accumulate_context(current_context, extracted_entities)
         conversation.context_data = current_context
 
+        # Transition PROSPECT → ENGAGED dès qu'un produit est identifié dans le contexte
+        if lead.lead_status == "PROSPECT" and current_context.get("product"):
+            lead.lead_status = "ENGAGED"
+            lead.save(update_fields=["lead_status", "updated_at"])
+
         # Persist/restore vision_variation_id across messages
         if vision_variation_id:
             current_context["_vision_variation_id"] = vision_variation_id
