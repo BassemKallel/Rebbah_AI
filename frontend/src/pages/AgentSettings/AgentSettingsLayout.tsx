@@ -5,6 +5,7 @@ import BotConfiguration from './tabs/BotConfiguration';
 import ResponseIntent from './tabs/ResponseIntent';
 import MissingEntities from './tabs/MissingEntities';
 import LLMSettings from './tabs/LLMSettings';
+import HumanHandoff from './tabs/HumanHandoff';
 
 import {
   Settings as GenIcon,
@@ -23,6 +24,7 @@ import {
   SlidersHorizontal,
   X,
   Brain,
+  UserCheck,
 } from 'lucide-react';
 
 const responseIntents = [
@@ -37,8 +39,9 @@ const responseIntents = [
 ];
 
 const navItems = [
-  { id: 'bot_config', label: 'Bot Configuration', icon: <GenIcon className="w-4 h-4" />, path: 'bot-configuration' },
-  { id: 'llm_settings', label: 'Mode IA (LLM)', icon: <Brain className="w-4 h-4" />, path: 'llm-settings' },
+  { id: 'bot_config',    label: 'Bot Configuration', icon: <GenIcon className="w-4 h-4" />,   path: 'bot-configuration' },
+  { id: 'llm_settings',  label: 'Mode IA (LLM)',      icon: <Brain className="w-4 h-4" />,     path: 'llm-settings' },
+  { id: 'human_handoff', label: 'Human Handoff',      icon: <UserCheck className="w-4 h-4" />, path: 'human-handoff' },
 ];
 
 const NavSection = ({ label, icon, basePath, subItems, location, onNavClick }: any) => {
@@ -174,6 +177,7 @@ const AgentSettingsLayout = () => {
             <Routes>
               <Route path="/" element={<Navigate to="bot-configuration" replace />} />
               <Route path="bot-configuration" element={<BotConfiguration />} />
+              <Route path="human-handoff" element={<HumanHandoff />} />
               {responseIntents.map((intent) => (
                 <Route
                   key={intent.key}
