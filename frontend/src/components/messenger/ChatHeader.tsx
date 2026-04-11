@@ -66,24 +66,22 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       </p>
     </div>
 
-    {/* Handoff button */}
+    {/* Handoff button — icon only */}
     {isHumanControlled ? (
       <button
         onClick={onRelease}
         title="Remettre au bot"
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-all flex-shrink-0"
+        className="w-8 h-8 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-600 hover:bg-amber-200 transition-all flex-shrink-0"
       >
-        <Bot className="w-3.5 h-3.5" />
-        <span className="hidden sm:inline">Remettre au Bot</span>
+        <Bot className="w-4 h-4" />
       </button>
     ) : (
       <button
         onClick={onTakeover}
         title="Prendre le relais"
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-xs font-semibold hover:bg-emerald-600 transition-all flex-shrink-0 shadow-sm"
+        className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-white hover:bg-emerald-600 transition-all flex-shrink-0 shadow-sm"
       >
-        <UserCheck className="w-3.5 h-3.5" />
-        <span className="hidden sm:inline">Prendre le relais</span>
+        <UserCheck className="w-4 h-4" />
       </button>
     )}
 

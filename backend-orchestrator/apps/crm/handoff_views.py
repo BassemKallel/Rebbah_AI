@@ -160,8 +160,15 @@ def toggle_bot(request, shop_id):
     """
     Toggle the bot on/off globally for a shop.
     Body: { "bot_enabled": true|false }
+
+    When bot is re-enabled (True):
+      - All conversations with is_human_controlled=True are released back to the bot.
     """
-    bot_config = get_object_or_404(BotConfiguration, shop_id=shop_id)
+    # get_or_create: in case BotConfiguration does not exist yet
+    bot_config, _ = BotConfiguration.objects.get_or_create(
+        shop_id=shop_id,
+        defaults={'bot_enabled': True}
+    )
     enabled = request.data.get("bot_enabled")
 
     if enabled is None:
@@ -170,9 +177,25 @@ def toggle_bot(request, shop_id):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    bot_config.bot_enabled = bool(enabled)
+    enabled = bool(enabled)
+    bot_config.bot_enabled = enabled
     bot_config.bot_disabled_at = None if enabled else timezone.now()
     bot_config.save(update_fields=['bot_enabled', 'bot_disabled_at'])
+
+    released_count = 0
+    if enabled:
+        # Re-enabling bot — release ALL human-controlled conversations for this shop
+        released_count = Conversation.objects.filter(
+            shop_id=shop_id,
+            is_human_controlled=True
+        ).update(
+            is_human_controlled=False,
+            human_takeover_at=None,
+            human_agent=None,
+        )
+        logger.info(
+            f"[HANDOFF] Bot re-enabled for shop={shop_id} — released {released_count} conversations"
+        )
 
     logger.info(
         f"[HANDOFF] Bot toggle — shop={shop_id} bot_enabled={enabled} "
@@ -182,4 +205,5 @@ def toggle_bot(request, shop_id):
         "shop_id": shop_id,
         "bot_enabled": bot_config.bot_enabled,
         "bot_disabled_at": bot_config.bot_disabled_at,
+        "conversations_released": released_count,
     })
