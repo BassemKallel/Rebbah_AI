@@ -111,8 +111,11 @@ class MessagePipeline:
 
         # ── HANDOFF GUARD 1 : Bot désactivé globalement pour la boutique ──────────
         from apps.crm.models import BotConfiguration
-        bot_config = BotConfiguration.objects.filter(shop_id=shop_id).first()
-        if bot_config and not bot_config.bot_enabled:
+        bot_config, _ = BotConfiguration.objects.get_or_create(
+            shop_id=shop_id,
+            defaults={'bot_enabled': True}
+        )
+        if not bot_config.bot_enabled:
             logger.info(f"[PIPELINE] Bot DISABLED for shop={shop_id} — saving message, skipping AI")
             Message.objects.create(
                 conversation=conversation,
