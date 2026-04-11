@@ -119,9 +119,30 @@ def sync_shop(shop_id, shop_name):
     seen_images   = set()
 
     for product in raw_results:
-        if product.get("parent") is not None:
+        parent_id = product.get("parent")
+
+        # ── Child product ────────────────────────────────────────────────────
+        # Children appear as flat items in the API response with parent != null.
+        # Their individual photos (per colour/size) must be captured here because
+        # the parent's embedded declinaisons often have photo=null.
+        # We vectorize them attributed to the parent (product_id=parent_id).
+        if parent_id is not None:
+            image_url = product.get("photo")
+            if image_url:
+                variation_id = product.get("id")
+                dedup_key = (str(parent_id), image_url)
+                if dedup_key not in seen_images:
+                    seen_images.add(dedup_key)
+                    if vectorize_image(image_url, parent_id, shop_id, variation_id):
+                        success_count += 1
+                    else:
+                        failure_count += 1
+                    time.sleep(0.5)
+                else:
+                    skipped_count += 1
             continue
 
+        # ── Parent product ───────────────────────────────────────────────────
         product_id = product.get("id")
         product_vectorized = False
 
