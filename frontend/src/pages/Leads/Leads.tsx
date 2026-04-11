@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   Search, RefreshCw, X, Plus,
-  Users, Clock, CheckCircle, AlertCircle, WifiOff, Trash2, SlidersHorizontal,
+  Users, Eye, TrendingUp, CheckCircle, WifiOff, Trash2, SlidersHorizontal,
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../types';
 import { SHOP_ID } from '../../constants';
@@ -14,10 +14,10 @@ import DeleteModal from '../../components/leads/DeleteModal';
 
 /* ─── Tabs ──────────────────────────────────────────────────────── */
 const TABS = [
-  { key: 'all', label: 'Tous', fullLabel: 'Tous les leads', icon: Users },
-  { key: 'pending', label: 'En attente', fullLabel: 'En attente', icon: Clock },
-  { key: 'confirmed', label: 'Confirmés', fullLabel: 'Confirmés', icon: CheckCircle },
-  { key: 'agent', label: 'Agent', fullLabel: 'Confirmation agent', icon: AlertCircle },
+  { key: 'all',       label: 'Tous',     fullLabel: 'Tous les leads',  icon: Users },
+  { key: 'prospect',  label: 'Prospect', fullLabel: 'Prospects',        icon: Eye },
+  { key: 'engaged',   label: 'Engagé',   fullLabel: 'Engagés',          icon: TrendingUp },
+  { key: 'qualified', label: 'Qualifié', fullLabel: 'Qualifiés',        icon: CheckCircle },
 ];
 
 /* ─── Main Page ─────────────────────────────────────────────────── */

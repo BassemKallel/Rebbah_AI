@@ -1,9 +1,12 @@
+export type LeadFunnelStatus = 'PROSPECT' | 'ENGAGED' | 'QUALIFIED';
+
 export interface Lead {
   id: number;
   uuid: string;
   platform_id: string;
   name: string;
   shop_id: string;
+  lead_status: LeadFunnelStatus;
   product_id: string | null;
   variation_id: string | null;
   color: string;

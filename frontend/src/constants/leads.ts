@@ -1,4 +1,4 @@
-import type { StatusOption, LeadStatus } from '../types';
+import type { StatusOption, LeadStatus, LeadFunnelStatus } from '../types';
 
 export const STATUS_OPTIONS: StatusOption[] = [
   { value: 'confirmed', label: 'Confirmé', has_pending_order: false, agent_confirmation_pending: false },
@@ -10,6 +10,18 @@ export const STATUS_COLORS: Record<LeadStatus, { pill: string; dot: string; hove
   confirmed: { pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-400', hover: 'hover:bg-emerald-100' },
   pending: { pill: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-400', hover: 'hover:bg-amber-100' },
   agent: { pill: 'bg-orange-50 text-orange-700 border-orange-200', dot: 'bg-orange-400', hover: 'hover:bg-orange-100' },
+};
+
+export const FUNNEL_STATUS_COLORS: Record<LeadFunnelStatus, { pill: string; dot: string; hover: string }> = {
+  PROSPECT:  { pill: 'bg-gray-50 text-gray-500 border-gray-200',       dot: 'bg-gray-400',    hover: 'hover:bg-gray-100' },
+  ENGAGED:   { pill: 'bg-amber-50 text-amber-700 border-amber-200',    dot: 'bg-amber-400',   hover: 'hover:bg-amber-100' },
+  QUALIFIED: { pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-400', hover: 'hover:bg-emerald-100' },
+};
+
+export const FUNNEL_STATUS_LABELS: Record<LeadFunnelStatus, string> = {
+  PROSPECT:  'Prospect',
+  ENGAGED:   'Engagé',
+  QUALIFIED: 'Qualifié',
 };
 
 export interface TabDef {

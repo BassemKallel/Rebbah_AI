@@ -18,15 +18,20 @@ export const getStatusValue = (lead: Lead): LeadStatus => {
 };
 
 export const getStatusConfig = (lead: Lead): StatusConfig => {
-  if (lead.agent_confirmation_pending)
-    return { label: 'Confirmation agent', color: 'bg-orange-50 text-orange-700 border-orange-200', dot: 'bg-orange-400' };
-  if (lead.has_pending_order)
-    return { label: 'En attente', color: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-400' };
-  return { label: 'Confirmé', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-400' };
+  const status = lead.lead_status;
+  if (status === 'QUALIFIED')
+    return { label: lead.agent_confirmation_pending ? 'Confirmation agent' : 'Qualifié', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-400' };
+  if (status === 'ENGAGED')
+    return { label: 'Engagé', color: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-400' };
+  return { label: 'Prospect', color: 'bg-gray-50 text-gray-500 border-gray-200', dot: 'bg-gray-400' };
 };
 
 export const matchTab = (lead: Lead, tab: string): boolean => {
   if (tab === 'all') return true;
+  if (tab === 'prospect') return lead.lead_status === 'PROSPECT';
+  if (tab === 'engaged') return lead.lead_status === 'ENGAGED';
+  if (tab === 'qualified') return lead.lead_status === 'QUALIFIED';
+  // legacy tabs (rétro-compatibilité avec agent_confirmation_pending)
   if (tab === 'pending') return lead.has_pending_order && !lead.agent_confirmation_pending;
   if (tab === 'confirmed') return !lead.has_pending_order && !lead.agent_confirmation_pending;
   if (tab === 'agent') return !!lead.agent_confirmation_pending;
