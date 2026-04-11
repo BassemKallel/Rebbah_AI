@@ -5,7 +5,7 @@ from .views import (
     ConversationViewSet, LeadViewSet,
     BotConfigurationViewSet, ResponseTemplateViewSet,
 )
-from .views.handoff import (
+from .handoff_views import (
     takeover_conversation, release_conversation,
     agent_reply, handoff_status, toggle_bot,
 )
