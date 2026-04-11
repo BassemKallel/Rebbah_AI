@@ -57,6 +57,34 @@ def get_active_companies():
         return []
 
 
+def get_existing_vectors(shop_id):
+    """
+    Return the set of (variation_id, image_url) already indexed in pgvector
+    for a given shop. Used to skip re-vectorization on incremental syncs.
+    If both variation_id AND image_url match → already up-to-date, skip.
+    If image_url changed for same variation_id → re-vectorize (UPSERT).
+    """
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
+            user=DB_USER, password=DB_PASSWORD,
+        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT variation_id, image_url
+            FROM products_vector
+            WHERE shop_id = %s
+        """, (str(shop_id),))
+        existing = {(str(row[0]), row[1]) for row in cursor.fetchall()}
+        cursor.close()
+        conn.close()
+        logger.info(f"  Found {len(existing)} already-indexed vectors for shop={shop_id}")
+        return existing
+    except Exception as e:
+        logger.warning(f"  Could not read existing vectors ({e}) — will re-vectorize all")
+        return set()
+
+
 # ── TikTak API ───────────────────────────────────────────────────────────────
 
 def fetch_products(shop_id):
@@ -108,6 +136,9 @@ def sync_shop(shop_id, shop_name):
     """Sync a single shop's catalog."""
     logger.info(f"── Syncing [{shop_name}] (shop_id={shop_id}) ──")
 
+    # Pre-load already-indexed (variation_id, image_url) to avoid re-encoding
+    existing_vectors = get_existing_vectors(shop_id)
+
     raw_results = fetch_products(shop_id)
     if not raw_results:
         logger.warning(f"  No products for {shop_name}")
@@ -130,6 +161,10 @@ def sync_shop(shop_id, shop_name):
             image_url = product.get("photo")
             if image_url:
                 variation_id = product.get("id")
+                # Skip if already indexed with the same image URL
+                if (str(variation_id), image_url) in existing_vectors:
+                    skipped_count += 1
+                    continue
                 dedup_key = (str(parent_id), image_url)
                 if dedup_key not in seen_images:
                     seen_images.add(dedup_key)
@@ -152,6 +187,11 @@ def sync_shop(shop_id, shop_name):
             variation_id = decl.get("id")
 
             if not image_url:
+                skipped_count += 1
+                continue
+
+            # Skip if already indexed with the same image URL
+            if (str(variation_id), image_url) in existing_vectors:
                 skipped_count += 1
                 continue
 
