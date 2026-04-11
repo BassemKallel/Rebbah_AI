@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Loader2, Power, PowerOff, AlertCircle, CheckCircle } from 'lucide-react';
 import api from '../../../api/axiosInstance';
 import { toggleBot } from '../../../api/handoffApi';
+import { useAuth } from '../../../providers/AuthProvider';
 
 interface BotConfig {
   bot_enabled: boolean;
@@ -10,18 +11,22 @@ interface BotConfig {
 }
 
 const HumanHandoff = () => {
-  const shopId = process.env.REACT_APP_SHOP_ID || '';
+  const { shopId } = useAuth();
   const [config, setConfig] = useState<BotConfig | null>(null);
+  // Local toggle state — updated immediately on click (optimistic)
+  const [botEnabled, setBotEnabled] = useState<boolean>(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   /* ── Load current bot config ── */
   const loadConfig = useCallback(async () => {
+    if (!shopId) return;
     setLoading(true);
     try {
       const { data } = await api.get(`/api/v1/crm/bot-configurations/${shopId}/`);
       setConfig(data);
+      setBotEnabled(data.bot_enabled);
     } catch (err) {
       setToast({ type: 'error', message: 'Impossible de charger la configuration du bot.' });
     } finally {
@@ -33,12 +38,15 @@ const HumanHandoff = () => {
 
   /* ── Toggle bot ── */
   const handleToggle = async (enable: boolean) => {
-    if (!config) return;
+    if (!shopId) return;
+    // Optimistic UI — toggle immediately
+    setBotEnabled(enable);
     setSaving(true);
     setToast(null);
     try {
       const { data } = await toggleBot(shopId, enable);
       setConfig(prev => prev ? { ...prev, bot_enabled: data.bot_enabled, bot_disabled_at: data.bot_disabled_at } : prev);
+      setBotEnabled(data.bot_enabled);
       setToast({
         type: 'success',
         message: enable
@@ -46,6 +54,8 @@ const HumanHandoff = () => {
           : 'Bot désactivé — toutes les conversations sont en mode manuel.',
       });
     } catch (err) {
+      // Rollback on error
+      setBotEnabled(!enable);
       setToast({ type: 'error', message: 'Impossible de modifier l\'état du bot.' });
     } finally {
       setSaving(false);
@@ -70,7 +80,15 @@ const HumanHandoff = () => {
     );
   }
 
-  const botEnabled = config?.bot_enabled ?? true;
+  if (!shopId) {
+    return (
+      <div className="max-w-3xl">
+        <div className="border border-amber-200 bg-amber-50 rounded-2xl p-6">
+          <p className="text-amber-800 font-semibold">Session invalide — veuillez vous reconnecter.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl">
