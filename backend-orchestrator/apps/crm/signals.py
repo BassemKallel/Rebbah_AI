@@ -10,7 +10,6 @@ When a Company is deleted, cascade-clean all associated data:
   - Redis template cache keys for this shop
 """
 import logging
-import os
 
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
@@ -74,16 +73,16 @@ def cleanup_company_data(sender, instance, **kwargs):
 def _clear_redis_cache(shop_id: str):
     """
     Delete all Redis template cache keys for this shop (pattern: tmpl:{shop_id}:*).
-    Uses raw Redis SCAN + DEL since Django's built-in RedisCache has no delete_pattern.
+    Uses the raw Redis client from Django's cache pool to avoid duplicating connection config.
     """
     try:
-        import redis as redis_lib
+        from django.core.cache import cache
 
-        host = os.getenv("REDIS_HOST", "tiktak-redis")
-        port = int(os.getenv("REDIS_PORT", "6379"))
-        client = redis_lib.Redis(host=host, port=port, db=1, socket_connect_timeout=3)
+        # Django's built-in RedisCache exposes the underlying Redis client via _cache
+        client = cache._cache.get_client(None)  # get the first (and only) client from the pool
 
-        pattern = f":1:tmpl:{shop_id}:*"  # Django adds ":1:" prefix for db=1
+        # Django key format (no KEY_PREFIX set): ":1:{key}" where 1 = KEY_VERSION default
+        pattern = f":1:tmpl:{shop_id}:*"
         keys = list(client.scan_iter(match=pattern, count=100))
         if keys:
             client.delete(*keys)
