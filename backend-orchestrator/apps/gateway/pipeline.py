@@ -19,17 +19,17 @@ Steps:
 """
 import logging
 from datetime import timedelta
-from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
-
 
 from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company
 from .context_manager import ContextManager
 from .response_templates import FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
-from .services.llm_response_service import generate_llm_response
 from .services.dialog_manager import detect_language
 from .services.azure_storage import azure_storage_service
+from .services.template_service import prewarm_order_templates
+from .services.llm_response_service import generate_llm_response
 from . import disambiguation
 
 logger = logging.getLogger(__name__)
@@ -47,40 +47,22 @@ class MessagePipeline:
     """
 
     def run(self, user_id, shop_id, text,
-            image_url=None, image_file=None,
-            mode_override=None) -> dict:
+            image_url=None, image_file=None) -> dict:
         """
         Process one incoming message through the full pipeline.
 
         Args:
-            user_id:       Unique user identifier (e.g. "messenger:123456")
-            shop_id:       Shop identifier for product/config lookup
-            text:          Message text (may be empty if image-only)
-            image_url:     URL of an image attachment (optional)
-            image_file:    Uploaded image file object (optional, POC only)
-            api_token:     (supprimé) — l'API TikTak est publique, aucun token requis.
-            mode_override: Force 'nlu' or 'llm' for this request only (optional)
-                           If None, uses Company.response_mode from DB.
+            user_id:    Unique user identifier (e.g. "messenger:123456")
+            shop_id:    Shop identifier for product/config lookup
+            text:       Message text (may be empty if image-only)
+            image_url:  URL of an image attachment (optional)
+            image_file: Uploaded image file object (optional, POC only)
 
         Returns:
             dict with keys: text, intent, state, entities, context,
                             matched_image_url?, uploaded_url?
         """
         result = {}
-
-        # ── LLM Mode Branch ───────────────────────────────────────────────
-        # If the company uses LLM Direct mode, bypass the entire NLU pipeline
-        company = Company.objects.filter(shop_id=shop_id, is_active=True).first()
-
-        # Determine effective mode: override > company setting > default 'nlu'
-        effective_mode = (
-            mode_override if mode_override in ('nlu', 'llm')
-            else (company.response_mode if company else 'nlu')
-        )
-
-        if company and effective_mode == 'llm' and text:
-            return self._run_llm_mode(user_id, shop_id, text, company)
-
 
         # ── Upload image to Azure if file provided ─────────────────────────
         uploaded_url = None
@@ -90,26 +72,79 @@ class MessagePipeline:
                 image_url = uploaded_url
                 result["uploaded_url"] = uploaded_url
 
-        # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
-        # Find an active conversation for this user (in-progress order)
-        conversation = Conversation.objects.filter(
-            sender_id=user_id,
-            state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
-        ).first()
+        # ── 1. Resolve Company (for LLM mode + auth) ──────────────────────
+        company = Company.objects.filter(shop_id=shop_id, is_active=True).first()
 
-        if conversation:
-            # Reuse the Lead tied to the active conversation
-            lead = conversation.lead
-        else:
-            # No active conversation → new order → create a fresh Lead
-            lead = Lead.objects.create(platform_id=user_id)
-            conversation = Conversation.objects.create(
-                lead=lead,
-                lead_uuid=lead.uuid,
-                sender_id=user_id,
-                shop_id=shop_id,
-                state="NEW_CONVERSATION"
+        # ── LLM Direct Mode — bypass NLU pipeline ─────────────────────────
+        if company and getattr(company, 'response_mode', 'nlu') == 'llm':
+            logger.info(f"[PIPELINE] LLM mode activated for shop={shop_id}")
+            return self._run_llm_mode(user_id, shop_id, text, company)
+
+        # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
+        # Atomic block prevents race conditions when two messages arrive simultaneously
+        # for the same user (e.g. Meta retransmission or rapid double-tap).
+        # select_for_update() acquires a PostgreSQL FOR UPDATE lock so concurrent
+        # threads wait instead of each creating a duplicate Lead + Conversation.
+        with transaction.atomic():
+            lead, _ = Lead.objects.get_or_create(platform_id=user_id)
+            conversation = (
+                Conversation.objects
+                .select_for_update()
+                .filter(
+                    sender_id=user_id,
+                    state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
+                )
+                .first()
             )
+            if not conversation:
+                # No active conversation → start a fresh one
+                conversation = Conversation.objects.create(
+                    lead=lead,
+                    lead_uuid=lead.uuid,
+                    sender_id=user_id,
+                    shop_id=shop_id,
+                    state="NEW_CONVERSATION"
+                )
+                is_new_conversation = True
+            else:
+                is_new_conversation = False
+
+        # Pre-warm ORDER_PRODUCT / INFORM_INFO templates for new conversations.
+        # Runs outside the transaction to avoid coupling Redis I/O to the DB lock.
+        # A failure here is non-blocking — get_template() will fall back normally.
+        if is_new_conversation:
+            try:
+                prewarm_order_templates(shop_id)
+            except Exception as exc:
+                logger.warning(f"[PIPELINE] Template pre-warm failed (non-blocking): {exc}")
+
+        # ── HANDOFF GUARD 1 : Bot désactivé globalement pour la boutique ──────────
+        bot_config, _ = BotConfiguration.objects.get_or_create(
+            shop_id=shop_id,
+            defaults={'bot_enabled': True}
+        )
+        if not bot_config.bot_enabled:
+            logger.info(f"[PIPELINE] Bot DISABLED for shop={shop_id} — saving message, skipping AI")
+            Message.objects.create(
+                conversation=conversation,
+                sender='USER',
+                text=text or '[image]',
+                conversation_state_before=conversation.state,
+                conversation_state_after=conversation.state,
+            )
+            return {"text": None, "handoff": True, "reason": "bot_disabled", "intent": "HANDOFF"}
+
+        # ── HANDOFF GUARD 2 : Conversation sous contrôle humain ───────────────────
+        if conversation.is_human_controlled:
+            logger.info(f"[PIPELINE] Conv {conversation.id} is HUMAN-CONTROLLED — saving message, skipping AI")
+            Message.objects.create(
+                conversation=conversation,
+                sender='USER',
+                text=text or '[image]',
+                conversation_state_before=conversation.state,
+                conversation_state_after=conversation.state,
+            )
+            return {"text": None, "handoff": True, "reason": "human_controlled", "intent": "HANDOFF"}
 
         # Handle grace period expiration
         correction_mode = False
@@ -261,6 +296,11 @@ class MessagePipeline:
         current_context = conversation.context_data
         current_context = dialog_manager.accumulate_context(current_context, extracted_entities)
         conversation.context_data = current_context
+
+        # Transition PROSPECT → ENGAGED dès qu'un produit est identifié dans le contexte
+        if lead.lead_status == "PROSPECT" and current_context.get("product"):
+            lead.lead_status = "ENGAGED"
+            lead.save(update_fields=["lead_status", "updated_at"])
 
         # Persist/restore vision_variation_id across messages
         if vision_variation_id:
@@ -546,7 +586,6 @@ class MessagePipeline:
             prod_name = current_context.get("product")
             if prod_name:
                 try:
-                    token = None
                     products = tiktak_service.get_products(shop_id)
                     matched_product, _, _ = tiktak_service.find_product(
                         products, prod_name
@@ -575,7 +614,7 @@ class MessagePipeline:
         conversation.context_data = current_context
         conversation.save()
 
-        # ── 8. Save Bot Message (traceability) ──────────────────────────
+        # ── 8. Save Bot Message + Redis ──────────────────────────────────
         Message.objects.create(
             conversation=conversation, sender="BOT", text=bot_text
         )
