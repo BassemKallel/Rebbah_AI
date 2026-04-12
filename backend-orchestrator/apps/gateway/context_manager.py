@@ -16,12 +16,20 @@ import json
 import os
 import redis
 
+# Module-level singleton pool — shared across all ContextManager instances
+# and Gunicorn threads. Prevents connection leaks when ContextManager()
+# is instantiated multiple times per request lifecycle.
+_REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+_REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+_pool = redis.ConnectionPool(
+    host=_REDIS_HOST, port=_REDIS_PORT, db=0,
+    decode_responses=True, max_connections=20
+)
+
 
 class ContextManager:
     def __init__(self):
-        redis_host = os.getenv("REDIS_HOST", "redis")
-        redis_port = int(os.getenv("REDIS_PORT", 6379))
-        self.redis_client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+        self.redis_client = redis.Redis(connection_pool=_pool)
         self.ttl = 3600   # 1 hour
         self.max_history = 10
 

@@ -42,44 +42,21 @@ model_name = "openai/clip-vit-base-patch32"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Minimum cosine similarity score to consider a result as a valid match.
-SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.7"))
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.75"))
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
-_REQUIRED_DB_ENV_VARS = [
-    "VECTOR_DB_HOST",
-    "VECTOR_DB_NAME",
-    "VECTOR_DB_USER",
-    "VECTOR_DB_PASSWORD",
-]
-
-
-def _validate_db_env() -> None:
-    """Fail fast at startup if any required DB env vars are missing."""
-    missing = [var for var in _REQUIRED_DB_ENV_VARS if not os.getenv(var)]
-    if missing:
-        raise EnvironmentError(
-            f"[vision-service] Missing required environment variables: {', '.join(missing)}. "
-            "Set them in your .env file before starting the service."
-        )
-
-
 def _create_db_pool() -> SimpleConnectionPool:
-    """Create a connection pool at startup.
-
-    All connection parameters MUST be provided via environment variables.
-    No credential defaults — the service will refuse to start if they are missing.
-    """
-    _validate_db_env()
+    """Create a connection pool at startup."""
     return SimpleConnectionPool(
         minconn=2,
         maxconn=10,
-        host=os.getenv("VECTOR_DB_HOST"),
+        host=os.getenv("VECTOR_DB_HOST", "vector-db"),
         port=os.getenv("VECTOR_DB_PORT", "5432"),
-        dbname=os.getenv("VECTOR_DB_NAME"),
-        user=os.getenv("VECTOR_DB_USER"),
-        password=os.getenv("VECTOR_DB_PASSWORD"),
+        dbname=os.getenv("VECTOR_DB_NAME", "tiktak_vectors"),
+        user=os.getenv("VECTOR_DB_USER", "tiktak_vector"),
+        password=os.getenv("VECTOR_DB_PASSWORD", "vector_pass"),
     )
 
 
@@ -103,19 +80,46 @@ def _init_database():
             CREATE TABLE IF NOT EXISTS products_vector (
                 id SERIAL PRIMARY KEY,
                 product_id   VARCHAR(255) NOT NULL,
-                variation_id VARCHAR(255) NOT NULL,
+                variation_id VARCHAR(255),
                 shop_id      VARCHAR(255) NOT NULL,
                 image_url    TEXT,
                 embedding    vector(512),
                 created_at   TIMESTAMP DEFAULT NOW(),
-                UNIQUE(variation_id, shop_id)
+                UNIQUE(product_id, image_url, shop_id)
             );
         """)
-        # Add created_at column if table already exists without it
+        # ── Migrations for existing tables ────────────────────────────────
+        # Add created_at if missing
         cur.execute("""
             DO $$ BEGIN
                 ALTER TABLE products_vector ADD COLUMN created_at TIMESTAMP DEFAULT NOW();
             EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+        # Drop old UNIQUE(variation_id, shop_id) constraint if it exists,
+        # replace with UNIQUE(product_id, image_url, shop_id).
+        cur.execute("""
+            DO $$ DECLARE
+                c TEXT;
+            BEGIN
+                SELECT conname INTO c
+                FROM pg_constraint
+                WHERE conrelid = 'products_vector'::regclass
+                  AND contype = 'u'
+                  AND conname LIKE '%variation%';
+                IF c IS NOT NULL THEN
+                    EXECUTE 'ALTER TABLE products_vector DROP CONSTRAINT ' || c;
+                END IF;
+            EXCEPTION WHEN others THEN NULL;
+            END $$;
+        """)
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE products_vector
+                    ADD CONSTRAINT products_vector_product_image_shop_unique
+                    UNIQUE (product_id, image_url, shop_id);
+            EXCEPTION WHEN duplicate_table THEN NULL;
+                     WHEN duplicate_object THEN NULL;
             END $$;
         """)
         # HNSW index for fast cosine similarity search (O(log n) instead of O(n))
@@ -288,8 +292,11 @@ async def predict_embedding(request: ImageRequest):
                         """
                         INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding, created_at)
                         VALUES (%s, %s, %s, %s, %s::vector, NOW())
-                        ON CONFLICT (variation_id, shop_id)
-                        DO UPDATE SET embedding = EXCLUDED.embedding, image_url = EXCLUDED.image_url, created_at = NOW();
+                        ON CONFLICT (product_id, image_url, shop_id)
+                        DO UPDATE SET
+                            variation_id = EXCLUDED.variation_id,
+                            embedding    = EXCLUDED.embedding,
+                            created_at   = NOW();
                         """,
                         (request.product_id, request.variation_id, request.shop_id,
                          request.store_image_url, embedding),
@@ -349,6 +356,72 @@ async def search_similar_upload(
             "threshold": SIMILARITY_THRESHOLD,
             "total_matches": len(results),
         }
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.delete("/vectors/")
+def clear_vectors(shop_id: Optional[str] = None):
+    """
+    Delete vectors from the DB.
+    - shop_id provided → delete only that shop's vectors
+    - no shop_id       → delete ALL vectors (full reset)
+    """
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if shop_id:
+                cur.execute(
+                    "DELETE FROM products_vector WHERE shop_id = %s RETURNING id;",
+                    (shop_id,),
+                )
+            else:
+                cur.execute("DELETE FROM products_vector RETURNING id;")
+            deleted = cur.rowcount
+            conn.commit()
+            cur.close()
+
+        scope = f"shop_id={shop_id}" if shop_id else "ALL shops"
+        logger.info(f"[VECTORS] Cleared {deleted} vectors ({scope})")
+        return {"status": "success", "deleted": deleted, "scope": scope}
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.get("/vectors/stats/")
+def vectors_stats(shop_id: Optional[str] = None):
+    """
+    Return count of vectors in DB, optionally filtered by shop_id.
+    Used by Django admin to display current state.
+    """
+    try:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if shop_id:
+                cur.execute(
+                    "SELECT COUNT(*) FROM products_vector WHERE shop_id = %s;",
+                    (shop_id,),
+                )
+            else:
+                cur.execute(
+                    "SELECT shop_id, COUNT(*) FROM products_vector GROUP BY shop_id ORDER BY shop_id;"
+                )
+                rows = cur.fetchall()
+                cur.close()
+                return {
+                    "status": "success",
+                    "shops": [{"shop_id": r[0], "count": r[1]} for r in rows],
+                    "total": sum(r[1] for r in rows),
+                }
+            count = cur.fetchone()[0]
+            cur.close()
+        return {"status": "success", "shop_id": shop_id, "count": count}
 
     except psycopg2.Error as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

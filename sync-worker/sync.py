@@ -15,10 +15,10 @@ TIKTAK_API_BASE_URL = os.getenv("TIKTAK_API_BASE_URL", "https://api.tiktakpro.co
 VISION_SERVICE_URL  = os.getenv("VISION_SERVICE_URL",  "http://vision-service:8002/vectorize")
 
 # Django DB — same env vars as backend-orchestrator
-DB_HOST     = os.getenv("POSTGRES_HOST", "db")
+DB_HOST     = os.getenv("POSTGRES_HOST", "")
 DB_PORT     = os.getenv("POSTGRES_PORT", "5432")
-DB_NAME     = os.getenv("POSTGRES_DB",   "tiktak_db")
-DB_USER     = os.getenv("POSTGRES_USER", "tiktak_user")
+DB_NAME     = os.getenv("POSTGRES_DB",   "")
+DB_USER     = os.getenv("POSTGRES_USER", "")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,6 +57,34 @@ def get_active_companies():
         return []
 
 
+def get_existing_vectors(shop_id):
+    """
+    Return the set of (product_id, image_url) already indexed in pgvector
+    for a given shop. Using product_id (= parent_id for children) + image_url
+    as the uniqueness key avoids re-vectorizing the same image if the API
+    returns children in a different order across sync cycles.
+    """
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
+            user=DB_USER, password=DB_PASSWORD,
+        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT product_id, image_url
+            FROM products_vector
+            WHERE shop_id = %s
+        """, (str(shop_id),))
+        existing = {(str(row[0]), row[1]) for row in cursor.fetchall()}
+        cursor.close()
+        conn.close()
+        logger.info(f"  Found {len(existing)} already-indexed vectors for shop={shop_id}")
+        return existing
+    except Exception as e:
+        logger.warning(f"  Could not read existing vectors ({e}) — will re-vectorize all")
+        return set()
+
+
 # ── TikTak API ───────────────────────────────────────────────────────────────
 
 def fetch_products(shop_id):
@@ -66,7 +94,7 @@ def fetch_products(shop_id):
     params = {"company": shop_id}
     page_count = 0
 
-    while url and page_count < 10:
+    while url and page_count < 50:
         try:
             if page_count == 0:
                 resp = requests.get(url, params=params, timeout=10)
@@ -108,6 +136,9 @@ def sync_shop(shop_id, shop_name):
     """Sync a single shop's catalog."""
     logger.info(f"── Syncing [{shop_name}] (shop_id={shop_id}) ──")
 
+    # Pre-load already-indexed (variation_id, image_url) to avoid re-encoding
+    existing_vectors = get_existing_vectors(shop_id)
+
     raw_results = fetch_products(shop_id)
     if not raw_results:
         logger.warning(f"  No products for {shop_name}")
@@ -119,10 +150,38 @@ def sync_shop(shop_id, shop_name):
     seen_images   = set()
 
     for product in raw_results:
-        if product.get("parent") is not None:
+        parent_id = product.get("parent")
+
+        # ── Child product ────────────────────────────────────────────────────
+        # Children appear as flat items in the API response with parent != null.
+        # Their individual photos (per colour/size) must be captured here because
+        # the parent's embedded declinaisons often have photo=null.
+        # We vectorize them attributed to the parent (product_id=parent_id).
+        if parent_id is not None:
+            image_url = product.get("photo")
+            if image_url:
+                variation_id = product.get("id")
+                # Skip if parent+image already indexed (regardless of which child
+                # arrived first — API order may vary between cycles)
+                if (str(parent_id), image_url) in existing_vectors:
+                    skipped_count += 1
+                    continue
+                dedup_key = (str(parent_id), image_url)
+                if dedup_key not in seen_images:
+                    seen_images.add(dedup_key)
+                    if vectorize_image(image_url, parent_id, shop_id, variation_id):
+                        success_count += 1
+                        existing_vectors.add(dedup_key)  # prevent re-send this cycle
+                    else:
+                        failure_count += 1
+                    time.sleep(0.5)
+                else:
+                    skipped_count += 1
             continue
 
+        # ── Parent product ───────────────────────────────────────────────────
         product_id = product.get("id")
+        product_vectorized = False
 
         # Products with variations
         for decl in product.get("declinaisons", []):
@@ -130,6 +189,11 @@ def sync_shop(shop_id, shop_name):
             variation_id = decl.get("id")
 
             if not image_url:
+                skipped_count += 1
+                continue
+
+            # Skip if product+image already indexed
+            if (str(product_id), image_url) in existing_vectors:
                 skipped_count += 1
                 continue
 
@@ -141,12 +205,13 @@ def sync_shop(shop_id, shop_name):
             seen_images.add(dedup_key)
             if vectorize_image(image_url, product_id, shop_id, variation_id):
                 success_count += 1
+                product_vectorized = True
             else:
                 failure_count += 1
             time.sleep(0.5)
 
-        # Simple product (no variations)
-        if not product.get("declinaisons") and product.get("photo"):
+        # Fallback: use parent photo when no variation had an image
+        if not product_vectorized and product.get("photo"):
             image_url = product["photo"]
             dedup_key = (str(product_id), image_url)
             if dedup_key not in seen_images:
