@@ -161,10 +161,13 @@ def toggle_bot(request, shop_id):
     Toggle the bot on/off globally for a shop.
     Body: { "bot_enabled": true|false }
 
-    When bot is re-enabled (True):
-      - All conversations with is_human_controlled=True are released back to the bot.
+    When bot is DISABLED (False):
+      - All conversations of the shop get is_human_controlled=True
+        so the merchant must respond manually to each one.
+
+    When bot is RE-ENABLED (True):
+      - All conversations get is_human_controlled=False (bot resumes).
     """
-    # get_or_create: in case BotConfiguration does not exist yet
     bot_config, _ = BotConfiguration.objects.get_or_create(
         shop_id=shop_id,
         defaults={'bot_enabled': True}
@@ -182,10 +185,9 @@ def toggle_bot(request, shop_id):
     bot_config.bot_disabled_at = None if enabled else timezone.now()
     bot_config.save(update_fields=['bot_enabled', 'bot_disabled_at'])
 
-    released_count = 0
     if enabled:
-        # Re-enabling bot — release ALL human-controlled conversations for this shop
-        released_count = Conversation.objects.filter(
+        # Re-enabling bot — release ALL human-controlled conversations
+        affected = Conversation.objects.filter(
             shop_id=shop_id,
             is_human_controlled=True
         ).update(
@@ -194,7 +196,19 @@ def toggle_bot(request, shop_id):
             human_agent=None,
         )
         logger.info(
-            f"[HANDOFF] Bot re-enabled for shop={shop_id} — released {released_count} conversations"
+            f"[HANDOFF] Bot RE-ENABLED shop={shop_id} — released {affected} conversations"
+        )
+    else:
+        # Disabling bot — put ALL conversations in human-controlled mode
+        affected = Conversation.objects.filter(
+            shop_id=shop_id,
+            is_human_controlled=False
+        ).update(
+            is_human_controlled=True,
+            human_takeover_at=timezone.now(),
+        )
+        logger.info(
+            f"[HANDOFF] Bot DISABLED shop={shop_id} — {affected} conversations set to human-controlled"
         )
 
     logger.info(
@@ -205,5 +219,5 @@ def toggle_bot(request, shop_id):
         "shop_id": shop_id,
         "bot_enabled": bot_config.bot_enabled,
         "bot_disabled_at": bot_config.bot_disabled_at,
-        "conversations_released": released_count,
+        "conversations_affected": affected,
     })
