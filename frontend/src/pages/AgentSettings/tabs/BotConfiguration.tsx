@@ -3,7 +3,6 @@ import { Loader2, Save } from 'lucide-react';
 import { useBotConfig } from '../../../hooks/useBotConfig';
 import { useAuth } from '../../../providers/AuthProvider';
 import Toast from '../../../components/ui/Toast';
-import { useAuth } from '../../../providers/AuthProvider';
 
 const BotConfiguration = () => {
   const { shopId } = useAuth();
