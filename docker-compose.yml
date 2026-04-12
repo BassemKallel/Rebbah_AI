@@ -18,7 +18,7 @@ services:
       - META_VERIFY_TOKEN=${META_VERIFY_TOKEN}
       - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY}
     command: >
-      sh -c "python manage.py migrate crm 0021 --fake &&
+      sh -c "python fix_migrations.py &&
              python manage.py migrate &&
              python manage.py collectstatic --noinput &&
              python manage.py setup_initial_data &&
