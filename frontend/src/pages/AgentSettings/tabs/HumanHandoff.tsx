@@ -50,8 +50,8 @@ const HumanHandoff = () => {
       setToast({
         type: 'success',
         message: enable
-          ? 'Bot reactivé — il répond à nouveau automatiquement.'
-          : 'Bot désactivé — toutes les conversations sont en mode manuel.',
+          ? 'Bot réactivé — toutes les conversations reviennent au bot automatiquement.'
+          : 'Bot désactivé — toutes les conversations sont maintenant en mode manuel. Vous devez répondre manuellement.',
       });
     } catch (err) {
       // Rollback on error
@@ -167,9 +167,10 @@ const HumanHandoff = () => {
         </div>
 
         <p className="text-xs text-gray-400 mt-4 leading-relaxed">
-          Désactiver le bot globalement met <strong>toutes</strong> les conversations en mode manuel.
-          Les messages des clients seront enregistrés mais aucune réponse automatique ne sera envoyée.
-          Utilisez le bouton «&nbsp;Prendre le relais&nbsp;» dans l'inbox pour contrôler chaque conversation individuellement.
+          Désactiver le bot met <strong>toutes</strong> les conversations en mode manuel —
+          chaque message client est sauvegardé mais <strong>aucune réponse automatique</strong> n'est envoyée.
+          Le marchand doit répondre manuellement depuis l'Inbox Messenger.
+          Réactiver le bot libère toutes les conversations et reprend les réponses automatiques.
         </p>
       </div>
 
