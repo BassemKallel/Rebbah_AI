@@ -3,6 +3,7 @@ import {
   Hand, ShoppingCart, Tag, Package, Truck, XCircle, HelpCircle, Info
 } from 'lucide-react';
 import TemplateEditor from '../components/TemplateEditor';
+import { useAuth } from '../../../providers/AuthProvider';
 
 const INTENTS = [
   { key: 'GREETING', label: 'Greeting', Icon: Hand, vars: ['shop_name', 'ai_agent_name'] },
@@ -22,7 +23,7 @@ const LANGUAGES = [
 ];
 
 const Responses = () => {
-  const shopId = process.env.REACT_APP_SHOP_ID || '';
+  const { shopId } = useAuth();
 
   const [activeIntent, setActiveIntent] = useState(INTENTS[0].key);
   const [selectedLanguage, setSelectedLanguage] = useState('FR');

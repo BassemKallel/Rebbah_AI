@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import TemplateEditor from '../components/TemplateEditor';
+import { useAuth } from '../../../providers/AuthProvider';
 
 const LANGUAGES = [
   { code: 'FR', label: 'French' },
@@ -12,7 +13,7 @@ const LANGUAGES = [
  * ResponseIntent — Per-intent response template editor.
  */
 const ResponseIntent = ({ intentKey, intentConfig }) => {
-  const shopId = process.env.REACT_APP_SHOP_ID || '';
+  const { shopId } = useAuth();
 
   const [selectedLanguage, setSelectedLanguage] = useState('FR');
 
