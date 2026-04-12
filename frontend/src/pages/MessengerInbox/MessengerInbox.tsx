@@ -48,7 +48,7 @@ const MessengerInbox: React.FC = () => {
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
-  /* ── Load messages ── */
+  /* ── Load messages (initial / full reload) ── */
   const loadMessages = useCallback(async (convIds: number[]) => {
     setMsgsLoading(true);
     setMessages([]);
@@ -68,6 +68,26 @@ const MessengerInbox: React.FC = () => {
       setMessages(merged);
     } catch { setMessages([]); }
     finally { setMsgsLoading(false); }
+  }, []);
+
+  /* ── Silent poll — no loading indicator, only appends new messages ── */
+  const pollMessages = useCallback(async (convIds: number[]) => {
+    try {
+      const ids = Array.isArray(convIds) ? convIds : [convIds];
+      const results = await Promise.all(ids.map((id) => fetchMessages(id)));
+      const all = results.flatMap(({ data }) => Array.isArray(data) ? data : (data.results ?? []));
+      const seen = new Set<string | number>();
+      const merged = all
+        .filter((m) => {
+          const key = m.id ?? `${m.created_at}-${m.text}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      // Only update if there are actually new messages
+      setMessages(prev => merged.length !== prev.length ? merged : prev);
+    } catch { /* silent */ }
   }, []);
 
   const handleSelect = (conv: Conversation) => {
@@ -129,14 +149,15 @@ const MessengerInbox: React.FC = () => {
     }
   }, [selected, draft]);
 
-  /* ── Real-time polling when in human mode ── */
+  /* ── Silent polling when in human mode (8s, no flicker) ── */
   useEffect(() => {
     if (!selected?.is_human_controlled) return;
+    const convIds = selected._convIds ?? [selected.id];
     const interval = setInterval(() => {
-      loadMessages(selected._convIds ?? [selected.id]);
-    }, 5000);
+      pollMessages(convIds);
+    }, 8000);
     return () => clearInterval(interval);
-  }, [selected?.is_human_controlled, selected?.id]);
+  }, [selected?.is_human_controlled, selected?.id, pollMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
