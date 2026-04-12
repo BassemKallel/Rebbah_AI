@@ -78,6 +78,47 @@ def invalidate_template_cache(shop_id, language, template_type, intent):
     logger.info(f"[TEMPLATE_SERVICE] Cache invalidated: {key}")
 
 
+# ── Pre-warm ORDER_PRODUCT / INFORM_INFO templates ─────────────────────────
+# Intents used in ORDER_PRODUCT and INFORM_INFO flows
+_PREWARM_INTENTS = {
+    "response": ["ORDER_PRODUCT", "INFORM_INFO", "ASK_AVAILABILITY"],
+    "missing_entity": ["color", "size", "quantity", "phone", "address", "name"],
+    "out_of_stock": ["default", "available", "sizes", "colors"],
+    "order_confirmed": ["with_ref", "no_ref"],
+    "misc": ["missing_entity_default", "inform_info_default", "inform_product_default"],
+}
+_PREWARM_LANGUAGES = ["fr", "ar", "en"]
+
+
+def prewarm_order_templates(shop_id: str | None = None):
+    """
+    Pre-load ORDER flow templates into Redis in a single DB query + set_many.
+    Called once per new conversation. Non-blocking: failures are caught by the caller.
+    """
+    try:
+        from apps.crm.models import ResponseTemplate
+
+        qs = ResponseTemplate.objects.all()
+        if shop_id:
+            # Fetch both shop-specific and system defaults in one query
+            from django.db.models import Q
+            qs = qs.filter(Q(shop_id=shop_id) | Q(shop_id=None, is_default=True))
+        else:
+            qs = qs.filter(shop_id=None, is_default=True)
+
+        to_cache = {}
+        for tmpl in qs:
+            key = _cache_key(tmpl.shop_id, tmpl.language, tmpl.template_type, tmpl.intent)
+            to_cache[key] = tmpl.text
+
+        if to_cache:
+            cache.set_many(to_cache, CACHE_TTL)
+            logger.info(f"[TEMPLATE_SERVICE] Pre-warmed {len(to_cache)} templates for shop={shop_id}")
+
+    except Exception as e:
+        logger.warning(f"[TEMPLATE_SERVICE] prewarm_order_templates failed: {e}")
+
+
 # ── Python fallback (exact copies from response_templates.py) ──────────────
 def _python_fallback(template_type: str, intent: str, language: str) -> str | None:
     from apps.gateway.response_templates import (
