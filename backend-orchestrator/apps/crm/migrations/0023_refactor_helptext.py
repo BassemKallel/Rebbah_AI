@@ -10,7 +10,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('crm', '0022_add_human_handoff'),
+        ('crm', '0021_nlufallbacklog_message_nullable'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
