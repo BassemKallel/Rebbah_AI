@@ -5,6 +5,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
+        ('crm', '0020_lead_status_field'),
         ('crm', '0020_remove_company_tiktak_api_token'),
     ]
 
