@@ -5,7 +5,7 @@ Mounted at: /api/v1/auth/
 """
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
-from .auth_views import LoginView, MeView, ChangePasswordView
+from .views import LoginView, MeView, ChangePasswordView
 
 urlpatterns = [
     path('login/',           LoginView.as_view(),          name='auth-login'),

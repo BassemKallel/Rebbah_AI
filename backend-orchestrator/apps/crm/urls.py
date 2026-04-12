@@ -4,12 +4,10 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ConversationViewSet, LeadViewSet,
     BotConfigurationViewSet, ResponseTemplateViewSet,
-)
-from .handoff_views import (
     takeover_conversation, release_conversation,
     agent_reply, handoff_status, toggle_bot,
+    CompanySettingsView,
 )
-from .company_views import CompanySettingsView
 
 router = DefaultRouter()
 router.register(r'conversations', ConversationViewSet, basename='conversation')
