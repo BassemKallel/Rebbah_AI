@@ -4,13 +4,15 @@ import { getBotConfig, updateBotConfig, patchBotConfig } from '../api/botConfigS
 /**
  * Custom hook for managing bot configuration.
  * Automatically fetches configuration on mount and provides mutation methods.
- *
+ * 
  * @param {string} shopId - Shop identifier
+ * @param {string} token - Bearer token for authentication
+ * @returns {Object} Hook state and methods
  */
-export const useBotConfig = (shopId: string) => {
-    const [config, setConfig] = useState<any>(null);
+export const useBotConfig = (shopId) => {
+    const [config, setConfig] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState(null);
 
     const fetchConfig = async () => {
         if (!shopId) {
@@ -23,7 +25,7 @@ export const useBotConfig = (shopId: string) => {
             setError(null);
             const data = await getBotConfig(shopId);
             setConfig(data);
-        } catch (err: any) {
+        } catch (err) {
             setError(err.response?.data?.detail || err.message || 'Failed to load configuration');
             console.error('Error fetching bot config:', err);
         } finally {
@@ -36,15 +38,19 @@ export const useBotConfig = (shopId: string) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [shopId]);
 
-    /** Fully replace bot configuration. */
-    const updateConfig = async (newData: Record<string, unknown>) => {
+    /**
+     * Fully replace bot configuration.
+     * @param {Object} newData - New configuration data
+     * @returns {Promise<Object>} Result object with success flag
+     */
+    const updateConfig = async (newData) => {
         try {
             setLoading(true);
             setError(null);
             const updated = await updateBotConfig({ ...newData, shop_id: shopId });
             setConfig(updated);
             return { success: true, data: updated };
-        } catch (err: any) {
+        } catch (err) {
             const errorMsg = err.response?.data?.detail || err.message || 'Failed to update configuration';
             setError(errorMsg);
             console.error('Error updating bot config:', err);
@@ -54,15 +60,19 @@ export const useBotConfig = (shopId: string) => {
         }
     };
 
-    /** Partially update bot configuration (only provided fields). */
-    const patchConfig = async (partialData: Record<string, unknown>) => {
+    /**
+     * Partially update bot configuration (only provided fields).
+     * @param {Object} partialData - Partial configuration data
+     * @returns {Promise<Object>} Result object with success flag
+     */
+    const patchConfig = async (partialData) => {
         try {
             setLoading(true);
             setError(null);
             const updated = await patchBotConfig({ ...partialData, shop_id: shopId });
             setConfig(updated);
             return { success: true, data: updated };
-        } catch (err: any) {
+        } catch (err) {
             const errorMsg = err.response?.data?.detail || err.message || 'Failed to update configuration';
             setError(errorMsg);
             console.error('Error patching bot config:', err);

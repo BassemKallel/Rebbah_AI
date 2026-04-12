@@ -36,7 +36,7 @@ const LeadTable: React.FC<LeadTableProps> = ({
   // Skeleton loader
   if (loading && leads.length === 0) {
     return (
-      <div className="scrollbar-thin">
+      <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-sm border-collapse min-w-[600px]">
           <thead className="sticky top-0 z-10 bg-white border-b border-gray-200">
             <tr>
@@ -127,7 +127,7 @@ const LeadTable: React.FC<LeadTableProps> = ({
                 key={lead.id}
                 onClick={() => onRowClick(lead)}
                 className={`group transition-colors cursor-pointer ${isActive ? 'bg-[#eef6f9] border-l-2 border-l-[#0f6885]' :
-                  isChecked ? 'bg-[#f5fafc]' : 'bg-white hover:bg-gray-50'
+                    isChecked ? 'bg-[#f5fafc]' : 'bg-white hover:bg-gray-50'
                   }`}
               >
                 {/* Checkbox */}

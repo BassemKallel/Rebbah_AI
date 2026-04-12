@@ -1,5 +1,5 @@
 // Lead types
-export type { Lead, LeadStatus, StatusOption, PlatformInfo, StatusConfig } from './lead';
+export type { Lead, LeadStatus, LeadFunnelStatus, StatusOption, PlatformInfo, StatusConfig } from './lead';
 
 // Conversation types
 export type { LeadDetails, Conversation, Message } from './conversation';

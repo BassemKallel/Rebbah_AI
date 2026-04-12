@@ -9,7 +9,6 @@ interface AuthState {
   shopId: string | null;
   companyName: string | null;
   username: string | null;
-  responseMode: string | null;
 }
 
 interface AuthContextType extends AuthState {
@@ -25,7 +24,6 @@ const STORAGE_KEYS = {
   shopId: 'tiktak_shop_id',
   companyName: 'tiktak_company_name',
   username: 'tiktak_username',
-  responseMode: 'tiktak_response_mode',
 } as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -37,7 +35,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     shopId: null,
     companyName: null,
     username: null,
-    responseMode: null,
   });
 
   // ── Restore session from localStorage ──────────────────────────────
@@ -47,7 +44,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const shopId = localStorage.getItem(STORAGE_KEYS.shopId);
     const companyName = localStorage.getItem(STORAGE_KEYS.companyName);
     const username = localStorage.getItem(STORAGE_KEYS.username);
-    const responseMode = localStorage.getItem(STORAGE_KEYS.responseMode);
 
     if (access && refresh) {
       setState({
@@ -58,14 +54,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         shopId,
         companyName,
         username,
-        responseMode,
       });
     } else {
       setState((s) => ({ ...s, isLoading: false }));
     }
   }, []);
 
-  // ── Login ──────────────────────────────────────────────────────────
+  // ── Login ───────────────────────────────────────────────────────────
   const login = useCallback(async (username: string, password: string) => {
     const { data } = await loginApi(username, password);
     persistSession(data);
@@ -77,11 +72,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       shopId: data.shop_id,
       companyName: data.company_name,
       username: data.user.username,
-      responseMode: data.response_mode,
     });
   }, []);
 
-  // ── Logout ─────────────────────────────────────────────────────────
+  // ── Logout ──────────────────────────────────────────────────────────
   const logout = useCallback(() => {
     clearSession();
     setState({
@@ -92,11 +86,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       shopId: null,
       companyName: null,
       username: null,
-      responseMode: null,
     });
   }, []);
 
-  // ── Auto-refresh token ─────────────────────────────────────────────
+  // ── Auto-refresh token ──────────────────────────────────────────────
   useEffect(() => {
     if (!state.refreshToken) return;
 
@@ -134,7 +127,7 @@ export function useAuth(): AuthContextType {
   return ctx;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 function persistSession(data: LoginResponse) {
   localStorage.setItem(STORAGE_KEYS.access, data.access);
@@ -142,7 +135,6 @@ function persistSession(data: LoginResponse) {
   localStorage.setItem(STORAGE_KEYS.shopId, data.shop_id);
   localStorage.setItem(STORAGE_KEYS.companyName, data.company_name);
   localStorage.setItem(STORAGE_KEYS.username, data.user.username);
-  localStorage.setItem(STORAGE_KEYS.responseMode, data.response_mode);
 }
 
 function clearSession() {

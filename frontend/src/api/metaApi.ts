@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE = (process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000') + '/api/v1/gateway/messenger/poc';
+const BASE = process.env.REACT_APP_META_API_URL || 'http://localhost:8000/api/v1/gateway/messenger/poc';
 
 const pocClient = axios.create({ baseURL: BASE });
 

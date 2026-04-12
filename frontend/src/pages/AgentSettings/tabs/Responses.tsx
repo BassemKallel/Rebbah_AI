@@ -138,7 +138,7 @@ const Responses = () => {
             category="response"
             subKey={activeIntent}
             language={selectedLanguage}
-            shopId={shopId || ''}
+            shopId={shopId}
             availableVariables={current.vars}
             label={`${current.label} Response`}
           />
