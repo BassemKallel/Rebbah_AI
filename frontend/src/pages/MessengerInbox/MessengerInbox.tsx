@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Loader, AlertCircle } from 'lucide-react';
+import { Loader, AlertCircle, UserCheck } from 'lucide-react';
 import MainLayout from '../../components/layout/MainLayout';
 import MessengerSidebar from './MessengerSidebar';
 import MsgBubble from '../../components/messenger/MsgBubble';
@@ -7,6 +7,7 @@ import ChatHeader from '../../components/messenger/ChatHeader';
 import ChatInput from '../../components/messenger/ChatInput';
 import EmptyState from '../../components/messenger/EmptyState';
 import { fetchConversations, fetchMessages } from '../../api/crmApi';
+import { takeoverConversation, releaseConversation, agentReply } from '../../api/handoffApi';
 import { SHOP_ID } from '../../constants';
 import { getConversationName, getConversationPsid } from '../../utils/messenger';
 import type { Conversation, Message } from '../../types';
@@ -21,6 +22,7 @@ const MessengerInbox: React.FC = () => {
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState('');
   const [lastMessages, setLastMessages] = useState<Record<string, string>>({});
+  const [handoffLoading, setHandoffLoading] = useState(false);
 
   /**
    * Mobile: 'list' = show conversation list, 'chat' = show chat.
@@ -46,7 +48,7 @@ const MessengerInbox: React.FC = () => {
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
-  /* ── Load messages ── */
+  /* ── Load messages (initial / full reload) ── */
   const loadMessages = useCallback(async (convIds: number[]) => {
     setMsgsLoading(true);
     setMessages([]);
@@ -68,6 +70,26 @@ const MessengerInbox: React.FC = () => {
     finally { setMsgsLoading(false); }
   }, []);
 
+  /* ── Silent poll — no loading indicator, only appends new messages ── */
+  const pollMessages = useCallback(async (convIds: number[]) => {
+    try {
+      const ids = Array.isArray(convIds) ? convIds : [convIds];
+      const results = await Promise.all(ids.map((id) => fetchMessages(id)));
+      const all = results.flatMap(({ data }) => Array.isArray(data) ? data : (data.results ?? []));
+      const seen = new Set<string | number>();
+      const merged = all
+        .filter((m) => {
+          const key = m.id ?? `${m.created_at}-${m.text}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      // Only update if there are actually new messages
+      setMessages(prev => merged.length !== prev.length ? merged : prev);
+    } catch { /* silent */ }
+  }, []);
+
   const handleSelect = (conv: Conversation) => {
     setSelected(conv);
     setDraft('');
@@ -79,6 +101,63 @@ const MessengerInbox: React.FC = () => {
     setMobileView('list');
     setSelected(null);
   };
+
+  /* ── Human Handoff handlers ── */
+  const handleTakeover = useCallback(async () => {
+    if (!selected) return;
+    setHandoffLoading(true);
+    try {
+      await takeoverConversation(selected.id);
+      // Optimistic update
+      setSelected(prev => prev ? { ...prev, is_human_controlled: true } : prev);
+      setConversations(prev =>
+        prev.map(c => c.id === selected.id ? { ...c, is_human_controlled: true } : c)
+      );
+    } catch (err) {
+      console.error('[HANDOFF] Takeover failed:', err);
+    } finally {
+      setHandoffLoading(false);
+    }
+  }, [selected]);
+
+  const handleRelease = useCallback(async () => {
+    if (!selected) return;
+    setHandoffLoading(true);
+    try {
+      await releaseConversation(selected.id);
+      setSelected(prev => prev ? { ...prev, is_human_controlled: false, human_agent_name: null } : prev);
+      setConversations(prev =>
+        prev.map(c => c.id === selected.id ? { ...c, is_human_controlled: false } : c)
+      );
+    } catch (err) {
+      console.error('[HANDOFF] Release failed:', err);
+    } finally {
+      setHandoffLoading(false);
+    }
+  }, [selected]);
+
+  const handleSend = useCallback(async () => {
+    if (!selected || !draft.trim()) return;
+    const text = draft.trim();
+    setDraft('');
+    try {
+      await agentReply(selected.id, text);
+      // Reload messages to show the sent message
+      loadMessages(selected._convIds ?? [selected.id]);
+    } catch (err) {
+      console.error('[HANDOFF] Agent reply failed:', err);
+    }
+  }, [selected, draft]);
+
+  /* ── Silent polling when in human mode (8s, no flicker) ── */
+  useEffect(() => {
+    if (!selected?.is_human_controlled) return;
+    const convIds = selected._convIds ?? [selected.id];
+    const interval = setInterval(() => {
+      pollMessages(convIds);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [selected?.is_human_controlled, selected?.id, pollMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -147,7 +226,20 @@ const MessengerInbox: React.FC = () => {
         name={selectedName}
         onRefresh={() => loadMessages(selected!._convIds ?? [selected!.id])}
         onBack={handleBackToList}
+        isHumanControlled={selected?.is_human_controlled ?? false}
+        humanAgentName={selected?.human_agent_name}
+        onTakeover={handleTakeover}
+        onRelease={handleRelease}
       />
+
+      {/* Handoff banner */}
+      {selected?.is_human_controlled && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 text-amber-700 text-xs font-medium">
+          <UserCheck className="w-4 h-4 flex-shrink-0" />
+          <span>Vous gérez cette conversation directement. Le bot est en pause.</span>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-8 scrollbar-thin">
         {msgsLoading ? (
           <div className="flex justify-center py-10">
@@ -164,7 +256,12 @@ const MessengerInbox: React.FC = () => {
         )}
         <div ref={messagesEndRef} />
       </div>
-      <ChatInput draft={draft} onDraftChange={setDraft} />
+      <ChatInput
+        draft={draft}
+        onDraftChange={setDraft}
+        onSend={handleSend}
+        isHumanControlled={selected?.is_human_controlled ?? false}
+      />
     </div>
   );
 

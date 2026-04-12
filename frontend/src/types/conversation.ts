@@ -22,6 +22,10 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  // ── Human Handoff ──────────────────────────────────────────
+  is_human_controlled: boolean;
+  human_takeover_at: string | null;
+  human_agent_name: string | null;
   /** Internal grouping field — PSID key */
   _psid?: string;
   /** Internal grouping field — all conversation IDs for this PSID */
@@ -41,7 +45,9 @@ export interface Message {
   extracted_intent: string | null;
   intent_confidence_score: number | null;
   extracted_entities: Record<string, unknown> | null;
+  is_error?: boolean;
   is_fallback: boolean;
+  is_human_agent: boolean;   // True = sent by a human agent (not the bot)
   confidence_score?: number;
   fallback_triggered?: boolean;
   conversation_state_before: string;
