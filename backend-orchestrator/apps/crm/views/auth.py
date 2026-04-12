@@ -1,10 +1,11 @@
 """
-auth_views.py — JWT authentication endpoints for the merchant dashboard.
+apps/crm/views/auth.py — JWT authentication endpoints for the merchant dashboard.
 
 Endpoints:
-    POST /api/v1/auth/login/    → Authenticate & return JWT tokens + company info
-    POST /api/v1/auth/refresh/  → Refresh an expired access token
-    GET  /api/v1/auth/me/       → Return current user + company info
+    POST /api/v1/auth/login/           → Authenticate & return JWT tokens + company info
+    POST /api/v1/auth/refresh/         → Refresh an expired access token
+    GET  /api/v1/auth/me/              → Return current user + company info
+    POST /api/v1/auth/change-password/ → Change authenticated user's password
 """
 from django.contrib.auth import authenticate
 from rest_framework.views import APIView
@@ -12,8 +13,6 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
-
-from .authentication import JWTCompanyAuthentication, StaticTokenAuthentication
 
 
 class LoginView(APIView):
@@ -136,9 +135,9 @@ class ChangePasswordView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        current_password  = request.data.get('current_password', '')
-        new_password      = request.data.get('new_password', '')
-        confirm_password  = request.data.get('confirm_password', '')
+        current_password = request.data.get('current_password', '')
+        new_password     = request.data.get('new_password', '')
+        confirm_password = request.data.get('confirm_password', '')
 
         if not current_password or not new_password or not confirm_password:
             return Response(
