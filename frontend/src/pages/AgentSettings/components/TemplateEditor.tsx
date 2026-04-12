@@ -13,6 +13,7 @@ import Toast from '../../../components/ui/Toast';
  * @param {string} props.subKey - Sous-clé (GREETING, size, with_ref, etc.)
  * @param {string} props.language - Langue (FR, AR, EN)
  * @param {string} props.shopId - Identifiant du shop
+ * @param {string} props.token - Bearer token
  * @param {Array<string>} props.availableVariables - Variables disponibles pour ce template
  * @param {string} props.label - Label du template (optionnel)
  */

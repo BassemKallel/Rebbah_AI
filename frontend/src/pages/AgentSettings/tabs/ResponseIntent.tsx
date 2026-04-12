@@ -77,7 +77,7 @@ const ResponseIntent = ({ intentKey, intentConfig }) => {
         category="response"
         subKey={apiSubKey}
         language={selectedLanguage}
-        shopId={shopId || ''}
+        shopId={shopId}
         availableVariables={intentConfig.vars || []}
         label={`${intentConfig.label} Response`}
       />

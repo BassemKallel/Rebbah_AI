@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-
 import ChatInput from './ChatInput';
 import MessageBubble from './MessageBubble';
 

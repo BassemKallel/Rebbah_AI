@@ -19,7 +19,6 @@ export default function Login() {
     return <Navigate to="/" replace />;
   }
 
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

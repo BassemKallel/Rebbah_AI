@@ -10,15 +10,18 @@ import type { ResponseTemplate } from '../types';
 /**
  * Custom hook for managing response templates.
  * Automatically fetches templates on mount and provides CRUD methods.
- *
+ * 
  * @param {Object} filters - Query filters (category, language, shop_id, is_default)
+ * @param {string} token - Bearer token for authentication
+ * @returns {Object} Hook state and methods
  */
-export const useTemplates = (filters: Record<string, any> = {}) => {
+export const useTemplates = (filters = {}) => {
     const [templates, setTemplates] = useState<ResponseTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const fetchTemplates = async () => {
+
         try {
             setLoading(true);
             setError(null);
@@ -37,8 +40,12 @@ export const useTemplates = (filters: Record<string, any> = {}) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [JSON.stringify(filters)]);
 
-    /** Create a new template (shop-specific override). */
-    const create = async (templateData: Record<string, unknown>) => {
+    /**
+     * Create a new template (shop-specific override).
+     * @param {Object} templateData - Template data
+     * @returns {Promise<Object>} Result object with success flag
+     */
+    const create = async (templateData) => {
         try {
             setError(null);
             const newTemplate = await createTemplate(templateData);
@@ -55,8 +62,13 @@ export const useTemplates = (filters: Record<string, any> = {}) => {
         }
     };
 
-    /** Update an existing template. */
-    const update = async (id: number, templateData: Record<string, unknown>) => {
+    /**
+     * Update an existing template.
+     * @param {number} id - Template ID
+     * @param {Object} templateData - Updated template data
+     * @returns {Promise<Object>} Result object with success flag
+     */
+    const update = async (id, templateData) => {
         try {
             setError(null);
             const updated = await updateTemplate(id, templateData);
@@ -70,8 +82,12 @@ export const useTemplates = (filters: Record<string, any> = {}) => {
         }
     };
 
-    /** Delete a shop-specific template. */
-    const remove = async (id: number) => {
+    /**
+     * Delete a shop-specific template.
+     * @param {number} id - Template ID
+     * @returns {Promise<Object>} Result object with success flag
+     */
+    const remove = async (id) => {
         try {
             setError(null);
             await deleteTemplate(id);
@@ -85,8 +101,10 @@ export const useTemplates = (filters: Record<string, any> = {}) => {
         }
     };
 
-    /** Find templates by category, sub_key, and language. */
-    const findTemplates = (category: string, subKey: string, language: string) => {
+    /**
+     * Find a template by category, sub_key, and language.
+     */
+    const findTemplates = (category, subKey, language) => {
         return templates.filter(t =>
             t.template_type === category &&
             t.intent === subKey &&
@@ -98,8 +116,10 @@ export const useTemplates = (filters: Record<string, any> = {}) => {
         });
     };
 
-    /** Get system template for a specific category/sub_key/language. */
-    const getSystemTemplate = (category: string, subKey: string, language: string) => {
+    /**
+     * Get system template for a specific category/sub_key/language.
+     */
+    const getSystemTemplate = (category, subKey, language) => {
         return templates.find(t =>
             t.template_type === category &&
             t.intent === subKey &&
@@ -108,8 +128,10 @@ export const useTemplates = (filters: Record<string, any> = {}) => {
         ) || null;
     };
 
-    /** Get custom (shop-specific) template. */
-    const getCustomTemplate = (category: string, subKey: string, language: string) => {
+    /**
+     * Get custom (shop-specific) template for a specific category/sub_key/language.
+     */
+    const getCustomTemplate = (category, subKey, language) => {
         return templates.find(t =>
             t.template_type === category &&
             t.intent === subKey &&

@@ -14,17 +14,14 @@ export interface LoginResponse {
   user: { id: number; username: string; email: string };
   shop_id: string;
   company_name: string;
-  response_mode: string;
+  dashboard_token: string;
 }
 
 export interface MeResponse {
-  user: { id: number; username: string; email: string };
+  user: { id: number; username: string; email: string } | null;
   company: {
     shop_id: string;
     name: string;
-    response_mode: string;
-    has_gemini_key: boolean;
-    has_llm_context: boolean;
     is_active: boolean;
   };
   role: string;

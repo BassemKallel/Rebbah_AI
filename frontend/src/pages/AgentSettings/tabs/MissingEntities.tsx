@@ -137,7 +137,7 @@ const MissingEntities = () => {
                         category="missing_entity"
                         subKey={activeEntity}
                         language={selectedLanguage}
-                        shopId={shopId || ''}
+                        shopId={shopId}
                         availableVariables={current.vars}
                         label={`${current.label} Question`}
                     />

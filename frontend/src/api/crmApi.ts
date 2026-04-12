@@ -1,43 +1,54 @@
+/**
+ * crmApi.ts — CRM API client using the shared JWT axiosInstance.
+ *
+ * Uses axiosInstance (with JWT interceptor) instead of its own axios.create().
+ * The JWT token is automatically injected from localStorage on every request.
+ */
 import api from './axiosInstance';
 
-// ─── Conversations ──────────────────────────────────────────────────────────
+const CRM = '/api/v1/crm';
 
-/** Fetch paginated list of conversations. */
+// ─── Conversations ────────────────────────────────────────────────────────────
+
+/** Fetch paginated list of conversations, optionally filtered by shop. */
 export const fetchConversations = (shopId?: string) =>
-  api.get('/api/v1/crm/conversations/', { params: shopId ? { shop_id: shopId } : {} });
+  api.get(`${CRM}/conversations/`, { params: shopId ? { shop_id: shopId } : {} });
 
 /** Fetch message history for a given conversation. */
 export const fetchMessages = (conversationId: number, page?: number) =>
-  api.get(`/api/v1/crm/conversations/${conversationId}/messages/`, {
+  api.get(`${CRM}/conversations/${conversationId}/messages/`, {
     params: page ? { page } : {},
   });
 
 /** Send a message as AGENT in a conversation. */
 export const sendMessage = (conversationId: number, text: string) =>
-  api.post(`/api/v1/crm/conversations/${conversationId}/messages/`, { text, sender: 'AGENT' });
+  api.post(`${CRM}/conversations/${conversationId}/messages/`, {
+    text,
+    sender: 'AGENT',
+  });
 
 // ─── Leads ───────────────────────────────────────────────────────────────────
 
 /** List leads, optionally filtered by shop. */
 export const fetchLeads = (shopId?: string) =>
-  api.get('/api/v1/crm/leads/', { params: shopId ? { shop_id: shopId } : {} });
+  api.get(`${CRM}/leads/`, { params: shopId ? { shop_id: shopId } : {} });
 
 /** Get a single lead by id. */
 export const fetchLead = (id: number) =>
-  api.get(`/api/v1/crm/leads/${id}/`);
+  api.get(`${CRM}/leads/${id}/`);
 
 /** Create a new lead. */
 export const createLead = (payload: Record<string, unknown>) =>
-  api.post('/api/v1/crm/leads/', payload);
+  api.post(`${CRM}/leads/`, payload);
 
 /** Partial update of a lead. */
 export const patchLead = (id: number, patch: Record<string, unknown>) =>
-  api.patch(`/api/v1/crm/leads/${id}/`, patch);
+  api.patch(`${CRM}/leads/${id}/`, patch);
 
 /** Full replacement update of a lead. */
 export const updateLead = (id: number, payload: Record<string, unknown>) =>
-  api.put(`/api/v1/crm/leads/${id}/`, payload);
+  api.put(`${CRM}/leads/${id}/`, payload);
 
 /** Delete a lead. */
 export const deleteLead = (id: number) =>
-  api.delete(`/api/v1/crm/leads/${id}/`);
+  api.delete(`${CRM}/leads/${id}/`);
