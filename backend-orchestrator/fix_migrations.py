@@ -1,6 +1,6 @@
 """
-One-time script: add missing columns with IF NOT EXISTS, then fake-apply
-migrations 0022-0024 so Django considers them done.
+One-time script: add ALL missing columns with IF NOT EXISTS, then fake-apply
+migrations 0020-0024 so Django considers them done.
 Safe to re-run. Remove this file after the server is fixed.
 """
 import django, os
@@ -11,6 +11,9 @@ django.setup()
 from django.db import connection
 
 ADD_COLUMN_SQL = [
+    # 0020_lead_status_field: Lead
+    "ALTER TABLE crm_lead ADD COLUMN IF NOT EXISTS lead_status varchar(20) DEFAULT 'PROSPECT' NOT NULL",
+    "CREATE INDEX IF NOT EXISTS crm_lead_lead_status_idx ON crm_lead (lead_status)",
     # 0022: BotConfiguration
     "ALTER TABLE crm_botconfiguration ADD COLUMN IF NOT EXISTS bot_enabled boolean DEFAULT true NOT NULL",
     "ALTER TABLE crm_botconfiguration ADD COLUMN IF NOT EXISTS bot_disabled_at timestamp with time zone",
@@ -23,6 +26,9 @@ ADD_COLUMN_SQL = [
 ]
 
 FAKE_MIGRATIONS = [
+    "0020_lead_status_field",
+    "0020_remove_company_tiktak_api_token",
+    "0021_nlufallbacklog_message_nullable",
     "0022_add_human_handoff_fields",
     "0023_refactor_helptext",
     "0024_add_company_llm_fields",
@@ -31,8 +37,11 @@ FAKE_MIGRATIONS = [
 with connection.cursor() as cursor:
     # Step 1: Add missing columns (idempotent)
     for sql in ADD_COLUMN_SQL:
-        cursor.execute(sql)
-        print(f"  OK: {sql.split('ADD COLUMN IF NOT EXISTS ')[1].split()[0]}")
+        try:
+            cursor.execute(sql)
+            print(f"  OK: {sql[:80]}")
+        except Exception as e:
+            print(f"  SKIP: {sql[:80]} — {e}")
 
     # Step 2: Purge stale migration records
     placeholders = ",".join(["%s"] * len(FAKE_MIGRATIONS))
