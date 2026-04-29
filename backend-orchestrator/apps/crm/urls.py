@@ -7,6 +7,9 @@ from .views import (
     takeover_conversation, release_conversation,
     agent_reply, handoff_status, toggle_bot,
     CompanySettingsView,
+    dashboard_kpis, dashboard_hourly, dashboard_pending_orders,
+    dashboard_recent_activity, dashboard_top_intents, dashboard_channels,
+    dashboard_lead_funnel,
 )
 
 router = DefaultRouter()
@@ -27,6 +30,15 @@ urlpatterns = [
     path('conversations/<int:conversation_id>/agent-reply/',   agent_reply,           name='conversation-agent-reply'),
     path('conversations/<int:conversation_id>/handoff-status/', handoff_status,       name='conversation-handoff-status'),
     path('bot-configurations/<str:shop_id>/toggle-bot/',       toggle_bot,            name='bot-toggle'),
+
+    # Dashboard KPIs
+    path('dashboard/kpis/',             dashboard_kpis,             name='dashboard-kpis'),
+    path('dashboard/hourly/',           dashboard_hourly,           name='dashboard-hourly'),
+    path('dashboard/pending-orders/',   dashboard_pending_orders,   name='dashboard-pending-orders'),
+    path('dashboard/recent-activity/',  dashboard_recent_activity,  name='dashboard-recent-activity'),
+    path('dashboard/top-intents/',      dashboard_top_intents,      name='dashboard-top-intents'),
+    path('dashboard/channels/',         dashboard_channels,         name='dashboard-channels'),
+    path('dashboard/lead-funnel/',      dashboard_lead_funnel,      name='dashboard-lead-funnel'),
 
     path('', include(router.urls)),
 ]

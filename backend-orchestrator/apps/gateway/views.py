@@ -102,7 +102,7 @@ class MetaWebhookView(APIView):
                         break
 
                 # ── Delegate to pipeline ───────────────────────────────
-                result = pipeline.run(user_id, shop_id, text, image_url=image_url)
+                result = pipeline.run(user_id, shop_id, text, image_url=image_url, platform=platform)
                 result["platform"] = platform
                 result["sender_psid"] = sender_psid
 
@@ -171,6 +171,7 @@ class MessengerWebhookPOC(APIView):
             user_id, shop_id, text,
             image_url=image_url,
             image_file=image_file,
+            platform="poc",
         )
 
         # ── 3. Build HTTP Response ────────────────────────────────────────

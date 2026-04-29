@@ -46,7 +46,7 @@ class MessagePipeline:
     """
 
     def run(self, user_id, shop_id, text,
-            image_url=None, image_file=None) -> dict:
+            image_url=None, image_file=None, platform="messenger") -> dict:
         """
         Process one incoming message through the full pipeline.
 
@@ -56,6 +56,7 @@ class MessagePipeline:
             text:       Message text (may be empty if image-only)
             image_url:  URL of an image attachment (optional)
             image_file: Uploaded image file object (optional, POC only)
+            platform:   Channel — "messenger" | "instagram" | "poc"
 
         Returns:
             dict with keys: text, intent, state, entities, context,
@@ -77,7 +78,6 @@ class MessagePipeline:
         # select_for_update() acquires a PostgreSQL FOR UPDATE lock so concurrent
         # threads wait instead of each creating a duplicate Lead + Conversation.
         with transaction.atomic():
-            lead, _ = Lead.objects.get_or_create(platform_id=user_id)
             conversation = (
                 Conversation.objects
                 .select_for_update()
@@ -85,19 +85,22 @@ class MessagePipeline:
                     sender_id=user_id,
                     state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
                 )
+                .select_related('lead')
                 .first()
             )
             if not conversation:
-                # No active conversation → start a fresh one
+                # No active conversation → start fresh; lead will be created lazily on ORDER_PRODUCT
                 conversation = Conversation.objects.create(
-                    lead=lead,
-                    lead_uuid=lead.uuid,
                     sender_id=user_id,
                     shop_id=shop_id,
+                    platform=platform,
                     state="NEW_CONVERSATION"
                 )
+                lead = None
                 is_new_conversation = True
             else:
+                # Always derive lead from the conversation to stay consistent
+                lead = conversation.lead
                 is_new_conversation = False
 
         # Pre-warm ORDER_PRODUCT / INFORM_INFO templates for new conversations.
@@ -154,10 +157,10 @@ class MessagePipeline:
                     conversation.state = "COMPLETED"
                     conversation.save()
                     context_manager.clear_context(user_id)
-                    lead = Lead.objects.create(platform_id=user_id)
+                    lead = None
                     conversation = Conversation.objects.create(
-                        lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
-                        shop_id=shop_id, state="NEW_CONVERSATION"
+                        sender_id=user_id,
+                        shop_id=shop_id, platform=platform, state="NEW_CONVERSATION"
                     )
                 else:
                     # Still in grace period — correction mode
@@ -171,10 +174,10 @@ class MessagePipeline:
                 conversation.state = "COMPLETED"
                 conversation.save()
                 context_manager.clear_context(user_id)
-                lead = Lead.objects.create(platform_id=user_id)
+                lead = None
                 conversation = Conversation.objects.create(
-                    lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
-                    shop_id=shop_id, state="NEW_CONVERSATION"
+                    sender_id=user_id,
+                    shop_id=shop_id, platform=platform, state="NEW_CONVERSATION"
                 )
 
 
@@ -241,9 +244,18 @@ class MessagePipeline:
                         extracted_entities["product"] = cp
                         break
 
-        # Default intent when only an image was provided
+        # Default intent when only an image was provided.
+        # If a non-order intent was pending (e.g. ASK_PRICE waiting for product),
+        # restore it instead of blindly forcing ORDER_PRODUCT.
         if (image_url or image_file) and (extracted_intent == "NOISE" or not text):
-            extracted_intent = "ORDER_PRODUCT"
+            _pending = conversation.context_data.get("_pending_intent")
+            if (_pending
+                    and conversation.state == "WAITING_USER_REPLY"
+                    and _pending in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DETAILS", "ASK_DISCOUNT")):
+                extracted_intent = _pending
+                logger.info(f"[PIPELINE] Image received — restoring pending intent: {_pending}")
+            else:
+                extracted_intent = "ORDER_PRODUCT"
 
         # Detect language for disambiguation messages
         lang = detect_language(text)
@@ -288,11 +300,6 @@ class MessagePipeline:
         current_context = conversation.context_data
         current_context = dialog_manager.accumulate_context(current_context, extracted_entities)
         conversation.context_data = current_context
-
-        # Transition PROSPECT → ENGAGED dès qu'un produit est identifié dans le contexte
-        if lead.lead_status == "PROSPECT" and current_context.get("product"):
-            lead.lead_status = "ENGAGED"
-            lead.save(update_fields=["lead_status", "updated_at"])
 
         # Persist/restore vision_variation_id across messages
         if vision_variation_id:
@@ -369,41 +376,49 @@ class MessagePipeline:
             logger.info("[PIPELINE] Correction mode → forcing ORDER_PRODUCT intent")
 
         # ── 10c. Progressive Lead Update ──────────────────────────────────
-        # Update lead fields as soon as entities are collected, without waiting
-        # for the full order to be confirmed.
-        _lead_dirty = []
+        # Lead is created lazily on first ORDER_PRODUCT intent (purchase intent detected).
+        # For non-purchase intents, lead stays None and this block is skipped.
+        if extracted_intent in ("ORDER_PRODUCT", "INFORM_INFO") and lead is None:
+            lead = Lead.objects.create(platform_id=user_id)
+            conversation.lead = lead
+            conversation.lead_uuid = lead.uuid
+            conversation.save(update_fields=['lead', 'lead_uuid'])
+            logger.info(f"[PIPELINE] Lead created lazily on ORDER_PRODUCT — lead.id={lead.id}")
 
-        if matched_product:
-            _pid = str(matched_product.get("id", ""))
-            if _pid and lead.product_id != _pid:
-                lead.product_id = _pid
-                _lead_dirty.append("product_id")
+        if lead is not None:
+            _lead_dirty = []
 
-        if vision_variation_id and lead.variation_id != str(vision_variation_id):
-            lead.variation_id = str(vision_variation_id)
-            _lead_dirty.append("variation_id")
+            if matched_product:
+                _pid = str(matched_product.get("id", ""))
+                if _pid and lead.product_id != _pid:
+                    lead.product_id = _pid
+                    _lead_dirty.append("product_id")
 
-        if not lead.shop_id and shop_id:
-            lead.shop_id = shop_id
-            _lead_dirty.append("shop_id")
+            if vision_variation_id and lead.variation_id != str(vision_variation_id):
+                lead.variation_id = str(vision_variation_id)
+                _lead_dirty.append("variation_id")
 
-        _ctx_to_lead = {
-            "color":        "color",
-            "size":         "size",
-            "address":      "address",
-            "phone_number": "phone_number",
-            "quantity":     "quantity",
-        }
-        for ctx_key, lead_field in _ctx_to_lead.items():
-            ctx_val = current_context.get(ctx_key)
-            if ctx_val is not None and getattr(lead, lead_field) != ctx_val:
-                setattr(lead, lead_field, ctx_val)
-                _lead_dirty.append(lead_field)
+            if not lead.shop_id and shop_id:
+                lead.shop_id = shop_id
+                _lead_dirty.append("shop_id")
 
-        if _lead_dirty:
-            _lead_dirty.append("updated_at")
-            lead.save(update_fields=_lead_dirty)
-            logger.info(f"[PIPELINE] Lead progressive update: {_lead_dirty}")
+            _ctx_to_lead = {
+                "color":        "color",
+                "size":         "size",
+                "address":      "address",
+                "phone_number": "phone_number",
+                "quantity":     "quantity",
+            }
+            for ctx_key, lead_field in _ctx_to_lead.items():
+                ctx_val = current_context.get(ctx_key)
+                if ctx_val is not None and getattr(lead, lead_field) != ctx_val:
+                    setattr(lead, lead_field, ctx_val)
+                    _lead_dirty.append(lead_field)
+
+            if _lead_dirty:
+                _lead_dirty.append("updated_at")
+                lead.save(update_fields=_lead_dirty)
+                logger.info(f"[PIPELINE] Lead progressive update: {_lead_dirty}")
 
         # ── 11. State Machine ─────────────────────────────────────────────
         bot_config, _ = BotConfiguration.objects.get_or_create(shop_id=shop_id)
@@ -429,6 +444,10 @@ class MessagePipeline:
         # ── 12. Persist State ─────────────────────────────────────────────
         conversation.state = new_state
         conversation.missing_entities = missing_list
+        # Clean up _pending_intent once it has been fulfilled (product now in context)
+        if current_context.get("_pending_intent") and not missing_list:
+            current_context.pop("_pending_intent", None)
+            logger.info("[PIPELINE] _pending_intent cleared — intent fulfilled")
         conversation.context_data = current_context
         conversation.save()
 
