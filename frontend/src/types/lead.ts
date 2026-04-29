@@ -1,4 +1,4 @@
-export type LeadFunnelStatus = 'PROSPECT' | 'ENGAGED' | 'QUALIFIED';
+export type LeadFunnelStatus = 'ENGAGED' | 'QUALIFIED';
 
 export interface Lead {
   id: number;

@@ -24,7 +24,7 @@ export interface PendingOrder {
   phone: string;
   address: string;
   platform: string;
-  avatar: string;
+  avatar: string | null;
 }
 
 export interface ActivityItem {

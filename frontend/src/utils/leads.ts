@@ -21,14 +21,11 @@ export const getStatusConfig = (lead: Lead): StatusConfig => {
   const status = lead.lead_status;
   if (status === 'QUALIFIED')
     return { label: lead.agent_confirmation_pending ? 'Confirmation agent' : 'Qualifié', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-400' };
-  if (status === 'ENGAGED')
-    return { label: 'Engagé', color: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-400' };
-  return { label: 'Prospect', color: 'bg-gray-50 text-gray-500 border-gray-200', dot: 'bg-gray-400' };
+  return { label: 'Engagé', color: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-400' };
 };
 
 export const matchTab = (lead: Lead, tab: string): boolean => {
   if (tab === 'all') return true;
-  if (tab === 'prospect') return lead.lead_status === 'PROSPECT';
   if (tab === 'engaged') return lead.lead_status === 'ENGAGED';
   if (tab === 'qualified') return lead.lead_status === 'QUALIFIED';
   // legacy tabs (rétro-compatibilité avec agent_confirmation_pending)

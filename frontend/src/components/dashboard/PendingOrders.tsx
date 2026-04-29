@@ -18,7 +18,7 @@ const PendingOrders: React.FC<PendingOrdersProps> = ({ orders }) => (
     <div className="divide-y divide-gray-50">
       {orders.map((o) => (
         <div key={o.id} className="flex items-start gap-3 px-4 sm:px-6 py-3.5 hover:bg-gray-50 transition-colors">
-          <img src={o.avatar} alt={o.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0 mt-0.5" />
+          <img src={o.avatar ?? `https://i.pravatar.cc/150?u=${o.id}`} alt={o.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <p className="text-sm font-semibold text-gray-800 truncate">{o.name}</p>
