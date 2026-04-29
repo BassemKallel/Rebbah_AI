@@ -9,12 +9,10 @@ class Lead(models.Model):
     Represents a potential customer identified via Messenger.
     Stores both lead info AND pending pre-order data waiting for agent confirmation.
     """
-    LEAD_STATUS_PROSPECT  = "PROSPECT"
     LEAD_STATUS_ENGAGED   = "ENGAGED"
     LEAD_STATUS_QUALIFIED = "QUALIFIED"
     LEAD_STATUS_CHOICES   = [
-        (LEAD_STATUS_PROSPECT,  "Prospect — conversation démarrée, pas d'intention d'achat"),
-        (LEAD_STATUS_ENGAGED,   "Engagé — produit identifié, entités en cours de collecte"),
+        (LEAD_STATUS_ENGAGED,   "Engagé — intention d'achat détectée, entités en cours de collecte"),
         (LEAD_STATUS_QUALIFIED, "Qualifié — pré-commande créée, en attente agent"),
     ]
 
@@ -31,7 +29,7 @@ class Lead(models.Model):
     address      = models.TextField(blank=True, null=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
 
-    lead_status = models.CharField(max_length=20, choices=LEAD_STATUS_CHOICES, default=LEAD_STATUS_PROSPECT, db_index=True)
+    lead_status = models.CharField(max_length=20, choices=LEAD_STATUS_CHOICES, default=LEAD_STATUS_ENGAGED, db_index=True)
 
     has_pending_order          = models.BooleanField(default=False)
     pending_order_reference    = models.CharField(max_length=50, blank=True, null=True, db_index=True)

@@ -5,10 +5,20 @@ from .lead import Lead
 
 class Conversation(models.Model):
     """Ongoing chat session with a lead."""
-    lead      = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="conversations")
+    lead      = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="conversations", null=True, blank=True)
     lead_uuid = models.UUIDField(null=True, blank=True)
     sender_id = models.CharField(max_length=255, null=True, blank=True)
     shop_id   = models.CharField(max_length=255)
+
+    PLATFORM_MESSENGER = "messenger"
+    PLATFORM_INSTAGRAM = "instagram"
+    PLATFORM_POC       = "poc"
+    PLATFORM_CHOICES   = [
+        (PLATFORM_MESSENGER, "Messenger"),
+        (PLATFORM_INSTAGRAM, "Instagram"),
+        (PLATFORM_POC,       "POC / Test"),
+    ]
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default=PLATFORM_MESSENGER, db_index=True)
 
     state            = models.CharField(max_length=50, default="NEW_CONVERSATION")
     context_data     = models.JSONField(default=dict, blank=True)
@@ -23,7 +33,8 @@ class Conversation(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Conv {self.id} with {self.lead.platform_id} (State: {self.state})"
+        pid = self.lead.platform_id if self.lead_id else "(no lead)"
+        return f"Conv {self.id} with {pid} (State: {self.state})"
 
 
 class Message(models.Model):

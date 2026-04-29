@@ -484,19 +484,49 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
             else:
                 bot_response = get_template("response", "INFORM_INFO", lang, shop_id) or ""
 
-    # ── ASK_PRICE / ASK_AVAILABILITY / ASK_DELIVERY ────────────────────────
+    # ── ASK_PRICE / ASK_AVAILABILITY / ASK_DELIVERY ──────────────────────
     elif intent in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DELIVERY"):
         if previous_state == "WAITING_USER_REPLY" and conversation.missing_entities:
             skip_missing_flow = False
 
             if intent == "ASK_PRICE" and matched_product:
                 price = matched_product.get('base_price', '0')
-                bot_response = (get_template("response", "ASK_PRICE", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{price}", str(price)) + " "
+                bot_response = (
+                    (get_template("response", "ASK_PRICE", lang, shop_id) or "")
+                    .replace("{product}", matched_product['name'])
+                    .replace("{price}", str(price))
+                )
+                if current_context.get("_pending_intent") == "ASK_PRICE":
+                    # ── Cas A : l'utilisateur avait demandé le prix → image fournie ensuite
+                    # Intent purement informatif, pas de commande active → on clôt le pending
+                    missing_list = []
+                    new_state = previous_state
+                    current_context.pop("_pending_intent", None)
+                else:
+                    # ── Cas B : image envoyée d'abord → commande en cours → "prix ?" en cours de route
+                    # Répondre le prix ET continuer à collecter les entités manquantes
+                    order_missing = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                    if order_missing:
+                        missing_list = order_missing
+                        new_state = "WAITING_USER_REPLY"
+                        first_missing = order_missing[0]
+                        bot_response += " " + (
+                            get_template("missing_entity", first_missing, lang, shop_id)
+                            or (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
+                        ).replace("{product}", matched_product['name']).replace("{color}", current_context.get("color", ""))
+                    else:
+                        missing_list = []
+                        new_state = previous_state
+                skip_missing_flow = True
+
             elif intent == "ASK_AVAILABILITY" and matched_product:
                 size  = current_context.get("size", "")
                 color = current_context.get("color", "")
+                variations = matched_product.get("variations", [])
+                sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
+                colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
+
                 if size:
-                    # User asked about a specific size — validate stock first
                     stock_ok, avail = _check_stock(matched_product, color, size)
                     if not stock_ok:
                         display = matched_product["name"]
@@ -512,19 +542,51 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                         _auto_fill_single_color(matched_product, current_context)
                         missing_list = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
                         new_state = "WAITING_USER_REPLY"
-                        skip_missing_flow = True  # Don't re-append missing list below
+                        skip_missing_flow = True
                     else:
-                        # Size IS in stock — confirm and continue flow
-                        variations = matched_product.get("variations", [])
-                        sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
-                        colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                        bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+                        bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-")
+                        if current_context.get("_pending_intent") == "ASK_AVAILABILITY":
+                            # Cas A — informationnel pur
+                            missing_list = []
+                            new_state = previous_state
+                            current_context.pop("_pending_intent", None)
+                        else:
+                            # Cas B — commande en cours, continuer
+                            order_missing = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                            if order_missing:
+                                missing_list = order_missing
+                                new_state = "WAITING_USER_REPLY"
+                                first_missing = order_missing[0]
+                                bot_response += " " + (
+                                    get_template("missing_entity", first_missing, lang, shop_id)
+                                    or (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
+                                ).replace("{product}", matched_product['name']).replace("{color}", color)
+                            else:
+                                missing_list = []
+                                new_state = previous_state
+                        skip_missing_flow = True
                 else:
-                    # No specific size — show all available
-                    variations = matched_product.get("variations", [])
-                    sizes  = ", ".join(sorted(set(v["size"]  for v in variations if v.get("stock_quantity", 0) > 0)))
-                    colors = ", ".join(sorted(set(v["color"] for v in variations if v.get("stock_quantity", 0) > 0)))
-                    bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-") + " "
+                    bot_response = (get_template("response", "ASK_AVAILABILITY", lang, shop_id) or "").replace("{product}", matched_product['name']).replace("{sizes}", sizes or "-").replace("{colors}", colors or "-")
+                    if current_context.get("_pending_intent") == "ASK_AVAILABILITY":
+                        # Cas A — informationnel pur
+                        missing_list = []
+                        new_state = previous_state
+                        current_context.pop("_pending_intent", None)
+                    else:
+                        # Cas B — commande en cours, continuer
+                        order_missing = [r for r in REQUIRED_ORDER_ENTITIES if r not in current_context]
+                        if order_missing:
+                            missing_list = order_missing
+                            new_state = "WAITING_USER_REPLY"
+                            first_missing = order_missing[0]
+                            bot_response += " " + (
+                                get_template("missing_entity", first_missing, lang, shop_id)
+                                or (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
+                            ).replace("{product}", matched_product['name']).replace("{color}", color)
+                        else:
+                            missing_list = []
+                            new_state = previous_state
+                    skip_missing_flow = True
             else:
                 bot_response = get_template("response", intent, lang, shop_id) or ""
 
@@ -540,12 +602,19 @@ def run_state_machine(intent: str, previous_state: str, current_context: dict,
                         or (get_template("misc", "missing_entity_default", lang, shop_id) or "").replace("{first_missing}", first_missing)
                     ).replace("{product}", matched_product["name"] if matched_product else current_context.get("product", "cet article")).replace("{color}", current_context.get("color", ""))
 
+
         else:
             if not matched_product:
                 if intent == "ASK_AVAILABILITY":
                     bot_response = get_template("misc", "ask_availability_default", lang, shop_id) or ""
+                    current_context["_pending_intent"] = "ASK_AVAILABILITY"  # ← FIX 2
+                    new_state = "WAITING_USER_REPLY"
+                    missing_list = ["product"]
                 elif intent == "ASK_PRICE":
                     bot_response = get_template("misc", "ask_price_default", lang, shop_id) or ""
+                    current_context["_pending_intent"] = "ASK_PRICE"  # ← FIX 2
+                    new_state = "WAITING_USER_REPLY"
+                    missing_list = ["product"]
                 else:
                     bot_response = get_template("response", intent, lang, shop_id) or ""
             else:
