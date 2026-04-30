@@ -571,7 +571,7 @@ class MessagePipeline:
         current_context = conversation.context_data or {}
 
         # ── 2. Hot Memory: conversation history from Redis ───────────────
-        conversation_history = context_manager.get_messages(user_id)
+        conversation_history = context_manager.get_recent_context(user_id, n=8)
 
         # ── 3. Call LLM with company context ─────────────────────────────
         llm_result = generate_llm_response(
