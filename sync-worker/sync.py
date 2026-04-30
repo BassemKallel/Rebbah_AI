@@ -90,30 +90,31 @@ def get_existing_vectors(shop_id):
 def fetch_products(shop_id):
     """
     Fetch all products for a shop with pagination.
-    Uses page_size=100 to minimise the number of HTTP requests.
-    With 1900 items this needs only 19 pages instead of 190.
+    Builds each page URL explicitly with page_size=100 and page=N to ensure
+    page_size is not lost when following the 'next' URL (which omits it).
     """
-    url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
+    base_url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
     all_results = []
-    params = {"company": shop_id, "page_size": 100}
-    page_count = 0
+    page = 1
+    page_size = 100
 
-    while url and page_count < 200:  # safety cap: 200 x 100 = 20 000 items
+    while page <= 200:  # safety cap: 200 x 100 = 20 000 items max
         try:
-            if page_count == 0:
-                resp = requests.get(url, params=params, timeout=15)
-            else:
-                resp = requests.get(url, timeout=15)
+            params = {"company": shop_id, "page_size": page_size, "page": page}
+            resp = requests.get(base_url, params=params, timeout=15)
             resp.raise_for_status()
             data = resp.json()
             batch = data.get("results", [])
+            if not batch:
+                break  # empty page = done
             all_results.extend(batch)
-            url = data.get("next")
-            page_count += 1
             total = data.get("count", "?")
-            logger.info(f"  Page {page_count}: +{len(batch)} items (total fetched: {len(all_results)}/{total})")
+            logger.info(f"  Page {page}: +{len(batch)} items (total fetched: {len(all_results)}/{total})")
+            if not data.get("next"):
+                break  # no more pages
+            page += 1
         except requests.exceptions.RequestException as e:
-            logger.error(f"  Erreur page {page_count}: {e}")
+            logger.error(f"  Erreur page {page}: {e}")
             break
 
     return all_results
@@ -128,8 +129,9 @@ def vectorize_image(image_url, product_id, shop_id, variation_id):
         "shop_id":         str(shop_id),
         "store_image_url": image_url,
     }
+    url = f"{VISION_SERVICE_URL.rstrip('/')}/vectorize"
     try:
-        response = requests.post(VISION_SERVICE_URL, json=payload, timeout=30)
+        response = requests.post(url, json=payload, timeout=30)
         response.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
