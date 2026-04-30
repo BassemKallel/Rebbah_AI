@@ -55,6 +55,8 @@ Réponds TOUJOURS en JSON avec cette structure EXACTE :
   "order_ready": false
 }}
 
+IMPORTANT : Ne mets JAMAIS "product_id" dans extracted_entities. Uniquement le NOM du produit dans le champ "product".
+
 --- LOGIQUE DE COMMANDE ---
 Entités OBLIGATOIRES pour finaliser une commande : product, address, phone_number
 Entités OPTIONNELLES : color, size, quantity (défaut = 1 si non précisé)

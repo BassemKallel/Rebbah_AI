@@ -586,8 +586,11 @@ class MessagePipeline:
         extracted_entities = llm_result.get("extracted_entities", {})
 
         # ── 4. Accumulate entities into context ──────────────────────────
+        # Blocked fields: product_id and variation_id must ONLY be resolved
+        # via tiktak_service.find_product(), never trusted from the LLM output.
+        _LLM_BLOCKED_FIELDS = {"product_id", "variation_id"}
         for key, value in extracted_entities.items():
-            if value:
+            if value and key not in _LLM_BLOCKED_FIELDS:
                 current_context[key] = value
 
         # ── 5. Save User Message (traceability) ─────────────────────────
@@ -605,13 +608,38 @@ class MessagePipeline:
         new_state = "LLM_ACTIVE"
         if llm_result.get("order_ready"):
             matched_product = None
-            prod_name = current_context.get("product")
+            prod_name = current_context.get("product", "")
             if prod_name:
                 try:
+                    import unicodedata
+                    def _norm(s):
+                        """Normalize string: lowercase, strip accents."""
+                        s = s.lower().strip()
+                        return ''.join(
+                            c for c in unicodedata.normalize('NFD', s)
+                            if unicodedata.category(c) != 'Mn'
+                        )
+
                     products = tiktak_service.get_products(shop_id)
-                    matched_product, _, _ = tiktak_service.find_product(
-                        products, prod_name
-                    )
+                    norm_name = _norm(prod_name)
+
+                    # 1st try: exact normalized match
+                    for p in products:
+                        if _norm(p["name"]) == norm_name:
+                            matched_product = p
+                            break
+
+                    # 2nd try: keyword match via find_product
+                    if not matched_product:
+                        matched_product, _, _ = tiktak_service.find_product(
+                            products, prod_name
+                        )
+
+                    if matched_product:
+                        logger.info(f"[LLM PIPELINE] Product matched: '{matched_product['name']}' (id={matched_product['id']})")
+                    else:
+                        logger.warning(f"[LLM PIPELINE] No product matched for name='{prod_name}'")
+
                 except Exception as e:
                     logger.error(f"[LLM PIPELINE] Product lookup error: {e}")
 
