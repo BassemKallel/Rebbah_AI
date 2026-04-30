@@ -88,23 +88,30 @@ def get_existing_vectors(shop_id):
 # ── TikTak API ───────────────────────────────────────────────────────────────
 
 def fetch_products(shop_id):
-    """Fetch all products for a shop with pagination. TikTak API is public."""
+    """
+    Fetch all products for a shop with pagination.
+    Uses page_size=100 to minimise the number of HTTP requests.
+    With 1900 items this needs only 19 pages instead of 190.
+    """
     url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
     all_results = []
-    params = {"company": shop_id}
+    params = {"company": shop_id, "page_size": 100}
     page_count = 0
 
-    while url and page_count < 50:
+    while url and page_count < 200:  # safety cap: 200 x 100 = 20 000 items
         try:
             if page_count == 0:
-                resp = requests.get(url, params=params, timeout=10)
+                resp = requests.get(url, params=params, timeout=15)
             else:
-                resp = requests.get(url, timeout=10)
+                resp = requests.get(url, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            all_results.extend(data.get("results", []))
+            batch = data.get("results", [])
+            all_results.extend(batch)
             url = data.get("next")
             page_count += 1
+            total = data.get("count", "?")
+            logger.info(f"  Page {page_count}: +{len(batch)} items (total fetched: {len(all_results)}/{total})")
         except requests.exceptions.RequestException as e:
             logger.error(f"  Erreur page {page_count}: {e}")
             break
@@ -136,7 +143,7 @@ def sync_shop(shop_id, shop_name):
     """Sync a single shop's catalog."""
     logger.info(f"── Syncing [{shop_name}] (shop_id={shop_id}) ──")
 
-    # Pre-load already-indexed (variation_id, image_url) to avoid re-encoding
+    # Pre-load already-indexed (parent_id, image_url) to avoid re-encoding
     existing_vectors = get_existing_vectors(shop_id)
 
     raw_results = fetch_products(shop_id)
@@ -163,20 +170,17 @@ def sync_shop(shop_id, shop_name):
                 variation_id = product.get("id")
                 # Skip if parent+image already indexed (regardless of which child
                 # arrived first — API order may vary between cycles)
-                if (str(parent_id), image_url) in existing_vectors:
+                dedup_key = (str(parent_id), image_url)
+                if dedup_key in seen_images:
                     skipped_count += 1
                     continue
-                dedup_key = (str(parent_id), image_url)
-                if dedup_key not in seen_images:
-                    seen_images.add(dedup_key)
-                    if vectorize_image(image_url, parent_id, shop_id, variation_id):
-                        success_count += 1
-                        existing_vectors.add(dedup_key)  # prevent re-send this cycle
-                    else:
-                        failure_count += 1
-                    time.sleep(0.5)
+                seen_images.add(dedup_key)
+                if vectorize_image(image_url, parent_id, shop_id, variation_id):
+                    success_count += 1
+                    existing_vectors.add(dedup_key)  # prevent re-send this cycle
                 else:
-                    skipped_count += 1
+                    failure_count += 1
+                time.sleep(0.3)
             continue
 
         # ── Parent product ───────────────────────────────────────────────────
