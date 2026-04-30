@@ -82,7 +82,7 @@ class MessagePipeline:
         effective_mode = mode_override or (getattr(company, 'response_mode', 'nlu') if company else 'nlu')
         if effective_mode == 'llm' and company:
             logger.info(f"[PIPELINE] LLM mode activated for shop={shop_id} (override={bool(mode_override)})")
-            return self._run_llm_mode(user_id, shop_id, text, company)
+            return self._run_llm_mode(user_id, shop_id, text, company, image_url=image_url)
 
         # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
         # Atomic block prevents race conditions when two messages arrive simultaneously
@@ -546,10 +546,11 @@ class MessagePipeline:
 
     # ── LLM Direct Mode Pipeline ─────────────────────────────────────────
 
-    def _run_llm_mode(self, user_id, shop_id, text, company):
+    def _run_llm_mode(self, user_id, shop_id, text, company, image_url=None):
         """
         Simplified pipeline for LLM Direct mode.
         Gemini generates the response using the company's context.
+        Supports image input via the vision service (CLIP embeddings).
         Can also create orders when all entities are collected.
         """
         # ── 1. Cold Memory: Lead + Conversation ──────────────────────────
@@ -572,6 +573,42 @@ class MessagePipeline:
 
         # ── 2. Hot Memory: conversation history from Redis ───────────────
         conversation_history = context_manager.get_recent_context(user_id, n=8)
+
+        # ── 2b. Vision: identify product from image ──────────────────────
+        matched_image_url = None
+        if image_url:
+            try:
+                vision_result = ai_service.call_vision(shop_id, image_url=image_url)
+                if vision_result:
+                    variation_id = vision_result.get("variation_id")
+                    matched_image_url = vision_result.get("image_url")
+                    products = tiktak_service.get_products(shop_id)
+
+                    # Resolve product from variation_id
+                    vision_product, color_from_vision, _ = tiktak_service.find_product(
+                        products, f"Article_From_Image_{variation_id}"
+                    )
+
+                    if vision_product:
+                        current_context["product"] = vision_product["name"]
+                        if color_from_vision:
+                            current_context["color"] = color_from_vision
+                        # Inject product info into user message so LLM understands context
+                        product_info = f"{vision_product['name']}"
+                        if color_from_vision:
+                            product_info += f" ({color_from_vision})"
+                        if vision_product.get("base_price"):
+                            product_info += f" — {vision_product['base_price']} TND"
+                        text = f"[Image reçue — produit identifié : {product_info}] {text}".strip()
+                        logger.info(f"[LLM PIPELINE] Vision matched: {product_info} (variation_id={variation_id})")
+                    else:
+                        text = f"[Image reçue — produit non identifié dans le catalogue] {text}".strip()
+                        logger.warning(f"[LLM PIPELINE] Vision returned variation_id={variation_id} but no product matched")
+                else:
+                    text = f"[Image reçue — vision service indisponible] {text}".strip()
+            except Exception as e:
+                logger.warning(f"[LLM PIPELINE] Vision lookup failed (non-blocking): {e}")
+                text = f"[Image reçue] {text}".strip()
 
         # ── 3. Call LLM with company context ─────────────────────────────
         llm_result = generate_llm_response(
@@ -681,4 +718,5 @@ class MessagePipeline:
             "entities": extracted_entities,
             "context": current_context,
             "missing_entities": [],
+            "matched_image_url": matched_image_url,
         }
