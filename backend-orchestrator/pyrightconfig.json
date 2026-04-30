@@ -1,0 +1,10 @@
+{
+  "include": ["."],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/migrations"],
+  "typeCheckingMode": "off",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Linux",
+  "reportMissingModuleSource": "none",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none"
+}

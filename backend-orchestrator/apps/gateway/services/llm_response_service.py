@@ -24,16 +24,19 @@ SYSTEM_PROMPT_LLM_MODE = """Tu es l'assistant IA de la boutique "{company_name}"
 --- CONTEXTE BOUTIQUE ---
 {llm_context}
 
+--- ENTITÉS DÉJÀ COLLECTÉES (NE PAS RE-DEMANDER CES INFORMATIONS) ---
+{collected_entities_str}
+
 --- RÈGLES CRITIQUES ---
 1. Tu comprends parfaitement le dialecte tunisien (Arabizi, Derja, mélange arabe/français).
-2. Si le client écrit en arabe ou en arabizi → réponds en ARABE PUR (عربية مبسطة واضحة).
+2. Si le client écrit en arabe ou en arabizi → réponds en ARABE TUNISIEN (Derja).
 3. Si le client écrit en français → réponds en FRANÇAIS.
 4. Ne mélange JAMAIS les deux langues dans une même réponse.
-5. Sois professionnel, sympathique et serviable.
-6. Ne réponds qu'aux sujets liés à la boutique. Pour tout hors-sujet, redirige poliment.
-7. Si tu ne connais pas la réponse, dis-le poliment au lieu d'inventer.
+5. Sois professionnel, sympathique et concis (2-3 phrases max).
+6. Ne réponds qu'aux sujets liés à la boutique.
+7. Ne mentionne JAMAIS un produit absent du CONTEXTE BOUTIQUE ci-dessus.
 
---- CONTEXTE DE LA CONVERSATION ---
+--- HISTORIQUE RÉCENT ---
 {conversation_context}
 
 --- FORMAT DE RÉPONSE ---
@@ -47,22 +50,33 @@ Réponds TOUJOURS en JSON avec cette structure EXACTE :
     "size": null,
     "address": null,
     "phone_number": null,
-    "quantity": null,
-    "client_name": null
+    "quantity": null
   }},
   "order_ready": false
 }}
 
---- LOGIQUE DE COMMANDE ---
-Quand le client veut commander un produit :
-1. Collecte TOUTES ces informations une par une : product, color, size, address, phone_number
-2. Pour chaque info manquante, demande-la poliment dans response_text
-3. Mets les infos déjà collectées dans extracted_entities (valeur réelle, pas null)
-4. Quand TOUTES les 5 informations sont collectées → mets "order_ready": true
-5. Si order_ready=true, confirme la commande dans response_text avec un récapitulatif
+IMPORTANT : Ne mets JAMAIS "product_id" dans extracted_entities. Uniquement le NOM du produit dans le champ "product".
 
-IMPORTANT : Remplis extracted_entities avec les nouvelles infos de CE message uniquement.
-Les infos déjà collectées dans les messages précédents sont dans le CONTEXTE ci-dessus."""
+--- LOGIQUE DE COMMANDE ---
+Entités OBLIGATOIRES pour finaliser une commande : product, address, phone_number
+Entités OPTIONNELLES : color, size, quantity (défaut = 1 si non précisé)
+
+Processus strict :
+1. Consulte "ENTITÉS DÉJÀ COLLECTÉES" — ces infos sont ACQUISES, ne les re-demande JAMAIS
+2. Identifie les entités OBLIGATOIRES encore manquantes
+3. Demande UNE SEULE info manquante à la fois dans response_text
+4. Dans extracted_entities → mets UNIQUEMENT les nouvelles infos du message ACTUEL
+5. CONDITION order_ready=true : product + address + phone_number sont tous présents
+   (soit dans ENTITÉS DÉJÀ COLLECTÉES, soit dans ce message)
+   → Quand cette condition est remplie : mets order_ready=true ET envoie un
+     RÉCAPITULATIF COMPLET en demandant confirmation (ex: "Confirmes-tu ta commande ?")
+
+PHASE DE CONFIRMATION (quand l'état est LLM_CONFIRMING) :
+- Si le client dit "oui/ey/ok/behi/confirme" → mets order_ready=true
+- Si le client CORRIGE une info (nouveau numéro, nouvelle adresse...) →
+  mets la nouvelle valeur dans extracted_entities + mets order_ready=true
+  et envoie un nouveau récapitulatif mis à jour
+- Ne crée jamais la commande sans confirmation explicite du client"""
 
 
 def generate_llm_response(
@@ -105,27 +119,35 @@ def generate_llm_response(
         result["error"] = True
         return result
 
-    # ── Build conversation context string ─────────────────────────────────
-    context_parts = []
+    # ── Build collected entities string (shown explicitly in prompt) ──────
+    ORDER_FIELDS = {"product", "color", "size", "address", "phone_number", "quantity"}
+    collected = {}
     if current_context:
-        collected = {k: v for k, v in current_context.items() if not k.startswith('_')}
-        if collected:
-            context_parts.append("Entités déjà collectées : " + json.dumps(collected, ensure_ascii=False))
+        collected = {
+            k: v for k, v in current_context.items()
+            if not k.startswith('_') and k in ORDER_FIELDS and v
+        }
 
+    if collected:
+        collected_entities_str = json.dumps(collected, ensure_ascii=False, indent=2)
+    else:
+        collected_entities_str = "Aucune entité collectée pour l'instant."
+
+    # ── Build conversation history string ─────────────────────────────────
+    conversation_context = "Première interaction avec ce client."
     if conversation_history:
         lines = []
-        for msg in conversation_history[-8:]:  # Last 8 messages
+        for msg in conversation_history[-8:]:
             role = "CLIENT" if msg.get("role") == "user" else "BOT"
             lines.append(f"{role}: {msg.get('text', '')}")
         if lines:
-            context_parts.append("Historique récent :\n" + "\n".join(lines))
-
-    conversation_context = "\n\n".join(context_parts) if context_parts else "Première interaction avec ce client."
+            conversation_context = "\n".join(lines)
 
     # ── Build prompt ──────────────────────────────────────────────────────
     system_prompt = SYSTEM_PROMPT_LLM_MODE.format(
         company_name=company.name,
         llm_context=company.llm_context or "Aucun contexte spécifique fourni pour cette boutique.",
+        collected_entities_str=collected_entities_str,
         conversation_context=conversation_context,
     )
 
@@ -140,7 +162,7 @@ def generate_llm_response(
             config={
                 "system_instruction": system_prompt,
                 "response_mime_type": "application/json",
-                "temperature": 0.3,
+                "temperature": 0.2,
             },
         )
 
@@ -152,7 +174,7 @@ def generate_llm_response(
         result["detected_intent"] = data.get("detected_intent", "OTHER")
         result["order_ready"] = bool(data.get("order_ready", False))
 
-        # Extract non-null entities
+        # Extract non-null entities from THIS message only
         raw_entities = data.get("extracted_entities", {})
         if isinstance(raw_entities, dict):
             result["extracted_entities"] = {
@@ -160,9 +182,18 @@ def generate_llm_response(
                 if v is not None and v != "" and v != "null"
             }
 
+        # ── Safety check: verify order_ready conditions server-side ──────
+        # Merge context + new entities to check if mandatory fields are present
+        merged = {**collected, **result["extracted_entities"]}
+        mandatory_present = all(merged.get(f) for f in ("product", "address", "phone_number"))
+        if mandatory_present and not result["order_ready"]:
+            logger.info(f"[LLM] Forcing order_ready=True — all mandatory entities present: {merged}")
+            result["order_ready"] = True
+
         logger.info(
             f"[LLM] shop={company.shop_id} intent={result['detected_intent']} "
-            f"entities={list(result['extracted_entities'].keys())} "
+            f"new_entities={list(result['extracted_entities'].keys())} "
+            f"collected={list(collected.keys())} "
             f"order_ready={result['order_ready']}"
         )
 

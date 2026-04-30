@@ -1,0 +1,23 @@
+{
+  "include": [
+    "backend-orchestrator",
+    "vision-service"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/migrations",
+    "frontend"
+  ],
+  "typeCheckingMode": "off",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Linux",
+  "reportMissingModuleSource": "none",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none",
+  "reportUndefinedVariable": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportOperatorIssue": "none",
+  "reportReturnType": "none"
+}

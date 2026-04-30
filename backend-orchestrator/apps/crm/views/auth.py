@@ -1,10 +1,11 @@
 """
-auth_views.py — JWT authentication endpoints for the merchant dashboard.
+apps/crm/views/auth.py — JWT authentication endpoints for the merchant dashboard.
 
 Endpoints:
-    POST /api/v1/auth/login/    → Authenticate & return JWT tokens + company info
-    POST /api/v1/auth/refresh/  → Refresh an expired access token
-    GET  /api/v1/auth/me/       → Return current user + company info
+    POST /api/v1/auth/login/           → Authenticate & return JWT tokens + company info
+    POST /api/v1/auth/refresh/         → Refresh an expired access token
+    GET  /api/v1/auth/me/              → Return current user + company info
+    POST /api/v1/auth/change-password/ → Change authenticated user's password
 """
 from django.contrib.auth import authenticate
 from rest_framework.views import APIView
@@ -12,8 +13,6 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
-
-from .authentication import JWTCompanyAuthentication, StaticTokenAuthentication
 
 
 class LoginView(APIView):
@@ -121,3 +120,57 @@ class MeView(APIView):
             },
             'role': user.profile.role,
         })
+
+
+class ChangePasswordView(APIView):
+    """
+    POST /api/v1/auth/change-password/
+
+    Body: { "current_password": "...", "new_password": "...", "confirm_password": "..." }
+    Changes the authenticated user's password.
+    Only available to JWT-authenticated users (not static token).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+
+        # Static token auth has no real Django user
+        if not hasattr(user, 'profile'):
+            return Response(
+                {'error': 'Opération non disponible pour ce type d\'authentification.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        current_password = request.data.get('current_password', '')
+        new_password     = request.data.get('new_password', '')
+        confirm_password = request.data.get('confirm_password', '')
+
+        if not current_password or not new_password or not confirm_password:
+            return Response(
+                {'error': 'Les trois champs sont requis.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {'error': 'Les deux nouveaux mots de passe ne correspondent pas.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Le nouveau mot de passe doit contenir au moins 8 caractères.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not user.check_password(current_password):
+            return Response(
+                {'error': 'Le mot de passe actuel est incorrect.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+
+        return Response({'message': 'Mot de passe modifié avec succès.'}, status=status.HTTP_200_OK)
