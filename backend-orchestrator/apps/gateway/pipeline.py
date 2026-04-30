@@ -556,7 +556,7 @@ class MessagePipeline:
         # ── 1. Cold Memory: Lead + Conversation ──────────────────────────
         conversation = Conversation.objects.filter(
             sender_id=user_id,
-            state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "LLM_ACTIVE"]
+            state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "LLM_ACTIVE", "LLM_CONFIRMING"]
         ).first()
 
         if not conversation:
@@ -641,60 +641,74 @@ class MessagePipeline:
             conversation_state_before=state_before,
         )
 
-        # ── 6. Order creation if ready ───────────────────────────────────
+        # ── 6. Confirmation gate + Order creation ────────────────────────
+        # Phase A — All entities collected → show recap, enter LLM_CONFIRMING
+        # Phase B — Client confirms       → create order → COMPLETED
+        # Phase C — Client corrects       → update context, stay LLM_CONFIRMING
         new_state = "LLM_ACTIVE"
-        if llm_result.get("order_ready"):
-            matched_product = None
-            prod_name = current_context.get("product", "")
-            if prod_name:
-                try:
-                    import unicodedata
-                    def _norm(s):
-                        """Normalize string: lowercase, strip accents."""
-                        s = s.lower().strip()
-                        return ''.join(
-                            c for c in unicodedata.normalize('NFD', s)
-                            if unicodedata.category(c) != 'Mn'
-                        )
 
-                    products = tiktak_service.get_products(shop_id)
-                    norm_name = _norm(prod_name)
+        _CONFIRM_WORDS = {
+            "oui", "yes", "ey", "behi", "ayh", "ok", "okay", "confirme",
+            "confirmer", "confirm", "valide", "valider", "d'accord",
+            "na3am", "yezzi", "go", "c'est bon", "cest bon", "parfait",
+        }
 
-                    # 1st try: exact normalized match
-                    for p in products:
-                        if _norm(p["name"]) == norm_name:
-                            matched_product = p
-                            break
-
-                    # 2nd try: keyword match via find_product
-                    if not matched_product:
-                        matched_product, _, _ = tiktak_service.find_product(
-                            products, prod_name
-                        )
-
-                    if matched_product:
-                        logger.info(f"[LLM PIPELINE] Product matched: '{matched_product['name']}' (id={matched_product['id']})")
-                    else:
-                        logger.warning(f"[LLM PIPELINE] No product matched for name='{prod_name}'")
-
-                except Exception as e:
-                    logger.error(f"[LLM PIPELINE] Product lookup error: {e}")
-
-            try:
-                lead.create_pending_order(
-                    shop_id=shop_id,
-                    product_id=matched_product["id"] if matched_product else None,
-                    variation_id=None,
-                    color=current_context.get("color", ""),
-                    size=current_context.get("size", ""),
-                    address=current_context.get("address", ""),
-                    phone_number=current_context.get("phone_number", ""),
-                    quantity=int(current_context.get("quantity", 1)),
+        def _resolve_product(prod_name):
+            """Resolve product name to catalog dict using normalized matching."""
+            import unicodedata
+            def _norm(s):
+                s = s.lower().strip()
+                return ''.join(
+                    c for c in unicodedata.normalize('NFD', s)
+                    if unicodedata.category(c) != 'Mn'
                 )
-                new_state = "COMPLETED"
-                logger.info(f"[LLM PIPELINE] Order created for lead={lead.id} shop={shop_id}")
+            try:
+                products = tiktak_service.get_products(shop_id)
+                norm_name = _norm(prod_name)
+                for p in products:
+                    if _norm(p["name"]) == norm_name:
+                        return p
+                matched, _, _ = tiktak_service.find_product(products, prod_name)
+                return matched
             except Exception as e:
-                logger.error(f"[LLM PIPELINE] Order creation error: {e}")
+                logger.error(f"[LLM PIPELINE] Product lookup error: {e}")
+                return None
+
+        if state_before == "LLM_CONFIRMING":
+            user_text_normalized = text.lower().strip().rstrip("!.,؟?")
+            is_confirmation = user_text_normalized in _CONFIRM_WORDS
+
+            if is_confirmation:
+                # ── Phase B: Create the order ─────────────────────────────
+                matched_product = _resolve_product(current_context.get("product", ""))
+                if matched_product:
+                    logger.info(f"[LLM PIPELINE] Product resolved: '{matched_product['name']}' id={matched_product['id']}")
+                try:
+                    lead.create_pending_order(
+                        shop_id=shop_id,
+                        product_id=matched_product["id"] if matched_product else None,
+                        variation_id=None,
+                        color=current_context.get("color", ""),
+                        size=current_context.get("size", ""),
+                        address=current_context.get("address", ""),
+                        phone_number=current_context.get("phone_number", ""),
+                        quantity=int(current_context.get("quantity", 1)),
+                    )
+                    new_state = "COMPLETED"
+                    logger.info(f"[LLM PIPELINE] Order confirmed and created — lead={lead.id}")
+                except Exception as e:
+                    logger.error(f"[LLM PIPELINE] Order creation error: {e}")
+                    new_state = "LLM_CONFIRMING"  # Retry on next message
+            else:
+                # ── Phase C: Client corrected something ───────────────────
+                new_state = "LLM_CONFIRMING"
+                logger.info(f"[LLM PIPELINE] Correction received in confirming phase: {extracted_entities}")
+
+        elif llm_result.get("order_ready"):
+            # ── Phase A: All entities collected → enter confirmation ──────
+            new_state = "LLM_CONFIRMING"
+            logger.info("[LLM PIPELINE] All entities collected — entering LLM_CONFIRMING phase")
+
 
         # ── 7. Persist conversation state ────────────────────────────────
         conversation.state = new_state

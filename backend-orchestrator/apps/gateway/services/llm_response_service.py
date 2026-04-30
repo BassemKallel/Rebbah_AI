@@ -65,10 +65,18 @@ Processus strict :
 1. Consulte "ENTITÉS DÉJÀ COLLECTÉES" — ces infos sont ACQUISES, ne les re-demande JAMAIS
 2. Identifie les entités OBLIGATOIRES encore manquantes
 3. Demande UNE SEULE info manquante à la fois dans response_text
-4. Dans extracted_entities → mets UNIQUEMENT les nouvelles infos du message ACTUEL (pas les anciennes)
+4. Dans extracted_entities → mets UNIQUEMENT les nouvelles infos du message ACTUEL
 5. CONDITION order_ready=true : product + address + phone_number sont tous présents
    (soit dans ENTITÉS DÉJÀ COLLECTÉES, soit dans ce message)
-   → Quand cette condition est remplie : mets order_ready=true ET envoie un récapitulatif complet de confirmation"""
+   → Quand cette condition est remplie : mets order_ready=true ET envoie un
+     RÉCAPITULATIF COMPLET en demandant confirmation (ex: "Confirmes-tu ta commande ?")
+
+PHASE DE CONFIRMATION (quand l'état est LLM_CONFIRMING) :
+- Si le client dit "oui/ey/ok/behi/confirme" → mets order_ready=true
+- Si le client CORRIGE une info (nouveau numéro, nouvelle adresse...) →
+  mets la nouvelle valeur dans extracted_entities + mets order_ready=true
+  et envoie un nouveau récapitulatif mis à jour
+- Ne crée jamais la commande sans confirmation explicite du client"""
 
 
 def generate_llm_response(
