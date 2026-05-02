@@ -57,6 +57,47 @@ _ERROR_MESSAGES = {
 }
 
 
+# ── Server-side entity extraction (safety net for Gemini misses) ─────────────
+
+# Standard clothing sizes — ordered longest first to avoid S matching inside XS/XL
+_KNOWN_SIZES: tuple = ('3XL', '2XL', 'XXL', 'XL', 'XS', 'L', 'M', 'S')
+_SIZE_PATTERN = re.compile(
+    r'(?<!\w)(' + '|'.join(re.escape(s) for s in _KNOWN_SIZES) + r')(?!\w)',
+    re.IGNORECASE,
+)
+# Tunisian phone: starts with 2,4,5,7,9 and has exactly 8 digits
+_PHONE_PATTERN = re.compile(r'(?<!\d)([2457-9]\d{7})(?!\d)')
+
+
+def _extract_entities_server_side(text: str, existing_entities: dict, collected: dict) -> dict:
+    """
+    Server-side safety net that runs AFTER Gemini to catch entities it missed.
+
+    Handles cases Gemini frequently misses with Tunisian arabizi:
+      - Standalone size letters : "M", "nheb M", "a3tini XL", "bghit L"
+      - Tunisian phone numbers  : "55 123 456", "55123456"
+
+    Only fills a field if BOTH Gemini missed it AND it's not already in context.
+    """
+    safety = {}
+
+    # ── Size ─────────────────────────────────────────────────────────────────
+    if not existing_entities.get('size') and not collected.get('size'):
+        m = _SIZE_PATTERN.search(text)
+        if m:
+            safety['size'] = m.group(1).upper()
+            logger.info(f"[LLM SAFETY] Server extracted size='{safety['size']}' from: '{text}'")
+
+    # ── Phone number ─────────────────────────────────────────────────────────
+    if not existing_entities.get('phone_number') and not collected.get('phone_number'):
+        m = _PHONE_PATTERN.search(re.sub(r'[\s.\-]', '', text))
+        if m:
+            safety['phone_number'] = m.group(1)
+            logger.info(f"[LLM SAFETY] Server extracted phone='{safety['phone_number']}' from: '{text}'")
+
+    return safety
+
+
 def _format_catalog_for_prompt(products: list) -> str:
     """
     Format the product catalog as compact text for the LLM system prompt.
@@ -135,6 +176,18 @@ SYSTEM_PROMPT_LLM_MODE = """Tu es l'assistant IA de la boutique "{company_name}"
 4. Sois professionnel, sympathique et concis (2-3 phrases max).
 5. Ne réponds qu'aux sujets liés à la boutique.
 6. Ne mentionne JAMAIS un produit absent du CATALOGUE ci-dessus.
+
+--- EXTRACTION D'ENTITÉS — RÈGLES SPÉCIALES ---
+TAILLE : Si le message contient une lettre ou combinaison de taille connue (S, M, L, XL, XXL, 2XL, 3XL),
+extrais-la TOUJOURS comme "size", même si elle est seule ou dans une phrase courte.
+Exemples OBLIGATOIRES à respecter :
+  "M"           → extracted_entities: {{"size": "M"}}
+  "nheb M"      → extracted_entities: {{"size": "M"}}   (nheb = je veux en arabizi)
+  "a3tini L"    → extracted_entities: {{"size": "L"}}   (a3tini = donne-moi)
+  "bghit XL"    → extracted_entities: {{"size": "XL"}}  (bghit = je veux)
+  "je prends S" → extracted_entities: {{"size": "S"}}
+  "XL s'il te plaît" → extracted_entities: {{"size": "XL"}}
+RÈGLE ABSOLUE : Si tu as extrait une taille valide dans extracted_entities, NE la redemande JAMAIS.
 
 --- HISTORIQUE RÉCENT ---
 {conversation_context}
@@ -303,6 +356,13 @@ def generate_llm_response(
                 k: v for k, v in raw_entities.items()
                 if v is not None and v != "" and v != "null"
             }
+
+        # ── Server-side safety net ────────────────────────────────────────
+        # Catches entities Gemini missed (sizes, phone numbers in arabizi context)
+        safety_entities = _extract_entities_server_side(
+            text, result["extracted_entities"], collected
+        )
+        result["extracted_entities"].update(safety_entities)
 
         # ── Safety check: verify order_ready conditions server-side ──────
         # Merge context + new entities to check if mandatory fields are present
