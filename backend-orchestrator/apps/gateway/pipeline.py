@@ -18,6 +18,7 @@ Steps:
   12-13. Persist State + Save Bot Message + AWAITING_CORRECTION
 """
 import logging
+import unicodedata
 from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
@@ -39,6 +40,95 @@ context_manager = ContextManager()
 
 # Grace period: how long a completed conversation stays open for corrections
 GRACE_PERIOD_MINUTES = 2
+
+# ── LLM Mode constants ──────────────────────────────────────────────────
+
+# Words that count as order confirmation in any supported language/dialect
+_LLM_CONFIRM_WORDS: frozenset = frozenset({
+    "oui", "yes", "ey", "behi", "ayh", "ok", "okay", "confirme",
+    "confirmer", "confirm", "valide", "valider", "d'accord",
+    "na3am", "yezzi", "go", "c'est bon", "cest bon", "parfait",
+})
+
+# Entity fields the LLM is NEVER trusted to resolve — must go via tiktak_service
+_LLM_BLOCKED_FIELDS: frozenset = frozenset({"product_id", "variation_id"})
+
+
+def _normalize(s: str) -> str:
+    """Normalize string for fuzzy comparison: lower, strip accents."""
+    if not s:
+        return ''
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', s.lower().strip())
+        if unicodedata.category(c) != 'Mn'
+    )
+
+
+def _check_stock_and_resolve(
+    products: list,
+    product_name: str,
+    color: str,
+    size: str,
+) -> tuple:
+    """
+    Resolve product + variation from catalog AND verify stock availability.
+
+    Strategy:
+      1. Exact name match
+      2. Exact color + size match within variations
+      3. Fallback: color-only match (size optional)
+      4. Fallback: fuzzy product match via tiktak_service.find_product()
+
+    Returns:
+        (product_dict, variation_dict, error_code)
+        error_code: None | 'rupture_de_stock' | 'variation_introuvable' | 'produit_introuvable'
+    """
+    product_norm = _normalize(product_name)
+    color_norm   = _normalize(color)
+    size_norm    = _normalize(size)
+
+    for p in products:
+        if _normalize(p['name']) != product_norm:
+            continue
+
+        # ─ Exact color + size match ─────────────────────────────────
+        best = None
+        for v in p.get('variations', []):
+            c_ok = not color_norm or _normalize(v.get('color', '')) == color_norm
+            s_ok = not size_norm  or _normalize(v.get('size',  '')) == size_norm
+            if c_ok and s_ok:
+                best = v
+                break
+
+        # ─ Fallback: color-only (size may not have been specified) ──────────
+        if best is None and color_norm:
+            for v in p.get('variations', []):
+                if _normalize(v.get('color', '')) == color_norm:
+                    best = v
+                    break
+
+        # ─ Fallback: first available variation ───────────────────────────
+        if best is None:
+            avail = [v for v in p.get('variations', []) if v.get('stock_quantity', 0) > 0]
+            if avail:
+                best = avail[0]
+
+        if best is None:
+            return p, None, 'variation_introuvable'
+
+        if best.get('stock_quantity', 0) <= 0:
+            return p, best, 'rupture_de_stock'
+
+        return p, best, None  # OK
+
+    # Not found by exact name — try fuzzy match
+    try:
+        matched, _, _ = tiktak_service.find_product(products, product_name)
+        if matched:
+            return matched, None, 'variation_introuvable'
+    except Exception:
+        pass
+    return None, None, 'produit_introuvable'
 
 
 class MessagePipeline:
@@ -554,9 +644,13 @@ class MessagePipeline:
         Supports image input via the vision service (CLIP embeddings).
         Can also create orders when all entities are collected.
         """
-        # ── 1. Cold Memory: Lead + Conversation ──────────────────────────
+        # ── 1. Cold Memory: Lead + Conversation ────────────────────────────────
+        # Filter by (sender_id, shop_id) for strict multi-tenant isolation.
+        # Two different shops cannot share the same conversation even if the
+        # sender_id were identical (edge case in tests; impossible with Meta IDs).
         conversation = Conversation.objects.filter(
             sender_id=user_id,
+            shop_id=shop_id,
             state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "LLM_ACTIVE", "LLM_CONFIRMING"]
         ).first()
 
@@ -573,8 +667,9 @@ class MessagePipeline:
         current_context = conversation.context_data or {}
         _start_time = time.time()
 
-        # ── 2. Hot Memory: conversation history from Redis ───────────────
-        conversation_history = context_manager.get_recent_context(user_id, n=8)
+        # ── 2. Hot Memory: conversation history from Redis ───────────────────
+        # shop_id passed for tenant-scoped Redis key: chat_context:{shop_id}:{user_id}
+        conversation_history = context_manager.get_recent_context(user_id, n=8, shop_id=shop_id)
 
         # ── 2b. Vision: identify product from image ──────────────────────
         matched_image_url = None
@@ -658,63 +753,10 @@ class MessagePipeline:
 
         def _check_stock(products, product_name, color, size):
             """
-            Resolve product + variation from catalog AND verify stock.
-
-            Returns:
-                (product_dict, variation_dict, error_code)
-                error_code: None | 'rupture_de_stock' | 'variation_introuvable' | 'produit_introuvable'
+            Wrapper around module-level _check_stock_and_resolve().
+            Kept as local alias for readability within this method.
             """
-            import unicodedata
-            def _norm(s):
-                if not s:
-                    return ''
-                return ''.join(
-                    c for c in unicodedata.normalize('NFD', s.lower().strip())
-                    if unicodedata.category(c) != 'Mn'
-                )
-
-            product_norm = _norm(product_name)
-            for p in products:
-                if _norm(p['name']) != product_norm:
-                    continue
-
-                # Product matched — find best variation
-                color_norm = _norm(color)
-                size_norm  = _norm(size)
-                best_variation = None
-
-                # Exact color + size match
-                for v in p.get('variations', []):
-                    c_match = not color_norm or _norm(v.get('color', '')) == color_norm
-                    s_match = not size_norm  or _norm(v.get('size',  '')) == size_norm
-                    if c_match and s_match:
-                        best_variation = v
-                        break
-
-                # Fallback: color match only (size may not have been specified)
-                if best_variation is None:
-                    for v in p.get('variations', []):
-                        c_match = not color_norm or _norm(v.get('color', '')) == color_norm
-                        if c_match:
-                            best_variation = v
-                            break
-
-                if best_variation is None:
-                    return p, None, 'variation_introuvable'
-
-                if best_variation.get('stock_quantity', 0) <= 0:
-                    return p, best_variation, 'rupture_de_stock'
-
-                return p, best_variation, None  # OK
-
-            # Product not found by exact name — try fuzzy match
-            try:
-                matched, _, _ = tiktak_service.find_product(products, product_name)
-                if matched:
-                    return matched, None, 'variation_introuvable'
-            except Exception:
-                pass
-            return None, None, 'produit_introuvable'
+            return _check_stock_and_resolve(products, product_name, color, size)
 
 
         if state_before == "LLM_CONFIRMING":
@@ -799,8 +841,8 @@ class MessagePipeline:
         Message.objects.create(
             conversation=conversation, sender="BOT", text=bot_text
         )
-        context_manager.add_message(user_id, role="user", text=text, intent=detected_intent)
-        context_manager.add_message(user_id, role="bot", text=bot_text)
+        context_manager.add_message(user_id, role="user", text=text, intent=detected_intent, shop_id=shop_id)
+        context_manager.add_message(user_id, role="bot", text=bot_text, shop_id=shop_id)
 
         user_message.conversation_state_after = new_state
         user_message.save(update_fields=["conversation_state_after"])
