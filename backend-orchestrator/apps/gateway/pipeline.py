@@ -22,7 +22,8 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company
+import time
+from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company, PipelineLog
 from .context_manager import ContextManager
 from .response_templates import FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
@@ -570,6 +571,7 @@ class MessagePipeline:
 
         state_before = conversation.state
         current_context = conversation.context_data or {}
+        _start_time = time.time()
 
         # ── 2. Hot Memory: conversation history from Redis ───────────────
         conversation_history = context_manager.get_recent_context(user_id, n=8)
@@ -614,6 +616,7 @@ class MessagePipeline:
         llm_result = generate_llm_response(
             text=text,
             company=company,
+            shop_id=shop_id,
             conversation_history=conversation_history,
             current_context=current_context,
         )
@@ -653,49 +656,127 @@ class MessagePipeline:
             "na3am", "yezzi", "go", "c'est bon", "cest bon", "parfait",
         }
 
-        def _resolve_product(prod_name):
-            """Resolve product name to catalog dict using normalized matching."""
+        def _check_stock(products, product_name, color, size):
+            """
+            Resolve product + variation from catalog AND verify stock.
+
+            Returns:
+                (product_dict, variation_dict, error_code)
+                error_code: None | 'rupture_de_stock' | 'variation_introuvable' | 'produit_introuvable'
+            """
             import unicodedata
             def _norm(s):
-                s = s.lower().strip()
+                if not s:
+                    return ''
                 return ''.join(
-                    c for c in unicodedata.normalize('NFD', s)
+                    c for c in unicodedata.normalize('NFD', s.lower().strip())
                     if unicodedata.category(c) != 'Mn'
                 )
+
+            product_norm = _norm(product_name)
+            for p in products:
+                if _norm(p['name']) != product_norm:
+                    continue
+
+                # Product matched — find best variation
+                color_norm = _norm(color)
+                size_norm  = _norm(size)
+                best_variation = None
+
+                # Exact color + size match
+                for v in p.get('variations', []):
+                    c_match = not color_norm or _norm(v.get('color', '')) == color_norm
+                    s_match = not size_norm  or _norm(v.get('size',  '')) == size_norm
+                    if c_match and s_match:
+                        best_variation = v
+                        break
+
+                # Fallback: color match only (size may not have been specified)
+                if best_variation is None:
+                    for v in p.get('variations', []):
+                        c_match = not color_norm or _norm(v.get('color', '')) == color_norm
+                        if c_match:
+                            best_variation = v
+                            break
+
+                if best_variation is None:
+                    return p, None, 'variation_introuvable'
+
+                if best_variation.get('stock_quantity', 0) <= 0:
+                    return p, best_variation, 'rupture_de_stock'
+
+                return p, best_variation, None  # OK
+
+            # Product not found by exact name — try fuzzy match
             try:
-                products = tiktak_service.get_products(shop_id)
-                norm_name = _norm(prod_name)
-                for p in products:
-                    if _norm(p["name"]) == norm_name:
-                        return p
-                matched, _, _ = tiktak_service.find_product(products, prod_name)
-                return matched
-            except Exception as e:
-                logger.error(f"[LLM PIPELINE] Product lookup error: {e}")
-                return None
+                matched, _, _ = tiktak_service.find_product(products, product_name)
+                if matched:
+                    return matched, None, 'variation_introuvable'
+            except Exception:
+                pass
+            return None, None, 'produit_introuvable'
+
 
         if state_before == "LLM_CONFIRMING":
             user_text_normalized = text.lower().strip().rstrip("!.,؟?")
             is_confirmation = user_text_normalized in _CONFIRM_WORDS
 
             if is_confirmation:
-                # ── Phase B: Create the order ─────────────────────────────
-                matched_product = _resolve_product(current_context.get("product", ""))
-                if matched_product:
-                    logger.info(f"[LLM PIPELINE] Product resolved: '{matched_product['name']}' id={matched_product['id']}")
+                # ── Phase B: Stock check → then create order ──────────────
                 try:
-                    lead.create_pending_order(
-                        shop_id=shop_id,
-                        product_id=matched_product["id"] if matched_product else None,
-                        variation_id=None,
-                        color=current_context.get("color", ""),
-                        size=current_context.get("size", ""),
-                        address=current_context.get("address", ""),
-                        phone_number=current_context.get("phone_number", ""),
-                        quantity=int(current_context.get("quantity", 1)),
+                    products_for_check = tiktak_service.get_products(shop_id)  # from Redis cache
+                    matched_product, matched_variation, stock_error = _check_stock(
+                        products_for_check,
+                        current_context.get("product", ""),
+                        current_context.get("color", ""),
+                        current_context.get("size", ""),
                     )
-                    new_state = "COMPLETED"
-                    logger.info(f"[LLM PIPELINE] Order confirmed and created — lead={lead.id}")
+
+                    if stock_error == "rupture_de_stock":
+                        # Stock = 0 → refuse order, prompt client to pick another option
+                        v_info = ""
+                        if matched_variation:
+                            c = matched_variation.get("color", "")
+                            s = matched_variation.get("size", "")
+                            v_info = f" ({c} {s})".strip()
+                        user_lang = detect_language(text)
+                        if user_lang == "ar":
+                            bot_text = f"عذراً، هذا المنتج{v_info} غير متوفر حالياً. هل تريد اختيار لون أو مقاس آخر؟"
+                        else:
+                            bot_text = f"Désolé, ce produit{v_info} est en rupture de stock. Souhaitez-vous choisir une autre couleur ou taille disponible ?"
+                        new_state = "LLM_ACTIVE"
+                        current_context.pop("size", None)
+                        current_context.pop("color", None)
+                        logger.info(
+                            f"[LLM PIPELINE] Stock check failed (rupture) "
+                            f"product='{current_context.get('product')}' variation={matched_variation}"
+                        )
+
+                    else:
+                        # Stock OK (or variation not found — agent will verify)
+                        if stock_error:
+                            logger.warning(
+                                f"[LLM PIPELINE] Stock check warning: {stock_error} "
+                                f"product='{current_context.get('product')}'"
+                            )
+                        if matched_product:
+                            logger.info(
+                                f"[LLM PIPELINE] Product resolved: '{matched_product['name']}' "
+                                f"id={matched_product['id']} variation={matched_variation}"
+                            )
+                        lead.create_pending_order(
+                            shop_id=shop_id,
+                            product_id=matched_product["id"] if matched_product else None,
+                            variation_id=matched_variation["id"] if matched_variation else None,
+                            color=current_context.get("color", ""),
+                            size=current_context.get("size", ""),
+                            address=current_context.get("address", ""),
+                            phone_number=current_context.get("phone_number", ""),
+                            quantity=int(current_context.get("quantity", 1)),
+                        )
+                        new_state = "COMPLETED"
+                        logger.info(f"[LLM PIPELINE] Order confirmed and created — lead={lead.id}")
+
                 except Exception as e:
                     logger.error(f"[LLM PIPELINE] Order creation error: {e}")
                     new_state = "LLM_CONFIRMING"  # Retry on next message
@@ -708,7 +789,6 @@ class MessagePipeline:
             # ── Phase A: All entities collected → enter confirmation ──────
             new_state = "LLM_CONFIRMING"
             logger.info("[LLM PIPELINE] All entities collected — entering LLM_CONFIRMING phase")
-
 
         # ── 7. Persist conversation state ────────────────────────────────
         conversation.state = new_state
@@ -724,6 +804,28 @@ class MessagePipeline:
 
         user_message.conversation_state_after = new_state
         user_message.save(update_fields=["conversation_state_after"])
+
+        # ── 9. PipelineLog ────────────────────────────────────────────────
+        _duration = int((time.time() - _start_time) * 1000)
+        try:
+            PipelineLog.objects.create(
+                shop_id       = shop_id,
+                sender_id     = user_id,
+                mode          = 'llm',
+                user_text     = text,
+                bot_text      = bot_text,
+                detected_intent = detected_intent,
+                has_image     = bool(image_url),
+                state_before  = state_before,
+                state_after   = new_state,
+                order_created = (new_state == 'COMPLETED'),
+                has_error     = llm_result.get('error', False),
+                error_type    = llm_result.get('error_type', 'none') if llm_result.get('error') else 'none',
+                error_detail  = str(llm_result.get('error_detail', '')),
+                duration_ms   = _duration,
+            )
+        except Exception as log_err:
+            logger.warning(f"[PIPELINE] Failed to write PipelineLog: {log_err}")
 
         return {
             "text": bot_text,
