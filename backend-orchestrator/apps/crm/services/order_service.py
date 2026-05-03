@@ -13,9 +13,11 @@ logger = logging.getLogger(__name__)
 
 def create_pending_order(lead, shop_id: str, product_id: str, variation_id: str,
                          color: str, size: str, address: str, phone_number: str,
-                         quantity: int = 1):
+                         quantity: int = 1, extra_data: dict = None):
     """
     Attach a pre-order to a lead and advance it to QUALIFIED status.
+    extra_data stores domain-specific entities not covered by standard fields
+    (e.g. dish/nb_persons for restaurants, reason/patient_name for medical).
     Returns the updated lead instance.
     """
     from apps.crm.models import Lead
@@ -28,6 +30,7 @@ def create_pending_order(lead, shop_id: str, product_id: str, variation_id: str,
     lead.quantity     = quantity
     lead.address      = address
     lead.phone_number = phone_number
+    lead.extra_data   = extra_data or {}
 
     lead.has_pending_order          = True
     lead.agent_confirmation_pending = True
@@ -39,5 +42,5 @@ def create_pending_order(lead, shop_id: str, product_id: str, variation_id: str,
     lead.pending_order_created_at = timezone.now()
     lead.save()
 
-    logger.info(f"[ORDER] Pre-order created — lead={lead.id} ref={lead.pending_order_reference}")
+    logger.info(f"[ORDER] Pre-order created — lead={lead.id} ref={lead.pending_order_reference} extra_keys={list((extra_data or {}).keys())}")
     return lead

@@ -53,6 +53,12 @@ _LLM_CONFIRM_WORDS: frozenset = frozenset({
 # Entity fields the LLM is NEVER trusted to resolve — must go via tiktak_service
 _LLM_BLOCKED_FIELDS: frozenset = frozenset({"product_id", "variation_id"})
 
+# Standard fields that map directly to Lead model columns.
+# Everything else in current_context goes to lead.extra_data.
+_STANDARD_LEAD_FIELDS: frozenset = frozenset({
+    "product", "color", "size", "address", "phone_number", "quantity",
+})
+
 
 def _normalize(s: str) -> str:
     """Normalize string for fuzzy comparison: lower, strip accents."""
@@ -806,6 +812,13 @@ class MessagePipeline:
                                 f"[LLM PIPELINE] Product resolved: '{matched_product['name']}' "
                                 f"id={matched_product['id']} variation={matched_variation}"
                             )
+                        # Build extra_data: all context entities outside standard Lead fields
+                        extra_data = {
+                            k: v for k, v in current_context.items()
+                            if k not in _STANDARD_LEAD_FIELDS
+                            and not k.startswith('_')
+                            and v
+                        }
                         lead.create_pending_order(
                             shop_id=shop_id,
                             product_id=matched_product["id"] if matched_product else None,
@@ -815,6 +828,7 @@ class MessagePipeline:
                             address=current_context.get("address", ""),
                             phone_number=current_context.get("phone_number", ""),
                             quantity=int(current_context.get("quantity", 1)),
+                            extra_data=extra_data,
                         )
                         new_state = "COMPLETED"
                         logger.info(f"[LLM PIPELINE] Order confirmed and created — lead={lead.id}")

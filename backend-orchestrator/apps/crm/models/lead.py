@@ -29,6 +29,14 @@ class Lead(models.Model):
     address      = models.TextField(blank=True, null=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
 
+    # Domain-specific entities that don't fit the standard fields above.
+    # Populated by the LLM pipeline for non-e-commerce domains.
+    # Examples:
+    #   Restaurant  → {"dish": "Pizza", "nb_persons": 4, "reservation_date": "vendredi 19h"}
+    #   Medical     → {"reason": "Consultation", "patient_name": "Ali", "preferred_date": "lundi"}
+    #   Electronics → {"storage": "128GB"}   (extra beyond product/color)
+    extra_data   = models.JSONField(default=dict, blank=True, null=True)
+
     lead_status = models.CharField(max_length=20, choices=LEAD_STATUS_CHOICES, default=LEAD_STATUS_ENGAGED, db_index=True)
 
     has_pending_order          = models.BooleanField(default=False)
@@ -45,11 +53,22 @@ class Lead(models.Model):
     def __str__(self):
         return f"{self.name or 'Unknown'} ({self.platform_id})"
 
-    def create_pending_order(self, shop_id, product_id, variation_id, color, size, address, phone_number, quantity=1):
-        self.shop_id = shop_id; self.product_id = product_id; self.variation_id = variation_id
-        self.color = color; self.size = size; self.quantity = quantity
-        self.address = address; self.phone_number = phone_number
-        self.has_pending_order = True; self.agent_confirmation_pending = True
+    def create_pending_order(
+        self, shop_id, product_id, variation_id,
+        color, size, address, phone_number,
+        quantity=1, extra_data=None,
+    ):
+        self.shop_id      = shop_id
+        self.product_id   = product_id
+        self.variation_id = variation_id
+        self.color        = color
+        self.size         = size
+        self.quantity     = quantity
+        self.address      = address
+        self.phone_number = phone_number
+        self.extra_data   = extra_data or {}
+        self.has_pending_order          = True
+        self.agent_confirmation_pending = True
         self.lead_status = Lead.LEAD_STATUS_QUALIFIED
         if not self.pending_order_reference:
             self.pending_order_reference = f"PRE-{int(time.time() * 1000)}"
