@@ -332,12 +332,15 @@ def generate_llm_response(
             logger.warning(f"[LLM] Could not load catalog for shop={effective_shop}: {cat_err}")
 
     # ── Build collected entities string (shown explicitly in prompt) ──────
-    ORDER_FIELDS = {"product", "color", "size", "address", "phone_number", "quantity"}
+    # Dynamic: ALL entities from context are shown, regardless of their key.
+    # This supports any domain: e-commerce (product/size/color), restaurant
+    # (dish/nb_persons/reservation_date), medical (reason/patient_name), etc.
+    # Only internal keys (starting with '_') are excluded.
     collected = {}
     if current_context:
         collected = {
             k: v for k, v in current_context.items()
-            if not k.startswith('_') and k in ORDER_FIELDS and v
+            if not k.startswith('_') and v
         }
 
     if collected:
@@ -404,12 +407,13 @@ def generate_llm_response(
         )
         result["extracted_entities"].update(safety_entities)
 
-        # ── Safety check: verify order_ready conditions server-side ──────
-        # Merge context + new entities to check if mandatory fields are present
+        # ── Safety check: force order_ready for standard e-commerce only ──
+        # For other domains (restaurant, medical, etc.) Gemini decides via
+        # llm_context. We only intervene for classic e-commerce fields.
         merged = {**collected, **result["extracted_entities"]}
-        mandatory_present = all(merged.get(f) for f in ("product", "address", "phone_number"))
-        if mandatory_present and not result["order_ready"]:
-            logger.info(f"[LLM] Forcing order_ready=True — all mandatory entities present: {merged}")
+        ecommerce_complete = all(merged.get(f) for f in ("product", "address", "phone_number"))
+        if ecommerce_complete and not result["order_ready"]:
+            logger.info(f"[LLM] Forcing order_ready=True (e-commerce) — keys: {list(merged.keys())}")
             result["order_ready"] = True
 
         # ── Log token usage (tracks Gemini implicit caching savings) ─────
