@@ -319,7 +319,10 @@ def generate_llm_response(
         return result
 
     # ── Build live catalog section (from Redis cache — no extra HTTP call) ─
-    catalog_section = "Catalogue non disponible."
+    # For service businesses (consulting, medical, legal...) with no product
+    # catalog, we inject a neutral message so Gemini knows it's a service
+    # company and won't try to reference products.
+    catalog_section = "Activité sans catalogue produit — référez-vous uniquement au CONTEXTE DU GÉRANT."
     effective_shop = shop_id or getattr(company, 'shop_id', None)
     if effective_shop:
         try:
@@ -328,6 +331,8 @@ def generate_llm_response(
             if products:
                 catalog_section = _format_catalog_for_prompt(products)
                 logger.debug(f"[LLM] Catalog injected: {len(products)} products for shop={effective_shop}")
+            else:
+                logger.debug(f"[LLM] No catalog for shop={effective_shop} — service-only business")
         except Exception as cat_err:
             logger.warning(f"[LLM] Could not load catalog for shop={effective_shop}: {cat_err}")
 
