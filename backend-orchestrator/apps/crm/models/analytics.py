@@ -98,6 +98,11 @@ class PipelineLog(models.Model):
     # ── Performance ────────────────────────────────────────────────────────
     duration_ms     = models.IntegerField(null=True, blank=True)
 
+    # ── Full logger trace ──────────────────────────────────────────────────
+    # Captures every logger.info/warning/error emitted during this pipeline run.
+    log_messages    = models.TextField(blank=True, default='',
+                                       help_text='Trace complète des logs (INFO/WARNING/ERROR) émis pendant ce run.')
+
     created_at      = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:

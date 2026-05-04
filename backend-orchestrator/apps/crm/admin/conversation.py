@@ -45,13 +45,13 @@ class ConversationAdmin(admin.ModelAdmin):
     list_display   = ('sender_id', 'lead', 'shop_id', 'state', 'handoff_badge', 'human_agent', 'updated_at')
     list_filter    = ('state', 'shop_id', 'is_human_controlled')
     search_fields  = ('sender_id', 'lead__platform_id', 'lead__name', 'lead_uuid')
-    readonly_fields = ('lead_uuid', 'sender_id', 'created_at', 'updated_at', 'pretty_context', 'pretty_missing', 'human_takeover_at')
+    readonly_fields = ('sender_id', 'created_at', 'updated_at', 'pretty_context', 'pretty_missing', 'human_takeover_at')
     inlines        = [MessageInline]
     date_hierarchy = 'created_at'
     ordering       = ('-updated_at',)
 
     fieldsets = (
-        ('Identification', {'fields': ('sender_id', 'lead', 'lead_uuid', 'shop_id', 'state')}),
+        ('Identification', {'fields': ('sender_id', 'lead', 'shop_id', 'state')}),
         ('Human Handoff', {'fields': ('is_human_controlled', 'human_agent', 'human_takeover_at'), 'description': 'Gerer manuellement le handoff pour cette conversation.'}),
         ('Contexte & État', {'fields': ('pretty_context', 'pretty_missing')}),
         ('Système', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),

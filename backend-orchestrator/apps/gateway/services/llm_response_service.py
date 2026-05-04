@@ -242,10 +242,11 @@ Si l'activité ne correspond à aucun exemple ci-dessus → invente les clés le
 logiques et explicites en accord avec le CONTEXTE DU GÉRANT.
 
 RÈGLES ABSOLUES :
-  1. N'inclus dans extracted_entities QUE les nouvelles infos du message ACTUEL.
-  2. Si une information figure dans "INFORMATIONS DÉJÀ RECUEILLIES" →
+  1. EXTRACTION IMMÉDIATE DU PRODUIT : Dès que le client nomme, demande le prix, ou s'intéresse à un article du catalogue, tu DOIS extraire la clé "product", même s'il ne confirme pas encore l'achat.
+  2. N'inclus dans extracted_entities QUE les nouvelles infos du message ACTUEL.
+  3. Si une information figure dans "INFORMATIONS DÉJÀ RECUEILLIES" →
      ne la redemande JAMAIS et ne l'inclus PAS dans extracted_entities.
-  3. Ne mets JAMAIS d'IDs techniques (product_id, variation_id) — uniquement
+  4. Ne mets JAMAIS d'IDs techniques (product_id, variation_id) — uniquement
      des valeurs lisibles (noms, dates, numéros).
 
 ╔══════════════════════════════════════════════════════════════════════╗

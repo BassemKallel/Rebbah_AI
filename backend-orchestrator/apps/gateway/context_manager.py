@@ -115,3 +115,29 @@ class ContextManager:
     def clear_context(self, user_id: str, shop_id: str = None) -> None:
         """Clear context when conversation is completed."""
         self.redis_client.delete(self._get_key(user_id, shop_id))
+
+    def preload_context(self, user_id: str, known_entities: dict, shop_id: str = None) -> None:
+        """
+        Pre-load Redis context with known client info for returning customers.
+
+        Inserts a synthetic 'system' message so Gemini sees previously collected
+        data (name, phone_number, etc.) without re-asking the client.
+
+        Args:
+            user_id:         Platform user ID
+            known_entities:  Dict of known info, e.g. {"name": "Ali", "phone_number": "55001122"}
+            shop_id:         Shop identifier for multi-tenant isolation
+        """
+        if not known_entities:
+            return
+
+        summary_parts = [f"{k}: {v}" for k, v in known_entities.items()]
+        summary_text = f"[Client connu] {', '.join(summary_parts)}"
+
+        context = [{
+            "role": "bot",
+            "text": summary_text,
+        }]
+
+        key = self._get_key(user_id, shop_id)
+        self.redis_client.setex(key, self.ttl, json.dumps(context, ensure_ascii=False))

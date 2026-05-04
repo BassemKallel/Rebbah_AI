@@ -116,15 +116,15 @@ class PipelineLogAdmin(admin.ModelAdmin):
     list_display  = (
         'created_at', 'mode_badge', 'shop_id', 'sender_id_short',
         'user_text_preview', 'detected_intent', 'state_transition',
-        'status_badge', 'error_type', 'duration_badge', 'order_created',
+        'status_badge', 'error_type', 'duration_badge', 'order_created', 'log_count',
     )
     list_filter   = ('mode', 'has_error', 'error_type', 'order_created', 'created_at')
-    search_fields = ('shop_id', 'sender_id', 'user_text', 'bot_text', 'detected_intent')
+    search_fields = ('shop_id', 'sender_id', 'user_text', 'bot_text', 'detected_intent', 'log_messages')
     readonly_fields = (
         'shop_id', 'sender_id', 'mode', 'user_text', 'bot_text',
         'detected_intent', 'has_image', 'state_before', 'state_after',
         'order_created', 'has_error', 'error_type', 'error_detail',
-        'duration_ms', 'created_at',
+        'duration_ms', 'created_at', 'pretty_logs',
     )
     date_hierarchy = 'created_at'
     ordering       = ('-created_at',)
@@ -149,6 +149,9 @@ class PipelineLogAdmin(admin.ModelAdmin):
         }),
         ('Performance', {
             'fields': ('duration_ms',),
+        }),
+        ('Trace Complète des Logs', {
+            'fields': ('pretty_logs',),
         }),
     )
 
@@ -195,3 +198,37 @@ class PipelineLogAdmin(admin.ModelAdmin):
             color, obj.duration_ms,
         )
     duration_badge.short_description = 'Durée'
+
+    def log_count(self, obj):
+        if not obj.log_messages:
+            return '—'
+        count = obj.log_messages.count('\n') + 1
+        has_err = '[ERROR]' in obj.log_messages or '[WARNING]' in obj.log_messages
+        color = '#e74c3c' if '[ERROR]' in obj.log_messages else ('#e67e22' if '[WARNING]' in obj.log_messages else '#27ae60')
+        return format_html(
+            '<span style="color:{};font-weight:bold">{} lignes</span>',
+            color, count,
+        )
+    log_count.short_description = 'Logs'
+
+    def pretty_logs(self, obj):
+        if not obj.log_messages:
+            return format_html('<em style="color:#888">Aucun log capturé</em>')
+        lines = obj.log_messages.split('\n')
+        colored = []
+        for line in lines:
+            if '[ERROR]' in line:
+                colored.append(f'<span style="color:#e74c3c;font-weight:bold">{line}</span>')
+            elif '[WARNING]' in line:
+                colored.append(f'<span style="color:#e67e22">{line}</span>')
+            elif '[INFO]' in line:
+                colored.append(f'<span style="color:#27ae60">{line}</span>')
+            else:
+                colored.append(line)
+        html_content = '<br>'.join(colored)
+        return format_html(
+            '<div style="background:var(--darkened-bg);padding:12px;border-radius:6px;'
+            'font-family:monospace;font-size:12px;line-height:1.6;max-height:500px;overflow-y:auto">{}</div>',
+            format_html(html_content),
+        )
+    pretty_logs.short_description = 'Trace Logs'

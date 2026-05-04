@@ -650,6 +650,17 @@ class MessagePipeline:
         Supports image input via the vision service (CLIP embeddings).
         Can also create orders when all entities are collected.
         """
+        # ── Log collector: captures every logger call during this run ─────
+        import logging as _logging
+        _log_buffer = []
+
+        class _ListHandler(_logging.Handler):
+            def emit(self, record):
+                _log_buffer.append(f"[{record.levelname}] {self.format(record)}")
+
+        _handler = _ListHandler()
+        _handler.setFormatter(_logging.Formatter('%(message)s'))
+        logger.addHandler(_handler)
         # ── 1. Cold Memory: Lead + Conversation ────────────────────────────────
         # Filter by (sender_id, shop_id) for strict multi-tenant isolation.
         # Two different shops cannot share the same conversation even if the
@@ -661,11 +672,44 @@ class MessagePipeline:
         ).first()
 
         if not conversation:
-            lead = Lead.objects.create(platform_id=user_id)
-            conversation = Conversation.objects.create(
-                lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
-                shop_id=shop_id, state="LLM_ACTIVE"
-            )
+            # ── Option B: Returning client detection ─────────────────────
+            # Before creating a brand-new Lead, check if this sender already
+            # has a recently completed conversation (< 30 days). If so, reuse
+            # the existing Lead to keep a unified customer profile in the CRM.
+            REOPEN_WINDOW_DAYS = 30
+            cutoff_date = timezone.now() - timedelta(days=REOPEN_WINDOW_DAYS)
+
+            recent_completed = Conversation.objects.filter(
+                sender_id=user_id,
+                shop_id=shop_id,
+                state="COMPLETED",
+                completed_at__gte=cutoff_date,
+            ).order_by('-completed_at').first()
+
+            if recent_completed and recent_completed.lead:
+                # Returning client — new conversation linked to existing Lead
+                lead = recent_completed.lead
+                conversation = Conversation.objects.create(
+                    lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
+                    shop_id=shop_id, state="LLM_ACTIVE"
+                )
+                # Pre-load known client info into Redis so Gemini knows them
+                known = {}
+                if lead.name:         known["name"] = lead.name
+                if lead.phone_number: known["phone_number"] = lead.phone_number
+                if known:
+                    context_manager.preload_context(user_id, known, shop_id=shop_id)
+                logger.info(
+                    f"[LLM PIPELINE] Returning client — reopened lead #{lead.id} "
+                    f"(sender={user_id}, shop={shop_id})"
+                )
+            else:
+                # Brand-new client (or inactive > 30 days) — fresh Lead
+                lead = Lead.objects.create(platform_id=user_id)
+                conversation = Conversation.objects.create(
+                    lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
+                    shop_id=shop_id, state="LLM_ACTIVE"
+                )
         else:
             lead = conversation.lead
 
@@ -831,6 +875,7 @@ class MessagePipeline:
                             extra_data=extra_data,
                         )
                         new_state = "COMPLETED"
+                        conversation.completed_at = timezone.now()
                         logger.info(f"[LLM PIPELINE] Order confirmed and created — lead={lead.id}")
 
                 except Exception as e:
@@ -863,6 +908,9 @@ class MessagePipeline:
 
         # ── 9. PipelineLog ────────────────────────────────────────────────
         _duration = int((time.time() - _start_time) * 1000)
+        # Detach the per-request log collector before writing to DB
+        logger.removeHandler(_handler)
+        _collected_logs = '\n'.join(_log_buffer)
         try:
             PipelineLog.objects.create(
                 shop_id       = shop_id,
@@ -879,6 +927,7 @@ class MessagePipeline:
                 error_type    = llm_result.get('error_type', 'none') if llm_result.get('error') else 'none',
                 error_detail  = str(llm_result.get('error_detail', '')),
                 duration_ms   = _duration,
+                log_messages  = _collected_logs,
             )
         except Exception as log_err:
             logger.warning(f"[PIPELINE] Failed to write PipelineLog: {log_err}")
