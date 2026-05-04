@@ -44,7 +44,7 @@ class LeadAdmin(admin.ModelAdmin):
             return format_html('<span style="color:#999">—</span>')
         formatted = json.dumps(data, ensure_ascii=False, indent=2)
         return format_html(
-            '<pre style="background:#f8f8f8;padding:8px;border-radius:4px;'
-            'font-size:12px;max-height:200px;overflow:auto;">{}</pre>',
+            '<pre style="background:var(--darkened-bg, rgba(128,128,128,0.1)); color:var(--body-fg); '
+            'padding:8px; border-radius:4px; font-size:12px; max-height:200px; overflow:auto;">{}</pre>',
             formatted
         )
