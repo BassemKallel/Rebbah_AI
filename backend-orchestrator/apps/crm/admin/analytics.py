@@ -3,7 +3,7 @@ from django.conf import settings as _settings
 from django.contrib import admin, messages as _messages
 from django.utils.html import format_html
 import json
-from ..models import NLUFallbackLog, ProductVector
+from ..models import NLUFallbackLog, ProductVector, PipelineLog
 
 
 def _vision_base():
@@ -109,3 +109,89 @@ class ProductVectorAdmin(admin.ModelAdmin):
         ('Identification', {'fields': ('id', 'shop_id', 'product_id', 'variation_id', 'created_at')}),
         ('Image', {'fields': ('image_preview_large',)}),
     )
+
+
+@admin.register(PipelineLog)
+class PipelineLogAdmin(admin.ModelAdmin):
+    list_display  = (
+        'created_at', 'mode_badge', 'shop_id', 'sender_id_short',
+        'user_text_preview', 'detected_intent', 'state_transition',
+        'status_badge', 'error_type', 'duration_badge', 'order_created',
+    )
+    list_filter   = ('mode', 'has_error', 'error_type', 'order_created', 'created_at')
+    search_fields = ('shop_id', 'sender_id', 'user_text', 'bot_text', 'detected_intent')
+    readonly_fields = (
+        'shop_id', 'sender_id', 'mode', 'user_text', 'bot_text',
+        'detected_intent', 'has_image', 'state_before', 'state_after',
+        'order_created', 'has_error', 'error_type', 'error_detail',
+        'duration_ms', 'created_at',
+    )
+    date_hierarchy = 'created_at'
+    ordering       = ('-created_at',)
+    list_per_page  = 50
+
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+
+    fieldsets = (
+        ('Identification', {
+            'fields': ('created_at', 'shop_id', 'sender_id', 'mode'),
+        }),
+        ('Message', {
+            'fields': ('user_text', 'bot_text', 'detected_intent', 'has_image'),
+        }),
+        ('État Machine', {
+            'fields': ('state_before', 'state_after', 'order_created'),
+        }),
+        ('Erreur', {
+            'fields': ('has_error', 'error_type', 'error_detail'),
+            'classes': ('collapse',),
+        }),
+        ('Performance', {
+            'fields': ('duration_ms',),
+        }),
+    )
+
+    def mode_badge(self, obj):
+        color = '#2980b9' if obj.mode == 'llm' else '#8e44ad'
+        label = obj.get_mode_display()
+        return format_html(
+            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{}</span>',
+            color, label,
+        )
+    mode_badge.short_description = 'Mode'
+
+    def status_badge(self, obj):
+        if obj.has_error:
+            return format_html('<span style="background:#e74c3c;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">❌ Erreur</span>')
+        return format_html('<span style="background:#27ae60;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">✅ OK</span>')
+    status_badge.short_description = 'Statut'
+
+    def user_text_preview(self, obj):
+        t = obj.user_text or ''
+        return (t[:50] + '…') if len(t) > 50 else t
+    user_text_preview.short_description = 'Message client'
+
+    def sender_id_short(self, obj):
+        s = obj.sender_id or ''
+        return s[-12:] if len(s) > 12 else s
+    sender_id_short.short_description = 'Sender'
+
+    def state_transition(self, obj):
+        if obj.state_before or obj.state_after:
+            return format_html(
+                '<small style="color:#666">{} → {}</small>',
+                obj.state_before or '—', obj.state_after or '—',
+            )
+        return '—'
+    state_transition.short_description = 'État'
+
+    def duration_badge(self, obj):
+        if obj.duration_ms is None:
+            return '—'
+        color = '#27ae60' if obj.duration_ms < 1000 else ('#e67e22' if obj.duration_ms < 3000 else '#e74c3c')
+        return format_html(
+            '<span style="color:{};font-weight:bold">{}ms</span>',
+            color, obj.duration_ms,
+        )
+    duration_badge.short_description = 'Durée'

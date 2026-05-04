@@ -51,3 +51,64 @@ class ProductVector(models.Model):
 
     def __str__(self):
         return f"[{self.shop_id}] product={self.product_id} var={self.variation_id}"
+
+
+class PipelineLog(models.Model):
+    """
+    Logs every AI pipeline execution for monitoring and debugging.
+    Captures both NLU and LLM mode runs, their errors, and key metadata.
+    """
+    MODE_CHOICES = [
+        ('nlu', 'NLU (TunBERT)'),
+        ('llm', 'LLM (Gemini Direct)'),
+    ]
+    ERROR_CHOICES = [
+        ('none',        'Aucune erreur'),
+        ('json_parse',  'JSON Parse Error (Gemini)'),
+        ('api_error',   'Gemini API Error'),
+        ('no_api_key',  'Clé API manquante'),
+        ('import_error','Package manquant'),
+        ('vision_error','Vision Service Error'),
+        ('order_error', 'Erreur création commande'),
+        ('timeout',     'Timeout'),
+        ('other',       'Autre'),
+    ]
+
+    # ── Identifiers ────────────────────────────────────────────────────────
+    shop_id         = models.CharField(max_length=100, db_index=True)
+    sender_id       = models.CharField(max_length=255)
+    mode            = models.CharField(max_length=10, choices=MODE_CHOICES, default='nlu')
+
+    # ── Message content ────────────────────────────────────────────────────
+    user_text       = models.TextField()
+    bot_text        = models.TextField(blank=True, default='')
+    detected_intent = models.CharField(max_length=50, blank=True, default='')
+    has_image       = models.BooleanField(default=False)
+
+    # ── State machine ──────────────────────────────────────────────────────
+    state_before    = models.CharField(max_length=50, blank=True, default='')
+    state_after     = models.CharField(max_length=50, blank=True, default='')
+    order_created   = models.BooleanField(default=False)
+
+    # ── Error tracking ─────────────────────────────────────────────────────
+    has_error       = models.BooleanField(default=False, db_index=True)
+    error_type      = models.CharField(max_length=20, choices=ERROR_CHOICES, default='none')
+    error_detail    = models.TextField(blank=True, default='')
+
+    # ── Performance ────────────────────────────────────────────────────────
+    duration_ms     = models.IntegerField(null=True, blank=True)
+
+    created_at      = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Pipeline Log'
+        verbose_name_plural = 'Pipeline Logs'
+        indexes = [
+            models.Index(fields=['shop_id', '-created_at']),
+            models.Index(fields=['has_error', '-created_at']),
+        ]
+
+    def __str__(self):
+        status = '❌' if self.has_error else '✅'
+        return f"{status} [{self.mode.upper()}] {self.shop_id} | {self.detected_intent} | '{self.user_text[:40]}'"

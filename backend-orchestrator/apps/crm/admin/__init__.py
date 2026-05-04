@@ -8,10 +8,10 @@ from .company import CompanyAdmin, UserProfileAdmin
 from .lead import LeadAdmin
 from .conversation import ConversationAdmin, MessageAdmin
 from .template import ResponseTemplateAdmin
-from .analytics import NLUFallbackLogAdmin, ProductVectorAdmin
+from .analytics import NLUFallbackLogAdmin, ProductVectorAdmin, PipelineLogAdmin
 
 __all__ = [
     'BotConfigurationAdmin', 'CompanyAdmin', 'UserProfileAdmin',
     'LeadAdmin', 'ConversationAdmin', 'MessageAdmin',
-    'ResponseTemplateAdmin', 'NLUFallbackLogAdmin', 'ProductVectorAdmin',
+    'ResponseTemplateAdmin', 'NLUFallbackLogAdmin', 'ProductVectorAdmin', 'PipelineLogAdmin',
 ]
