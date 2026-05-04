@@ -102,29 +102,52 @@ def _format_catalog_for_prompt(products: list) -> str:
     """
     Format the product catalog as compact text for the LLM system prompt.
 
-    Only includes products with at least one variation in stock.
-    Format is kept minimal (~5 tokens per product) to avoid token bloat.
-    The data comes from Redis cache (tiktak_service.get_products) — no extra HTTP calls.
+    Supports two product structures from tiktak_service.get_products():
+      1. Simple products (no variations): declinaisons=[] or variations=[]
+         Uses product-level stock and price.
+         Output: "- Jeu Ken T7ebni | 59 TND"
+      2. Products with variations: declinaisons=[...] or variations=[...]
+         Groups in-stock variations by color/size.
+         Output: "- Pull Polo | 42 TND | Marron(S/M/L)"
 
-    Example output:
-        - Pull Polo | 42 TND | Marron(S/M/L), Bleu Canard(S/M/L/XL/XXL)
-        - T-Shirt Basic | 29 TND | Blanc(S/M/L/XL), Noir(S/M/L)
+    Supports both TikTak API fields (price, declinaisons) and
+    internal format fields (base_price, variations).
     """
     lines = []
     for p in products:
-        # Keep only variations with stock > 0
+        if not p.get("active", True):
+            continue
+
+        # Support declinaisons (TikTak API) and variations (internal format)
+        raw_variations = p.get("declinaisons") or p.get("variations") or []
+
+        # Resolve price: TikTak API uses 'price', internal uses 'base_price'
+        try:
+            price = int(float(p.get("price") or p.get("base_price") or 0))
+        except (ValueError, TypeError):
+            price = p.get("price") or p.get("base_price") or "?"
+
+        # Case 1: Simple product without variations
+        if not raw_variations:
+            product_stock = p.get("stock") or p.get("total_stock") or 0
+            if product_stock <= 0 and not p.get("order_without_stock", False):
+                continue
+            lines.append(f"- {p['name']} | {price} TND")
+            continue
+
+        # Case 2: Product with variations
         available = [
-            v for v in p.get("variations", [])
-            if v.get("stock_quantity", 0) > 0
+            v for v in raw_variations
+            if (v.get("stock_quantity") or v.get("stock") or 0) > 0
+            or v.get("order_without_stock", False)
         ]
         if not available:
-            continue  # Entirely out of stock → skip
+            continue
 
-        # Group sizes by color
         colors: dict[str, list[str]] = {}
         for v in available:
-            color = v.get("color") or "Standard"
-            size  = v.get("size") or ""
+            color = v.get("color") or v.get("couleur") or "Standard"
+            size  = v.get("size") or v.get("taille") or ""
             if color not in colors:
                 colors[color] = []
             if size:
@@ -136,11 +159,6 @@ def _format_catalog_for_prompt(products: list) -> str:
                 color_parts.append(f"{color}({'/'.join(sizes)})")
             else:
                 color_parts.append(color)
-
-        try:
-            price = int(float(p.get("base_price", 0)))
-        except (ValueError, TypeError):
-            price = p.get("base_price", "?")
 
         lines.append(f"- {p['name']} | {price} TND | {', '.join(color_parts)}")
 
