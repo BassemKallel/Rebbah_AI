@@ -396,7 +396,7 @@ def generate_llm_response(
 
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
+            model="gemini-2.5-flash",
             contents=f"CLIENT: {text}",
             config={
                 "system_instruction": system_prompt,
@@ -438,6 +438,18 @@ def generate_llm_response(
         if ecommerce_complete and not result["order_ready"]:
             logger.info(f"[LLM] Forcing order_ready=True (e-commerce) — keys: {list(merged.keys())}")
             result["order_ready"] = True
+            
+            # Since Gemini didn't realize the order was complete, its original text
+            # likely asks the user for the missing entity. We must replace it with a summary.
+            summary = "\n".join(f"- {k}: {v}" for k, v in merged.items() if not k.startswith("_"))
+            
+            # Simple language detection based on Gemini's original text
+            is_arabic = any('\u0600' <= c <= '\u06FF' for c in result.get("response_text", ""))
+            
+            if is_arabic:
+                result["response_text"] = f"يعيشك، قيدت كل المعطيات. هاو التلخيص متاعك:\n{summary}\n\nنأكدلك الطلبية؟ (نعم/لا)"
+            else:
+                result["response_text"] = f"Parfait, j'ai toutes les informations. Voici le récapitulatif :\n{summary}\n\nEst-ce que je confirme la commande ? (Oui/Non)"
 
         # ── Log token usage (tracks Gemini implicit caching savings) ─────
         try:
