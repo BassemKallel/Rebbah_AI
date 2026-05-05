@@ -659,8 +659,10 @@ class MessagePipeline:
                 _log_buffer.append(f"[{record.levelname}] {self.format(record)}")
 
         _handler = _ListHandler()
-        _handler.setFormatter(_logging.Formatter('%(message)s'))
-        logger.addHandler(_handler)
+        _handler.setFormatter(_logging.Formatter('%(name)s: %(message)s'))
+        _handler.setLevel(_logging.DEBUG)
+        _root_logger = _logging.getLogger()  # Root logger captures ALL modules
+        _root_logger.addHandler(_handler)
         # ── 1. Cold Memory: Lead + Conversation ────────────────────────────────
         # Filter by (sender_id, shop_id) for strict multi-tenant isolation.
         # Two different shops cannot share the same conversation even if the
@@ -831,7 +833,7 @@ class MessagePipeline:
             context_manager.add_message(user_id, role="bot", text=bot_text, shop_id=shop_id)
 
             # Write PipelineLog for error monitoring
-            logger.removeHandler(_handler)
+            _root_logger.removeHandler(_handler)
             _duration = int((time.time() - _start_time) * 1000)
             try:
                 PipelineLog.objects.create(
@@ -996,7 +998,7 @@ class MessagePipeline:
         # ── 9. PipelineLog ────────────────────────────────────────────────
         _duration = int((time.time() - _start_time) * 1000)
         # Detach the per-request log collector before writing to DB
-        logger.removeHandler(_handler)
+        _root_logger.removeHandler(_handler)
         _collected_logs = '\n'.join(_log_buffer)
         try:
             PipelineLog.objects.create(
