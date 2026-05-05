@@ -24,7 +24,7 @@ from django.db import transaction
 from django.utils import timezone
 
 import time
-from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company, PipelineLog
+from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company, PipelineLog, PendingMessage
 from .context_manager import ContextManager
 from .response_templates import FALLBACK_PRODUCTS
 from .services import ai_service, tiktak_service, dialog_manager
@@ -769,6 +769,93 @@ class MessagePipeline:
         bot_text = llm_result["response_text"]
         detected_intent = llm_result.get("detected_intent", "LLM_DIRECT")
         extracted_entities = llm_result.get("extracted_entities", {})
+
+        # ── Circuit Breaker: handle Gemini API errors gracefully ──────────
+        if llm_result.get("error"):
+            import random
+
+            _FALLBACK_PHRASES = [
+                "Laissez-moi juste vérifier ça avec notre équipe, je reviens vers vous dans quelques instants 😊",
+                "Notre système est un peu lent en ce moment, un petit instant s'il vous plaît...",
+                "Je vérifie les informations disponibles, je vous réponds très rapidement !",
+            ]
+            _HANDOFF_PHRASE = (
+                "Notre système rencontre des difficultés techniques. "
+                "Je vous mets en relation avec un conseiller humain qui prendra le relais immédiatement. "
+                "Merci pour votre patience ! 🙏"
+            )
+
+            error_count = context_manager.increment_error_count(user_id, shop_id)
+            logger.warning(
+                f"[CIRCUIT BREAKER] Gemini error #{error_count} for sender={user_id} "
+                f"shop={shop_id} error_type={llm_result.get('error_type')}"
+            )
+
+            if error_count >= 3:
+                # ── Handoff: escalade vers agent humain ───────────────────
+                conversation.is_human_controlled = True
+                conversation.save(update_fields=['is_human_controlled'])
+                context_manager.reset_error_count(user_id, shop_id)
+                bot_text = _HANDOFF_PHRASE
+                logger.warning(
+                    f"[CIRCUIT BREAKER] Human handoff triggered for sender={user_id} "
+                    f"shop={shop_id} after {error_count} consecutive errors."
+                )
+            else:
+                # ── Graceful Fallback: message naturel + mise en queue ─────
+                bot_text = random.choice(_FALLBACK_PHRASES)
+                try:
+                    PendingMessage.objects.create(
+                        shop_id=shop_id,
+                        sender_id=user_id,
+                        conversation=conversation,
+                        user_text=text,
+                        image_url=image_url or '',
+                    )
+                    logger.info(
+                        f"[CIRCUIT BREAKER] Message queued for retry — "
+                        f"sender={user_id} shop={shop_id}"
+                    )
+                except Exception as q_err:
+                    logger.error(f"[CIRCUIT BREAKER] Failed to queue message: {q_err}")
+
+            # Save and return the graceful response immediately
+            Message.objects.create(
+                conversation=conversation, sender="USER", text=text,
+                extracted_intent="LLM_ERROR", conversation_state_before=state_before,
+            )
+            Message.objects.create(
+                conversation=conversation, sender="BOT", text=bot_text
+            )
+            context_manager.add_message(user_id, role="user", text=text, shop_id=shop_id)
+            context_manager.add_message(user_id, role="bot", text=bot_text, shop_id=shop_id)
+
+            # Write PipelineLog for error monitoring
+            logger.removeHandler(_handler)
+            _duration = int((time.time() - _start_time) * 1000)
+            try:
+                PipelineLog.objects.create(
+                    shop_id=shop_id, sender_id=user_id, mode='llm',
+                    user_text=text, bot_text=bot_text,
+                    detected_intent='LLM_ERROR', state_before=state_before,
+                    state_after=conversation.state,
+                    has_error=True,
+                    error_type=llm_result.get('error_type', 'api_error'),
+                    error_detail=str(llm_result.get('error_detail', '')),
+                    duration_ms=_duration,
+                    log_messages='\n'.join(_log_buffer),
+                )
+            except Exception:
+                pass
+            return {
+                "text": bot_text, "intent": "LLM_ERROR",
+                "state": conversation.state, "entities": {},
+                "context": current_context, "missing_entities": [],
+                "matched_image_url": None,
+            }
+
+        # ── Gemini succeeded: reset error counter ─────────────────────────
+        context_manager.reset_error_count(user_id, shop_id)
 
         # ── 4. Accumulate entities into context ──────────────────────────
         # Blocked fields: product_id and variation_id must ONLY be resolved

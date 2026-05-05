@@ -141,3 +141,34 @@ class ContextManager:
 
         key = self._get_key(user_id, shop_id)
         self.redis_client.setex(key, self.ttl, json.dumps(context, ensure_ascii=False))
+
+    # ── Circuit Breaker: error counter per client ─────────────────────────────
+
+    def _error_key(self, user_id: str, shop_id: str = None) -> str:
+        """Redis key for the per-client Gemini error counter."""
+        prefix = f"gemini_errors:{shop_id}" if shop_id else "gemini_errors"
+        return f"{prefix}:{user_id}"
+
+    def increment_error_count(self, user_id: str, shop_id: str = None) -> int:
+        """
+        Increment the Gemini error counter for this client.
+
+        The counter expires automatically after 5 minutes (300s) so that
+        a temporary spike doesn't permanently block the client.
+
+        Returns the new counter value.
+        """
+        key = self._error_key(user_id, shop_id)
+        count = self.redis_client.incr(key)
+        # Set/reset TTL on every increment so the window slides correctly
+        self.redis_client.expire(key, 300)   # 5-minute sliding window
+        return int(count)
+
+    def reset_error_count(self, user_id: str, shop_id: str = None) -> None:
+        """Delete the error counter (called after successful handoff or Gemini recovery)."""
+        self.redis_client.delete(self._error_key(user_id, shop_id))
+
+    def get_error_count(self, user_id: str, shop_id: str = None) -> int:
+        """Return the current error count without incrementing."""
+        val = self.redis_client.get(self._error_key(user_id, shop_id))
+        return int(val) if val else 0

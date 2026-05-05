@@ -8,10 +8,10 @@ from .config import BotConfiguration
 from .conversation import Conversation, Message
 from .company import Company, UserProfile
 from .template import ResponseTemplate
-from .analytics import NLUFallbackLog, ProductVector, PipelineLog
+from .analytics import NLUFallbackLog, ProductVector, PipelineLog, PendingMessage
 
 __all__ = [
     'Lead', 'BotConfiguration', 'Conversation', 'Message',
     'Company', 'UserProfile', 'ResponseTemplate',
-    'NLUFallbackLog', 'ProductVector', 'PipelineLog',
+    'NLUFallbackLog', 'ProductVector', 'PipelineLog', 'PendingMessage',
 ]

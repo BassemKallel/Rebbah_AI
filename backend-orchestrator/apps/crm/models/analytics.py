@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from datetime import timedelta
 
 
 class NLUFallbackLog(models.Model):
@@ -117,3 +118,55 @@ class PipelineLog(models.Model):
     def __str__(self):
         status = '❌' if self.has_error else '✅'
         return f"{status} [{self.mode.upper()}] {self.shop_id} | {self.detected_intent} | '{self.user_text[:40]}'"
+
+
+class PendingMessage(models.Model):
+    """
+    Retry queue for messages that failed due to a temporary Gemini API error
+    (e.g. 429 RESOURCE_EXHAUSTED, 503 UNAVAILABLE).
+
+    The cron job RetryPendingMessagesCronJob reads this table every minute
+    and re-processes each pending message once Gemini is available again.
+    """
+    # ── Identifiers ────────────────────────────────────────────────────────
+    shop_id       = models.CharField(max_length=100, db_index=True)
+    sender_id     = models.CharField(max_length=255)
+    conversation  = models.ForeignKey(
+        'crm.Conversation', on_delete=models.CASCADE,
+        related_name='pending_messages', null=True, blank=True
+    )
+
+    # ── Payload ────────────────────────────────────────────────────────────
+    user_text     = models.TextField()
+    image_url     = models.URLField(max_length=2048, blank=True, default='')
+
+    # ── Retry tracking ─────────────────────────────────────────────────────
+    retry_count   = models.PositiveSmallIntegerField(default=0)
+    next_retry_at = models.DateTimeField(default=timezone.now, db_index=True)
+    MAX_RETRIES   = 3
+
+    created_at    = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['next_retry_at']
+        verbose_name = 'Message en Attente (Queue)'
+        verbose_name_plural = 'Messages en Attente (Queue)'
+        indexes = [
+            models.Index(fields=['shop_id', 'next_retry_at']),
+        ]
+
+    def schedule_next_retry(self, delay_seconds: int = 60):
+        """Reschedule after a failed retry attempt."""
+        self.retry_count += 1
+        self.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
+        self.save(update_fields=['retry_count', 'next_retry_at'])
+
+    @property
+    def is_expired(self) -> bool:
+        return self.retry_count >= self.MAX_RETRIES
+
+    def __str__(self):
+        return (
+            f"[Queue] shop={self.shop_id} sender={self.sender_id} "
+            f"retry={self.retry_count}/{self.MAX_RETRIES} | '{self.user_text[:40]}'"
+        )
