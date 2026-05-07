@@ -27,9 +27,9 @@ class NLUFallbackLogAdmin(admin.ModelAdmin):
         ('Active Learning', {'fields': ('intent_changed', 'reviewed', 'review_label')}),
     )
 
+    @admin.display(description='Texte')
     def original_text_preview(self, obj):
         return obj.original_text[:60] + '...' if len(obj.original_text) > 60 else obj.original_text
-    original_text_preview.short_description = 'Texte'
 
     def _confidence_badge(self, score):
         if score is None:
@@ -37,25 +37,25 @@ class NLUFallbackLogAdmin(admin.ModelAdmin):
         color = '#27ae60' if score >= 0.8 else ('#e67e22' if score >= 0.5 else '#e74c3c')
         return format_html('<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>', color, f'{score:.0%}')
 
+    @admin.display(description='TunBERT Conf.')
     def tunbert_confidence_badge(self, obj):
         return self._confidence_badge(obj.tunbert_confidence)
-    tunbert_confidence_badge.short_description = 'TunBERT Conf.'
 
+    @admin.display(description='Gemini Conf.')
     def gemini_confidence_badge(self, obj):
         return self._confidence_badge(obj.gemini_confidence)
-    gemini_confidence_badge.short_description = 'Gemini Conf.'
 
+    @admin.display(description='Entites TunBERT')
     def pretty_tunbert_entities(self, obj):
         if not obj.tunbert_entities:
             return '-'
         return format_html('<pre>{}</pre>', json.dumps(obj.tunbert_entities, indent=2, ensure_ascii=False))
-    pretty_tunbert_entities.short_description = 'Entites TunBERT'
 
+    @admin.display(description='Entites Gemini')
     def pretty_gemini_entities(self, obj):
         if not obj.gemini_entities:
             return '-'
         return format_html('<pre>{}</pre>', json.dumps(obj.gemini_entities, indent=2, ensure_ascii=False))
-    pretty_gemini_entities.short_description = 'Entites Gemini'
 
 
 @admin.register(RetrainingLog)
@@ -65,13 +65,13 @@ class RetrainingLogAdmin(admin.ModelAdmin):
     readonly_fields = ('training_report', 'started_at', 'finished_at')
     ordering = ('-started_at',)
     
+    @admin.display(description='Amélioration F1')
     def f1_improvement(self, obj):
         if obj.new_f1 and obj.old_f1:
             diff = obj.new_f1 - obj.old_f1
             color = 'green' if diff > 0 else 'gray'
             return format_html('<span style="color:{}; font-weight:bold;">{:+.4f}</span>', color, diff)
         return '-'
-    f1_improvement.short_description = 'Amélioration F1'
 
 
 @admin.register(ProductVector)
@@ -109,17 +109,17 @@ class ProductVectorAdmin(admin.ModelAdmin):
         except Exception as e:
             self.message_user(request, f"Erreur : {e}", level=_messages.ERROR)
 
+    @admin.display(description='Image')
     def image_preview(self, obj):
         if obj.image_url:
             return format_html('<img src="{}" style="height:48px;width:48px;object-fit:cover;border-radius:4px;border:1px solid #ddd;" onerror="this.style.display=\'none\'"/>', obj.image_url)
         return '—'
-    image_preview.short_description = 'Image'
 
+    @admin.display(description='Image')
     def image_preview_large(self, obj):
         if obj.image_url:
             return format_html('<img src="{}" style="max-height:200px;max-width:200px;border-radius:8px;border:1px solid #ddd;"/><br><small style="color:#888">{}</small>', obj.image_url, obj.image_url)
         return '—'
-    image_preview_large.short_description = 'Image'
 
     fieldsets = (
         ('Identification', {'fields': ('id', 'shop_id', 'product_id', 'variation_id', 'created_at')}),
