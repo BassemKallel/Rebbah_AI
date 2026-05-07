@@ -1,14 +1,23 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, AlertCircle, Bot, Sparkles, Edit3 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { mlopsApi } from '../../../api/mlopsApi';
 import type { NLUFallbackLog, PaginatedFallbacks } from '../../../types/mlops';
 
-const INTENT_OPTIONS = [
-  'ASK_ADVICE', 'ASK_AVAILABILITY', 'ASK_DELIVERY', 'ASK_DETAILS',
-  'ASK_DISCOUNT', 'ASK_LOCATION', 'ASK_PRICE', 'CANCEL_ORDER',
-  'CHECK_PACKAGE', 'COMPLAINT', 'CONFIRM_DENY', 'ECHANGE',
-  'GREETING', 'INFORM_INFO', 'NOISE', 'ORDER_PRODUCT', 'TRACK_ORDER',
+const INTENT_GROUPS = [
+  {
+    label: 'Questions',
+    options: ['ASK_ADVICE', 'ASK_AVAILABILITY', 'ASK_DELIVERY', 'ASK_DETAILS', 'ASK_DISCOUNT', 'ASK_LOCATION', 'ASK_PRICE']
+  },
+  {
+    label: 'Commandes',
+    options: ['ORDER_PRODUCT', 'CANCEL_ORDER', 'TRACK_ORDER', 'CHECK_PACKAGE', 'ECHANGE']
+  },
+  {
+    label: 'Général',
+    options: ['GREETING', 'CONFIRM_DENY', 'COMPLAINT', 'INFORM_INFO', 'NOISE']
+  }
 ];
 
 export default function PredictionReview() {
@@ -35,6 +44,10 @@ export default function PredictionReview() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fallbacks'] });
       setEditingId(null);
+      toast.success('Label validé avec succès !');
+    },
+    onError: () => {
+      toast.error('Erreur lors de la validation du label.');
     }
   });
 
@@ -144,7 +157,11 @@ export default function PredictionReview() {
                             className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 focus:ring-[#0f6885]"
                           >
                             <option value="">Sélectionner...</option>
-                            {INTENT_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            {INTENT_GROUPS.map(group => (
+                              <optgroup key={group.label} label={group.label}>
+                                {group.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                              </optgroup>
+                            ))}
                           </select>
                           <button
                             onClick={() => handleSave(log.id)}

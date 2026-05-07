@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Download, FileJson, FileSpreadsheet, CheckCircle, Upload, FileUp } from 'lucide-react';
+import { Download, FileJson, FileSpreadsheet, CheckCircle, Upload, FileUp, Info } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { mlopsApi } from '../../../api/mlopsApi';
 
 export default function DatasetExport() {
@@ -22,9 +23,10 @@ export default function DatasetExport() {
       document.body.appendChild(link);
       link.click();
       link.parentNode?.removeChild(link);
+      toast.success('Dataset téléchargé avec succès !');
     } catch (error) {
       console.error('Download failed', error);
-      alert('Erreur lors du téléchargement');
+      toast.error('Erreur lors du téléchargement');
     } finally {
       setDownloading(false);
     }
@@ -38,9 +40,10 @@ export default function DatasetExport() {
       const result = await mlopsApi.importDataset(importFile);
       setImportResult(result);
       setImportFile(null);
+      toast.success('Dataset importé avec succès !');
     } catch (error: any) {
       console.error('Import failed', error);
-      alert(error.response?.data?.error || 'Erreur lors de l import du fichier');
+      toast.error(error.response?.data?.error || 'Erreur lors de l import du fichier');
     } finally {
       setUploading(false);
     }
@@ -162,19 +165,43 @@ export default function DatasetExport() {
             </>
           ) : (
             <>
-              {/* Import UI */}
-              <div className="mb-8">
-                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">Uploader un fichier</h3>
+              {/* Import UI Redesign */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+                {/* Info Side */}
+                <div className="flex flex-col justify-center">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="bg-blue-50 text-blue-600 p-2 rounded-lg">
+                      <Upload className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900">Importer vos Annotations</h3>
+                  </div>
+                  <p className="text-gray-500 mb-6 leading-relaxed">
+                    Uploadez un fichier JSON contenant vos données conversationnelles. Le système mettra à jour intelligemment les labels des messages existants et ajoutera les nouveaux pour enrichir le dataset.
+                  </p>
+                  <ul className="space-y-3 text-sm font-medium text-gray-600">
+                    <li className="flex items-center gap-3"><CheckCircle className="w-5 h-5 text-emerald-500" /> Format JSON structuré requis</li>
+                    <li className="flex items-center gap-3"><CheckCircle className="w-5 h-5 text-emerald-500" /> Mise à jour intelligente (Upsert)</li>
+                    <li className="flex items-center gap-3"><CheckCircle className="w-5 h-5 text-emerald-500" /> Préserve les IDs originaux (Traçabilité)</li>
+                  </ul>
+                </div>
+
+                {/* Upload Side */}
                 <div 
-                  className="border-2 border-dashed border-gray-300 rounded-2xl p-10 flex flex-col items-center justify-center text-center hover:border-[#0f6885] hover:bg-[#0f6885]/5 transition-colors cursor-pointer"
+                  className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-all cursor-pointer min-h-[250px] ${
+                    importFile 
+                      ? 'border-[#0f6885] bg-[#0f6885]/5 shadow-inner' 
+                      : 'border-gray-300 hover:border-[#0f6885] hover:bg-gray-50'
+                  }`}
                   onClick={() => document.getElementById('file-upload')?.click()}
                 >
-                  <FileUp className="w-12 h-12 text-gray-400 mb-4" />
-                  <p className="text-lg font-semibold text-gray-900 mb-1">
-                    {importFile ? importFile.name : 'Cliquez pour uploader un fichier JSON'}
+                  <div className={`p-4 rounded-full mb-4 ${importFile ? 'bg-[#0f6885] text-white' : 'bg-gray-100 text-gray-400'}`}>
+                    {importFile ? <CheckCircle className="w-8 h-8" /> : <FileUp className="w-8 h-8" />}
+                  </div>
+                  <p className="text-lg font-bold text-gray-900 mb-1">
+                    {importFile ? importFile.name : 'Sélectionner un fichier JSON'}
                   </p>
-                  <p className="text-sm text-gray-500">
-                    {importFile ? `${(importFile.size / 1024).toFixed(2)} KB` : 'Format JSON exporté par TikTak AI'}
+                  <p className="text-sm font-medium text-gray-500">
+                    {importFile ? `${(importFile.size / 1024).toFixed(2)} KB prêt pour l'import` : 'Fichier issu d\'un export TikTak AI'}
                   </p>
                   <input 
                     id="file-upload" 
@@ -187,12 +214,12 @@ export default function DatasetExport() {
               </div>
 
               {importResult && (
-                <div className="mb-8 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex items-start gap-3">
-                  <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                <div className="mb-8 p-5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex items-start gap-4 shadow-sm animate-fade-in">
+                  <CheckCircle className="w-6 h-6 mt-0.5 flex-shrink-0" />
                   <div>
-                    <div className="font-bold">{importResult.message}</div>
-                    <div className="text-sm mt-1">
-                      {importResult.imported} nouveaux logs importés, {importResult.updated} logs mis à jour.
+                    <div className="font-bold text-lg">{importResult.message}</div>
+                    <div className="text-sm mt-1 font-medium opacity-90">
+                      {importResult.imported} nouveaux logs importés, {importResult.updated} logs mis à jour dans la base.
                     </div>
                   </div>
                 </div>
