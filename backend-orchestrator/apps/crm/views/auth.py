@@ -53,7 +53,7 @@ class LoginView(APIView):
 
         # Resolve UserProfile → Company
         try:
-            profile = user.profile
+            profile = user.profile  # type: ignore
             company = profile.company
         except Exception:
             return Response(
@@ -124,7 +124,7 @@ class MeView(APIView):
                 'name': company.name,
                 'is_active': company.is_active,
             } if company else None,
-            'role': user.profile.role,
+            'role': user.profile.role,  # type: ignore
         })
 
 
