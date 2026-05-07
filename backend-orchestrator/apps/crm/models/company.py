@@ -36,7 +36,10 @@ class Company(models.Model):
 
 class UserProfile(models.Model):
     """Links a Django User to a Company for dashboard authentication."""
-    ROLE_CHOICES = [('owner', 'Owner')]
+    ROLE_CHOICES = [
+        ('owner', 'Owner'),
+        ('admin', 'Admin MLOps'),
+    ]
 
     user       = models.OneToOneField('auth.User', on_delete=models.CASCADE, related_name='profile')
     company    = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='users')

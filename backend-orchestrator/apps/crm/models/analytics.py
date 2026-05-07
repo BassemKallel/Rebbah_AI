@@ -51,3 +51,44 @@ class ProductVector(models.Model):
 
     def __str__(self):
         return f"[{self.shop_id}] product={self.product_id} var={self.variation_id}"
+
+
+class RetrainingLog(models.Model):
+    """
+    Trace chaque cycle de retraining déclenché via GitHub Actions ou manuellement.
+    Le champ `training_report` stocke le rapport complet généré par retrain_tunbert.py.
+    """
+    STATUS_CHOICES = [
+        ('PENDING',         'En attente'),
+        ('RUNNING',         'En cours'),
+        ('SUCCESS',         'Succes'),
+        ('FAILED',          'Echec'),
+        ('SKIPPED',         'Ignore (F1 insuffisant)'),
+        ('PENDING_REVIEW',  'En attente de validation admin'),
+    ]
+
+    status       = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING')
+    old_f1       = models.FloatField(null=True, blank=True)
+    new_f1       = models.FloatField(null=True, blank=True)
+    deployed     = models.BooleanField(default=False)
+    run_number   = models.IntegerField(null=True, blank=True)
+    samples      = models.IntegerField(null=True, blank=True)
+    triggered_by = models.CharField(max_length=50, default='github_actions')
+    started_at   = models.DateTimeField(auto_now_add=True)
+    finished_at  = models.DateTimeField(null=True, blank=True)
+    notes        = models.TextField(blank=True)
+
+    # Rapport complet généré par retrain_tunbert.py
+    training_report = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-started_at']
+        verbose_name = 'Retraining Log'
+        verbose_name_plural = 'Retraining Logs'
+
+    def __str__(self):
+        improvement = ""
+        if self.old_f1 and self.new_f1:
+            diff = self.new_f1 - self.old_f1
+            improvement = f" | delta={diff:+.3f}"
+        return f"[{self.status}] Run #{self.run_number}{improvement}"

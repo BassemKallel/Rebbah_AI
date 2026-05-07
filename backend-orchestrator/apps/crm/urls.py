@@ -12,6 +12,17 @@ from .views import (
     dashboard_lead_funnel,
 )
 
+from .views.mlops import (
+    mlops_stats,
+    mlops_fallbacks_list,
+    mlops_review_fallback,
+    mlops_export,
+    mlops_retrain_trigger,
+    mlops_retrain_status,
+    mlops_deployment_log,
+    mlops_retrain_report,
+)
+
 router = DefaultRouter()
 router.register(r'conversations', ConversationViewSet, basename='conversation')
 router.register(r'leads', LeadViewSet, basename='lead')
@@ -39,6 +50,16 @@ urlpatterns = [
     path('dashboard/top-intents/',      dashboard_top_intents,      name='dashboard-top-intents'),
     path('dashboard/channels/',         dashboard_channels,         name='dashboard-channels'),
     path('dashboard/lead-funnel/',      dashboard_lead_funnel,      name='dashboard-lead-funnel'),
+
+    # Admin MLOps (Protected by IsAdminUser)
+    path('admin/mlops/stats/',              mlops_stats,            name='mlops-stats'),
+    path('admin/mlops/fallbacks/',          mlops_fallbacks_list,   name='mlops-fallbacks-list'),
+    path('admin/mlops/fallbacks/<int:pk>/', mlops_review_fallback,  name='mlops-review-fallback'),
+    path('admin/mlops/export/',             mlops_export,           name='mlops-export'),
+    path('admin/mlops/retrain/trigger/',    mlops_retrain_trigger,  name='mlops-retrain-trigger'),
+    path('admin/mlops/retrain/status/',     mlops_retrain_status,   name='mlops-retrain-status'),
+    path('admin/mlops/deployment-log/',     mlops_deployment_log,   name='mlops-deployment-log'),
+    path('admin/mlops/retrain/<int:pk>/report/', mlops_retrain_report, name='mlops-retrain-report'),
 
     path('', include(router.urls)),
 ]
