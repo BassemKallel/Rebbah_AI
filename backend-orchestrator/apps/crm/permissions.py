@@ -10,7 +10,7 @@ class IsAdminUser(BasePermission):
     """
     message = "Accès réservé aux administrateurs MLOps."
 
-    def has_permission(self, request, view):
+    def has_permission(self, request, view) -> bool:
         if not request.user or not request.user.is_authenticated:
             return False
         try:

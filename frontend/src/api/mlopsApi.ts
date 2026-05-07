@@ -53,7 +53,7 @@ export const mlopsApi = {
     return data;
   },
 
-  getRetrainReport: async (id: number): Promise<{ run_id: number; status: string; report: any }> => {
+  getRetrainReport: async (id: number): Promise<{ run_id: number; status: string; deployed: boolean; old_f1: number | null; new_f1: number | null; report: any }> => {
     const { data } = await api.get(`/admin/mlops/retrain/${id}/report/`);
     return data;
   }
