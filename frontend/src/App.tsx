@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './providers/AuthProvider';
 import { QueryProvider } from './providers/QueryProvider';
 import RequireAuth from './components/guards/RequireAuth';
+import RequireAdmin from './components/guards/RequireAdmin';
 import MainLayout from './components/layout/MainLayout';
 import Dashboard from './pages/Dashboard/Dashboard';
 import Inbox from './pages/Inbox/Inbox';
@@ -12,6 +13,12 @@ import MessengerInbox from './pages/MessengerInbox/MessengerInbox';
 import Leads from './pages/Leads/Leads';
 import Login from './pages/Login/Login';
 import Profile from './pages/Profile/Profile';
+
+import AdminMLOpsLayout from './pages/AdminMLOps/AdminMLOpsLayout';
+import MLOpsDashboard from './pages/AdminMLOps/MLOpsDashboard/MLOpsDashboard';
+import PredictionReview from './pages/AdminMLOps/PredictionReview/PredictionReview';
+import DatasetExport from './pages/AdminMLOps/DatasetExport/DatasetExport';
+import Retraining from './pages/AdminMLOps/Retraining/Retraining';
 
 
 function App() {
@@ -41,6 +48,16 @@ function App() {
                   </MainLayout>
                 }
               />
+            </Route>
+
+            {/* Admin routes — require admin role */}
+            <Route element={<RequireAdmin />}>
+              <Route path="/admin/*" element={<AdminMLOpsLayout />}>
+                <Route path="mlops" element={<MLOpsDashboard />} />
+                <Route path="review" element={<PredictionReview />} />
+                <Route path="export" element={<DatasetExport />} />
+                <Route path="retrain" element={<Retraining />} />
+              </Route>
             </Route>
           </Routes>
         </Router>
