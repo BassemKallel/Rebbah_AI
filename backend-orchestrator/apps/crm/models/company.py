@@ -51,4 +51,5 @@ class UserProfile(models.Model):
         verbose_name_plural = 'User Profiles'
 
     def __str__(self):
-        return f"{self.user.username} → {self.company.name} ({self.role})"
+        comp_name = self.company.name if self.company else "Global"
+        return f"{self.user.username} → {comp_name} ({self.role})"
