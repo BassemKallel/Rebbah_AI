@@ -13,6 +13,17 @@ export interface MLOpsStats {
   last_retraining: RetrainingLog | null;
 }
 
+export interface ModelHealth {
+  status: 'healthy' | 'unhealthy' | 'unreachable';
+  version: string;
+}
+
+export interface ModelsHealthResponse {
+  tunbert: ModelHealth;
+  gliner: ModelHealth;
+  clip: ModelHealth;
+}
+
 export interface NLUFallbackLog {
   id: number;
   message_id: number | null;

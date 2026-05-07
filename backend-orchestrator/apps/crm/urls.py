@@ -21,6 +21,8 @@ from .views.mlops import (
     mlops_retrain_status,
     mlops_deployment_log,
     mlops_retrain_report,
+    mlops_models_health,
+    mlops_dataset_import,
 )
 
 router = DefaultRouter()
@@ -60,6 +62,8 @@ urlpatterns = [
     path('admin/mlops/retrain/status/',     mlops_retrain_status,   name='mlops-retrain-status'),
     path('admin/mlops/deployment-log/',     mlops_deployment_log,   name='mlops-deployment-log'),
     path('admin/mlops/retrain/<int:pk>/report/', mlops_retrain_report, name='mlops-retrain-report'),
+    path('admin/mlops/models/health/',      mlops_models_health,    name='mlops-models-health'),
+    path('admin/mlops/dataset/import/',     mlops_dataset_import,   name='mlops-dataset-import'),
 
     path('', include(router.urls)),
 ]

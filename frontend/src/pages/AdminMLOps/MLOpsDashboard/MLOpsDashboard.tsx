@@ -1,19 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { Database, AlertTriangle, Activity, BrainCircuit } from 'lucide-react';
+import { Database, AlertTriangle, Activity, BrainCircuit, Server, CheckCircle2, XCircle } from 'lucide-react';
 import { greeting, todayFormatted } from '../../../utils/date';
 import KpiCard from '../../../components/dashboard/KpiCard';
 import type { KpiData } from '../../../types';
 import { mlopsApi } from '../../../api/mlopsApi';
-import type { MLOpsStats } from '../../../types/mlops';
+import type { MLOpsStats, ModelsHealthResponse } from '../../../types/mlops';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function MLOpsDashboard() {
   const [stats, setStats] = useState<MLOpsStats | null>(null);
+  const [health, setHealth] = useState<ModelsHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    mlopsApi.getStats()
-      .then(setStats)
+    Promise.all([
+      mlopsApi.getStats(),
+      mlopsApi.getModelsHealth().catch(e => {
+        console.error("Health check failed", e);
+        return null;
+      })
+    ])
+      .then(([statsData, healthData]) => {
+        setStats(statsData);
+        if (healthData) setHealth(healthData);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
@@ -69,6 +79,40 @@ export default function MLOpsDashboard() {
           </span>
         </div>
       </div>
+
+      {/* Health Cards */}
+      {health && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mb-6 sm:mb-7">
+          {[
+            { id: 'tunbert', name: 'TunBERT', icon: <BrainCircuit className="w-6 h-6" />, data: health.tunbert, bg: 'bg-indigo-50', text: 'text-indigo-600' },
+            { id: 'gliner', name: 'GLiNER', icon: <Database className="w-6 h-6" />, data: health.gliner, bg: 'bg-purple-50', text: 'text-purple-600' },
+            { id: 'clip', name: 'CLIP Vision', icon: <Server className="w-6 h-6" />, data: health.clip, bg: 'bg-cyan-50', text: 'text-cyan-600' },
+          ].map(model => (
+            <div key={model.id} className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${model.bg} ${model.text}`}>
+                  {model.icon}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">{model.name}</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">{model.data.version}</p>
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                {model.data.status === 'healthy' ? (
+                  <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full text-xs font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> En ligne
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 text-red-600 bg-red-50 px-2 py-1 rounded-full text-xs font-semibold">
+                    <XCircle className="w-3.5 h-3.5" /> Hors ligne
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5 mb-6 sm:mb-7">

@@ -5,6 +5,7 @@ Tous protégés par IsAdminUser.
 import csv
 import json
 import logging
+import requests
 from datetime import timedelta
 
 from django.http import HttpResponse, JsonResponse
@@ -251,3 +252,98 @@ def mlops_retrain_report(request, pk):
         'deployed': log.deployed,
         'report':   log.training_report,
     })
+
+
+# ─── 8. Models Health Check ──────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def mlops_models_health(request):
+    """
+    Interroge les endpoints de santé des services NLU et Vision
+    """
+    health_data = {
+        'tunbert': {'status': 'unreachable', 'version': 'v3 (Intent)'},
+        'gliner': {'status': 'unreachable', 'version': 'v1 (NER)'},
+        'clip': {'status': 'unreachable', 'version': 'ViT-B/32 (Vision)'},
+    }
+    
+    # 1. NLU Service (TunBERT & GLiNER)
+    try:
+        resp = requests.get('http://nlu-service:8001/health', timeout=2)
+        if resp.status_code == 200:
+            data = resp.json()
+            tunbert_ok = data.get('tunbert_loaded', False)
+            gliner_ok = data.get('gliner_loaded', False)
+            health_data['tunbert']['status'] = 'healthy' if tunbert_ok else 'unhealthy'
+            health_data['gliner']['status'] = 'healthy' if gliner_ok else 'unhealthy'
+    except Exception as e:
+        logger.warning(f"NLU Service health check failed: {e}")
+
+    # 2. Vision Service (CLIP)
+    try:
+        resp = requests.get('http://vision-service:8002/health', timeout=2)
+        if resp.status_code == 200:
+            health_data['clip']['status'] = 'healthy'
+    except Exception as e:
+        logger.warning(f"Vision Service health check failed: {e}")
+        
+    return Response(health_data)
+
+
+# ─── 9. Import Dataset ───────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def mlops_dataset_import(request):
+    """
+    Importe un dataset JSON (exporté via mlops_export) pour initialiser 
+    les logs ou insérer des données annotées manuelles.
+    """
+    file_obj = request.FILES.get('file')
+    if not file_obj:
+        return Response({'error': 'Aucun fichier fourni.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        data = json.load(file_obj)
+    except Exception:
+        return Response({'error': 'Fichier JSON invalide. Seul le format JSON exporté est supporté.'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not isinstance(data, list):
+        return Response({'error': 'Le JSON doit contenir une liste d objects.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    imported_count = 0
+    updated_count = 0
+    
+    for item in data:
+        original_text = item.get('original_text')
+        if not original_text:
+            continue
+            
+        label = item.get('review_label') or item.get('label')
+        
+        log = NLUFallbackLog.objects.filter(original_text=original_text).first()
+        if log:
+            if label and not log.reviewed:
+                log.review_label = label
+                log.reviewed = True
+                log.save(update_fields=['review_label', 'reviewed'])
+                updated_count += 1
+        else:
+            NLUFallbackLog.objects.create(
+                original_text=original_text,
+                tunbert_intent=item.get('tunbert_intent') or item.get('gemini_intent') or '',
+                tunbert_confidence=item.get('tunbert_confidence', 0.0),
+                gemini_intent=item.get('gemini_intent') or item.get('tunbert_intent') or '',
+                gemini_confidence=item.get('gemini_confidence', 0.0),
+                trigger_reason=item.get('trigger_reason', 'LOW_CONFIDENCE'),
+                review_label=label,
+                reviewed=bool(label),
+            )
+            imported_count += 1
+
+    return Response({
+        'message': 'Import réussi.',
+        'imported': imported_count,
+        'updated': updated_count
+    }, status=status.HTTP_200_OK)

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, AlertCircle } from 'lucide-react';
+import { CheckCircle, AlertCircle, Bot, Sparkles, Edit3 } from 'lucide-react';
 import { mlopsApi } from '../../../api/mlopsApi';
 import type { NLUFallbackLog, PaginatedFallbacks } from '../../../types/mlops';
 
@@ -118,16 +118,20 @@ export default function PredictionReview() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] uppercase font-bold text-gray-400 w-16">TunBERT</span>
-                          <span className="text-sm bg-red-50 text-red-700 px-2 py-0.5 rounded">{log.tunbert_intent}</span>
-                          <span className="text-xs text-gray-400">{(log.tunbert_confidence * 100).toFixed(1)}%</span>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                          <Bot className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                          <div className="flex-1 flex justify-between items-center">
+                            <span className="text-sm font-semibold text-gray-700">{log.tunbert_intent}</span>
+                            <span className="text-xs font-mono text-gray-400">{(log.tunbert_confidence * 100).toFixed(1)}%</span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] uppercase font-bold text-gray-400 w-16">Gemini</span>
-                          <span className="text-sm bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{log.gemini_intent}</span>
-                          {log.gemini_confidence && <span className="text-xs text-gray-400">{(log.gemini_confidence * 100).toFixed(1)}%</span>}
+                        <div className="flex items-center gap-3 bg-[#0f6885]/5 p-2 rounded-lg border border-[#0f6885]/10">
+                          <Sparkles className="w-4 h-4 text-[#0f6885] flex-shrink-0" />
+                          <div className="flex-1 flex justify-between items-center">
+                            <span className="text-sm font-semibold text-[#0f6885]">{log.gemini_intent}</span>
+                            {log.gemini_confidence && <span className="text-xs font-mono text-[#0f6885]/70">{(log.gemini_confidence * 100).toFixed(1)}%</span>}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -154,22 +158,23 @@ export default function PredictionReview() {
                         <div className="flex items-center justify-between group">
                           <div className="flex items-center gap-2">
                             {log.reviewed ? (
-                              <>
-                                <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                <span className="text-sm font-semibold text-emerald-700">{log.review_label}</span>
-                              </>
+                              <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                <CheckCircle className="w-4 h-4" />
+                                <span className="text-sm font-bold">{log.review_label}</span>
+                              </div>
                             ) : (
-                              <>
-                                <AlertCircle className="w-4 h-4 text-orange-400" />
-                                <span className="text-sm text-orange-600 font-medium">Non révisé</span>
-                              </>
+                              <div className="bg-orange-50 border border-orange-200 text-orange-600 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4" />
+                                <span className="text-sm font-medium">Non révisé</span>
+                              </div>
                             )}
                           </div>
                           <button
                             onClick={() => handleEditClick(log)}
-                            className="text-gray-400 hover:text-[#0f6885] opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="p-2 text-gray-400 hover:text-[#0f6885] hover:bg-[#0f6885]/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="Modifier le label"
                           >
-                            Éditer
+                            <Edit3 className="w-4 h-4" />
                           </button>
                         </div>
                       )}

@@ -1,10 +1,15 @@
 import api from './axiosInstance';
-import { MLOpsStats, PaginatedFallbacks, RetrainingStatus } from '../types/mlops';
+import { MLOpsStats, PaginatedFallbacks, RetrainingStatus, ModelsHealthResponse } from '../types/mlops';
 
 export const mlopsApi = {
   // 1. Dashboard Stats
   getStats: async (): Promise<MLOpsStats> => {
     const { data } = await api.get('/api/v1/crm/admin/mlops/stats/');
+    return data;
+  },
+
+  getModelsHealth: async (): Promise<ModelsHealthResponse> => {
+    const { data } = await api.get('/api/v1/crm/admin/mlops/models/health/');
     return data;
   },
 
@@ -38,6 +43,17 @@ export const mlopsApi = {
     const { data } = await api.get('/api/v1/crm/admin/mlops/export/', {
       params: { format, reviewed: reviewedOnly },
       responseType: 'blob'
+    });
+    return data;
+  },
+
+  importDataset: async (file: File): Promise<{ message: string; imported: number; updated: number }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/api/v1/crm/admin/mlops/dataset/import/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
     });
     return data;
   },
