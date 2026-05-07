@@ -85,7 +85,6 @@ class MessagePipeline:
                     sender_id=user_id,
                     state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
                 )
-                .select_related('lead')
                 .first()
             )
             if not conversation:
@@ -190,7 +189,7 @@ class MessagePipeline:
         vision_variation_id = None
 
         if image_file or image_url:
-            vision_result = ai_service.call_vision(shop_id, image_url=image_url, image_file=image_file if image_file else None)
+            vision_result = ai_service.call_vision(shop_id, image_url=image_url or "", image_file=image_file if image_file else None)
             if vision_result:
                 extracted_entities["product"] = f"Article_From_Image_{vision_result['product_id']}"
                 matched_image_url = vision_result.get("image_url")
@@ -333,7 +332,7 @@ class MessagePipeline:
             try:
                 products = tiktak_service.get_products(shop_id)
                 matched_product, color_from_vision, candidates = tiktak_service.find_product(
-                    products, prod_name, vision_variation_id
+                    products, prod_name, vision_variation_id or None
                 )
 
                 # Pre-fill color from vision if not yet in context
