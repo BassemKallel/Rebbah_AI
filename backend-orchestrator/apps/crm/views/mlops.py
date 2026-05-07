@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import status
 
-from ..models import NLUFallbackLog, RetrainingLog, ProductVector
+from ..models import NLUFallbackLog, RetrainingLog, ProductVector, ManualDataset
 from ..permissions import IsAdminUser
 from ..serializers.mlops import (
     NLUFallbackLogListSerializer,
@@ -162,6 +162,25 @@ def mlops_export(request):
             }
             for obj in qs
         ]
+        
+        if reviewed_only:
+            manual_qs = ManualDataset.objects.all()
+            if date_from: manual_qs = manual_qs.filter(created_at__date__gte=date_from)
+            if date_to:   manual_qs = manual_qs.filter(created_at__date__lte=date_to)
+            
+            data.extend([
+                {
+                    'original_text':      obj.original_text,
+                    'tunbert_intent':     '',
+                    'tunbert_confidence': 0.0,
+                    'gemini_intent':      '',
+                    'review_label':       obj.label,
+                    'trigger_reason':     'MANUAL',
+                    'label':              obj.label,
+                }
+                for obj in manual_qs
+            ])
+            
         response = HttpResponse(json.dumps(data, ensure_ascii=False, indent=2), content_type='application/json')
         response['Content-Disposition'] = 'attachment; filename="fallback_logs.json"'
         return response
@@ -173,7 +192,15 @@ def mlops_export(request):
     writer = csv.writer(response)
     writer.writerow(['id', 'original_text', 'tunbert_intent', 'tunbert_confidence', 'gemini_intent', 'review_label', 'trigger_reason', 'created_at'])
     for obj in qs:
-        writer.writerow([obj.id, obj.original_text, obj.tunbert_intent, obj.tunbert_confidence, obj.gemini_intent, obj.review_label or obj.gemini_intent, obj.trigger_reason, obj.created_at.strftime('%Y-%m-%d %H:%M')])
+        writer.writerow([f"fb_{obj.id}", obj.original_text, obj.tunbert_intent, obj.tunbert_confidence, obj.gemini_intent, obj.review_label or obj.gemini_intent, obj.trigger_reason, obj.created_at.strftime('%Y-%m-%d %H:%M')])
+        
+    if reviewed_only:
+        manual_qs = ManualDataset.objects.all()
+        if date_from: manual_qs = manual_qs.filter(created_at__date__gte=date_from)
+        if date_to:   manual_qs = manual_qs.filter(created_at__date__lte=date_to)
+        for obj in manual_qs:
+            writer.writerow([f"md_{obj.id}", obj.original_text, '', 0.0, '', obj.label, 'MANUAL', obj.created_at.strftime('%Y-%m-%d %H:%M')])
+            
     return response
 
 
@@ -307,23 +334,61 @@ def mlops_dataset_import(request):
     if not file_obj:
         return Response({'error': 'Aucun fichier fourni.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        data = json.load(file_obj)
-    except Exception:
-        return Response({'error': 'Fichier JSON invalide. Seul le format JSON exporté est supporté.'}, status=status.HTTP_400_BAD_REQUEST)
+    filename = file_obj.name.lower()
+    data = []
     
-    if not isinstance(data, list):
-        return Response({'error': 'Le JSON doit contenir une liste d objects.'}, status=status.HTTP_400_BAD_REQUEST)
+    if filename.endswith('.json'):
+        try:
+            data = json.load(file_obj)
+            if not isinstance(data, list):
+                return Response({'error': 'Le JSON doit contenir une liste d objects.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({'error': 'Fichier JSON invalide. Vérifiez le format.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+    elif filename.endswith('.csv'):
+        raw_bytes = file_obj.read()
+        try:
+            decoded_file = raw_bytes.decode('utf-8-sig').splitlines()
+        except UnicodeDecodeError:
+            try:
+                decoded_file = raw_bytes.decode('windows-1252').splitlines()
+            except UnicodeDecodeError:
+                decoded_file = raw_bytes.decode('latin-1', errors='replace').splitlines()
+                
+        try:
+            # Skip junk top lines (like "Column2;Column3") by looking for known column names
+            start_idx = 0
+            for i, line in enumerate(decoded_file[:10]):
+                line_lower = line.lower()
+                if any(k in line_lower for k in ['original_text', 'cleaned_message', 'message', 'text', 'label']):
+                    start_idx = i
+                    break
+                    
+            first_line = decoded_file[start_idx] if decoded_file else ""
+            delimiter = ';' if ';' in first_line else ','
+            reader = csv.DictReader(decoded_file[start_idx:], delimiter=delimiter)
+            
+            if reader.fieldnames:
+                reader.fieldnames = [k.strip().lower() for k in reader.fieldnames]
+                
+            for row in reader:
+                data.append(row)
+        except Exception as e:
+            return Response({'error': f'Erreur lors de la lecture du CSV : {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+            
+    else:
+        return Response({'error': 'Format non supporté. Veuillez importer un fichier JSON ou CSV.'}, status=status.HTTP_400_BAD_REQUEST)
 
     imported_count = 0
     updated_count = 0
     
     for item in data:
-        original_text = item.get('original_text')
+        # Support various column names for the text and the label
+        original_text = item.get('original_text') or item.get('cleaned_message') or item.get('message') or item.get('text')
         if not original_text:
             continue
             
-        label = item.get('review_label') or item.get('label')
+        label = item.get('review_label') or item.get('label') or item.get('intent')
         
         log = NLUFallbackLog.objects.filter(original_text=original_text).first()
         if log:
@@ -333,17 +398,16 @@ def mlops_dataset_import(request):
                 log.save(update_fields=['review_label', 'reviewed'])
                 updated_count += 1
         else:
-            NLUFallbackLog.objects.create(
+            md, created = ManualDataset.objects.get_or_create(
                 original_text=original_text,
-                tunbert_intent=item.get('tunbert_intent') or item.get('gemini_intent') or '',
-                tunbert_confidence=item.get('tunbert_confidence', 0.0),
-                gemini_intent=item.get('gemini_intent') or item.get('tunbert_intent') or '',
-                gemini_confidence=item.get('gemini_confidence', 0.0),
-                trigger_reason=item.get('trigger_reason', 'LOW_CONFIDENCE'),
-                review_label=label,
-                reviewed=bool(label),
+                defaults={'label': label or 'UNKNOWN'}
             )
-            imported_count += 1
+            if not created and label and md.label != label:
+                md.label = label
+                md.save(update_fields=['label'])
+                updated_count += 1
+            elif created:
+                imported_count += 1
 
     return Response({
         'message': 'Import réussi.',
