@@ -49,26 +49,28 @@ export default function DatasetExport() {
   return (
     <div className="max-w-4xl mx-auto flex flex-col h-full">
       <div className="mb-8 text-center">
-        <h2 className="text-3xl font-extrabold text-gray-900">Gestion de Dataset</h2>
-        <p className="text-gray-500 mt-3 max-w-2xl mx-auto">
-          Exportez ou importez des données conversationnelles pour entraîner vos propres modèles hors-ligne.
+        <h2 className="text-3xl sm:text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-[#0f6885] to-indigo-600 pb-1">
+          Gestion de Dataset
+        </h2>
+        <p className="text-gray-500 mt-4 max-w-2xl mx-auto font-medium">
+          Exportez ou importez des données conversationnelles pour entraîner vos propres modèles hors-ligne ou restaurer des annotations.
         </p>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-8 max-w-md mx-auto">
+      <div className="flex bg-gray-100 p-1 rounded-xl mb-8 max-w-md mx-auto shadow-inner">
         <button
           onClick={() => setActiveTab('export')}
-          className={`flex-1 py-3 text-sm font-bold text-center transition-colors border-b-2 ${
-            activeTab === 'export' ? 'border-[#0f6885] text-[#0f6885]' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          className={`flex-1 py-2.5 text-sm font-bold text-center transition-all rounded-lg ${
+            activeTab === 'export' ? 'bg-white text-[#0f6885] shadow-sm' : 'text-gray-500 hover:text-gray-700'
           }`}
         >
           Exporter
         </button>
         <button
           onClick={() => setActiveTab('import')}
-          className={`flex-1 py-3 text-sm font-bold text-center transition-colors border-b-2 ${
-            activeTab === 'import' ? 'border-[#0f6885] text-[#0f6885]' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          className={`flex-1 py-2.5 text-sm font-bold text-center transition-all rounded-lg ${
+            activeTab === 'import' ? 'bg-white text-[#0f6885] shadow-sm' : 'text-gray-500 hover:text-gray-700'
           }`}
         >
           Importer
@@ -163,18 +165,24 @@ export default function DatasetExport() {
           ) : (
             <>
               {/* Import UI */}
-              <div className="mb-8">
+              <div className="mb-10">
                 <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">Uploader un fichier</h3>
                 <div 
-                  className="border-2 border-dashed border-gray-300 rounded-2xl p-10 flex flex-col items-center justify-center text-center hover:border-[#0f6885] hover:bg-[#0f6885]/5 transition-colors cursor-pointer"
+                  className={`border-2 border-dashed rounded-3xl p-12 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
+                    importFile 
+                      ? 'border-[#0f6885] bg-[#0f6885]/5 shadow-inner' 
+                      : 'border-gray-300 hover:border-[#0f6885] hover:bg-gray-50'
+                  }`}
                   onClick={() => document.getElementById('file-upload')?.click()}
                 >
-                  <FileUp className="w-12 h-12 text-gray-400 mb-4" />
-                  <p className="text-lg font-semibold text-gray-900 mb-1">
-                    {importFile ? importFile.name : 'Cliquez pour uploader un fichier JSON'}
+                  <div className={`p-4 rounded-full mb-5 ${importFile ? 'bg-[#0f6885] text-white' : 'bg-gray-100 text-gray-400'}`}>
+                    {importFile ? <CheckCircle className="w-8 h-8" /> : <FileUp className="w-8 h-8" />}
+                  </div>
+                  <p className="text-xl font-bold text-gray-900 mb-2">
+                    {importFile ? importFile.name : 'Cliquez pour sélectionner un fichier JSON'}
                   </p>
-                  <p className="text-sm text-gray-500">
-                    {importFile ? `${(importFile.size / 1024).toFixed(2)} KB` : 'Format JSON exporté par TikTak AI'}
+                  <p className="text-sm font-medium text-gray-500">
+                    {importFile ? `${(importFile.size / 1024).toFixed(2)} KB prês pour l'import` : 'Format JSON exporté par l\'outil MLOps TikTak'}
                   </p>
                   <input 
                     id="file-upload" 
