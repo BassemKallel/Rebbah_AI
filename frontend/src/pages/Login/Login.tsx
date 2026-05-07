@@ -6,7 +6,7 @@ import logoTiktak from '../../assets/images/logoTiktak.png';
 import './Login.css';
 
 export default function Login() {
-  const { login, isAuthenticated, isLoading } = useAuth();
+  const { login, isAuthenticated, isLoading, role } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -16,6 +16,9 @@ export default function Login() {
 
   // Already authenticated → redirect to dashboard
   if (!isLoading && isAuthenticated) {
+    if (role === 'admin') {
+      return <Navigate to="/admin/mlops" replace />;
+    }
     return <Navigate to="/" replace />;
   }
 
@@ -24,8 +27,12 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await login(username, password);
-      navigate('/', { replace: true });
+      const authUser = await login(username, password);
+      if (authUser?.role === 'admin') {
+        navigate('/admin/mlops', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     } catch (err: any) {
       const msg = err?.response?.data?.error || 'Identifiants invalides. Veuillez réessayer.';
       setError(msg);

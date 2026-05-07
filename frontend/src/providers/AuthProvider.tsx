@@ -9,10 +9,11 @@ interface AuthState {
   shopId: string | null;
   companyName: string | null;
   username: string | null;
+  role: string | null;
 }
 
 interface AuthContextType extends AuthState {
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<{ role?: string }>;
   logout: () => void;
 }
 
@@ -24,6 +25,7 @@ const STORAGE_KEYS = {
   shopId: 'tiktak_shop_id',
   companyName: 'tiktak_company_name',
   username: 'tiktak_username',
+  role: 'tiktak_role',
 } as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -35,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     shopId: null,
     companyName: null,
     username: null,
+    role: null,
   });
 
   // ── Restore session from localStorage ──────────────────────────────
@@ -44,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const shopId = localStorage.getItem(STORAGE_KEYS.shopId);
     const companyName = localStorage.getItem(STORAGE_KEYS.companyName);
     const username = localStorage.getItem(STORAGE_KEYS.username);
+    const role = localStorage.getItem(STORAGE_KEYS.role);
 
     if (access && refresh) {
       setState({
@@ -54,13 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         shopId,
         companyName,
         username,
+        role,
       });
     } else {
       setState((s) => ({ ...s, isLoading: false }));
     }
   }, []);
 
-  // ── Login ───────────────────────────────────────────────────────────
   const login = useCallback(async (username: string, password: string) => {
     const { data } = await loginApi(username, password);
     persistSession(data);
@@ -72,7 +76,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       shopId: data.shop_id,
       companyName: data.company_name,
       username: data.user.username,
+      role: data.role || 'owner',
     });
+    return { role: data.role || 'owner' };
   }, []);
 
   // ── Logout ──────────────────────────────────────────────────────────
@@ -86,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       shopId: null,
       companyName: null,
       username: null,
+      role: null,
     });
   }, []);
 
@@ -129,12 +136,13 @@ export function useAuth(): AuthContextType {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function persistSession(data: LoginResponse) {
+function persistSession(data: LoginResponse & { role?: string }) {
   localStorage.setItem(STORAGE_KEYS.access, data.access);
   localStorage.setItem(STORAGE_KEYS.refresh, data.refresh);
-  localStorage.setItem(STORAGE_KEYS.shopId, data.shop_id);
-  localStorage.setItem(STORAGE_KEYS.companyName, data.company_name);
-  localStorage.setItem(STORAGE_KEYS.username, data.user.username);
+  if (data.shop_id) localStorage.setItem(STORAGE_KEYS.shopId, data.shop_id);
+  if (data.company_name) localStorage.setItem(STORAGE_KEYS.companyName, data.company_name);
+  if (data.user?.username) localStorage.setItem(STORAGE_KEYS.username, data.user.username);
+  localStorage.setItem(STORAGE_KEYS.role, data.role || 'owner');
 }
 
 function clearSession() {

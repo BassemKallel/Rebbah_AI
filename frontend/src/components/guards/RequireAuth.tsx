@@ -7,7 +7,7 @@ import { useAuth } from '../../providers/AuthProvider';
  * Wrap protected routes with this component.
  */
 export default function RequireAuth() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, role } = useAuth();
 
   if (isLoading) {
     return (
@@ -29,5 +29,8 @@ export default function RequireAuth() {
     );
   }
 
-  return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (role === 'admin') return <Navigate to="/admin/mlops" replace />;
+  
+  return <Outlet />;
 }
