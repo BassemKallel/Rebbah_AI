@@ -7,7 +7,7 @@ import { useAuth } from '../../providers/AuthProvider';
  * or to / if the user is not an admin.
  */
 export default function RequireAdmin() {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading, role } = useAuth();
 
   if (isLoading) {
     return (
@@ -30,7 +30,7 @@ export default function RequireAdmin() {
   }
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (user?.role !== 'admin') return <Navigate to="/" replace />;
+  if (role !== 'admin') return <Navigate to="/" replace />;
   
   return <Outlet />;
 }

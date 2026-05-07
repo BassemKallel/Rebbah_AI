@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Download, FileJson, FileSpreadsheet, CheckCircle } from 'lucide-react';
 import { mlopsApi } from '../../../api/mlopsApi';
-import api from '../../../api/axiosInstance'; // to get baseURL
 
 export default function DatasetExport() {
   const [format, setFormat] = useState<'json' | 'csv'>('json');

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { CheckCircle, AlertCircle } from 'lucide-react';
 import { mlopsApi } from '../../../api/mlopsApi';
-import type { NLUFallbackLog } from '../../../types/mlops';
+import type { NLUFallbackLog, PaginatedFallbacks } from '../../../types/mlops';
 
 const INTENT_OPTIONS = [
   'ASK_ADVICE', 'ASK_AVAILABILITY', 'ASK_DELIVERY', 'ASK_DETAILS',
@@ -21,14 +21,13 @@ export default function PredictionReview() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<string>('');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<PaginatedFallbacks>({
     queryKey: ['fallbacks', filter, page, search],
     queryFn: () => mlopsApi.getFallbacks({
       reviewed: filter === 'PENDING' ? false : filter === 'REVIEWED' ? true : undefined,
       page,
       search: search || undefined
-    }),
-    keepPreviousData: true,
+    })
   });
 
   const reviewMutation = useMutation({
@@ -145,7 +144,7 @@ export default function PredictionReview() {
                           </select>
                           <button
                             onClick={() => handleSave(log.id)}
-                            disabled={reviewMutation.isLoading}
+                            disabled={reviewMutation.isPending}
                             className="bg-[#0f6885] text-white p-1.5 rounded-lg hover:bg-[#0c5168]"
                           >
                             <CheckCircle className="w-4 h-4" />

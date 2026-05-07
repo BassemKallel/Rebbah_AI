@@ -22,6 +22,7 @@ const MessengerInbox: React.FC = () => {
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState('');
   const [lastMessages, setLastMessages] = useState<Record<string, string>>({});
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [handoffLoading, setHandoffLoading] = useState(false);
 
   /**
@@ -147,7 +148,7 @@ const MessengerInbox: React.FC = () => {
     } catch (err) {
       console.error('[HANDOFF] Agent reply failed:', err);
     }
-  }, [selected, draft]);
+  }, [selected, draft, loadMessages]);
 
   /* ── Silent polling when in human mode (8s, no flicker) ── */
   useEffect(() => {
@@ -157,7 +158,7 @@ const MessengerInbox: React.FC = () => {
       pollMessages(convIds);
     }, 8000);
     return () => clearInterval(interval);
-  }, [selected?.is_human_controlled, selected?.id, pollMessages]);
+  }, [selected?.is_human_controlled, selected?.id, selected?._convIds, pollMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

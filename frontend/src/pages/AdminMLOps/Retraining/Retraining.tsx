@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Play, RotateCw, CheckCircle, XCircle, AlertTriangle, Activity } from 'lucide-react';
 import { mlopsApi } from '../../../api/mlopsApi';
-import type { RetrainingLog } from '../../../types/mlops';
 import { LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 export default function Retraining() {

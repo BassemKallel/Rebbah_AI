@@ -15,6 +15,7 @@ export interface LoginResponse {
   shop_id: string;
   company_name: string;
   dashboard_token: string;
+  role?: string;
 }
 
 export interface MeResponse {

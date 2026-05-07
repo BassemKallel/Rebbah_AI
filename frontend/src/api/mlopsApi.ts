@@ -1,5 +1,5 @@
 import api from './axiosInstance';
-import { MLOpsStats, PaginatedFallbacks, RetrainingLog, RetrainingStatus } from '../types/mlops';
+import { MLOpsStats, PaginatedFallbacks, RetrainingStatus } from '../types/mlops';
 
 export const mlopsApi = {
   // 1. Dashboard Stats
