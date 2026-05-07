@@ -53,12 +53,10 @@ export default function Retraining() {
     <div className="max-w-[1600px] mx-auto flex flex-col h-full space-y-6">
       
       {/* Header & Trigger */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 flex flex-wrap justify-between items-center gap-6 bg-gradient-to-br from-white to-gray-50/50">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-wrap justify-between items-center gap-6">
         <div>
-          <h2 className="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-[#0f6885] to-indigo-600">
-            Pipeline de Réentraînement
-          </h2>
-          <p className="text-gray-500 mt-2 font-medium">
+          <h2 className="text-2xl font-bold text-gray-900">Pipeline de Réentraînement</h2>
+          <p className="text-gray-500 mt-1">
             Déclenchez le réentraînement TunBERT via GitHub Actions ou consultez les rapports des anciens runs.
           </p>
         </div>
@@ -121,21 +119,21 @@ export default function Retraining() {
                       : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
                   }`}
                 >
-                  <div className="flex justify-between items-start mb-3">
-                    <span className="font-extrabold text-gray-900">Run #{run.run_number || run.id}</span>
-                    <span className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-lg border ${
-                      run.status === 'SUCCESS' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
-                      run.status === 'FAILED' ? 'bg-red-50 border-red-200 text-red-700' :
-                      run.status === 'SKIPPED' ? 'bg-orange-50 border-orange-200 text-orange-700' :
-                      'bg-blue-50 border-blue-200 text-blue-700'
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="font-bold text-gray-900">Run #{run.run_number || run.id}</span>
+                    <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full ${
+                      run.status === 'SUCCESS' ? 'bg-emerald-100 text-emerald-700' :
+                      run.status === 'FAILED' ? 'bg-red-100 text-red-700' :
+                      run.status === 'SKIPPED' ? 'bg-orange-100 text-orange-700' :
+                      'bg-blue-100 text-blue-700'
                     }`}>
                       {run.status}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 flex items-center justify-between font-medium">
-                    <span>{new Date(run.started_at).toLocaleString('fr-FR')}</span>
+                  <div className="text-xs text-gray-500 flex items-center justify-between">
+                    <span>{new Date(run.started_at).toLocaleDateString('fr-FR')}</span>
                     {run.f1_improvement !== null && (
-                      <span className={`font-bold px-2 py-1 rounded-md ${run.f1_improvement > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`font-semibold ${run.f1_improvement > 0 ? 'text-emerald-500' : 'text-gray-500'}`}>
                         Δ {run.f1_improvement > 0 ? '+' : ''}{run.f1_improvement.toFixed(4)}
                       </span>
                     )}
@@ -160,22 +158,22 @@ export default function Retraining() {
           ) : reportData?.report ? (
             <div className="space-y-8 animate-fade-in">
               {/* Header Report */}
-              <div className="flex justify-between items-end border-b border-gray-100 pb-6">
+              <div className="flex justify-between items-end border-b pb-4">
                 <div>
-                  <h3 className="text-2xl font-extrabold text-gray-900">Rapport d'entraînement</h3>
-                  <div className="flex flex-wrap gap-3 mt-3 text-sm">
-                    <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-md font-medium">Durée : {reportData.report.meta.duration_seconds}s</span>
-                    <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-md font-medium">Epochs : {reportData.report.meta.epochs}</span>
-                    <span className="bg-[#0f6885]/10 text-[#0f6885] px-3 py-1 rounded-md font-bold">Modèle : {reportData.report.meta.base_model}</span>
+                  <h3 className="text-xl font-bold text-gray-900">Rapport d'entraînement</h3>
+                  <div className="flex gap-4 mt-2 text-sm text-gray-500">
+                    <span>Durée : {reportData.report.meta.duration_seconds}s</span>
+                    <span>Epochs : {reportData.report.meta.epochs}</span>
+                    <span>Modèle : {reportData.report.meta.base_model}</span>
                   </div>
                 </div>
                 {reportData.deployed ? (
-                  <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl font-bold shadow-sm">
+                  <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg font-bold">
                     <CheckCircle className="w-5 h-5" />
                     Déployé en production
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2 text-orange-700 bg-orange-50 border border-orange-200 px-4 py-2 rounded-xl font-bold shadow-sm">
+                  <div className="flex items-center gap-2 text-orange-600 bg-orange-50 px-3 py-1.5 rounded-lg font-bold">
                     <AlertTriangle className="w-5 h-5" />
                     Non déployé (Skip)
                   </div>
