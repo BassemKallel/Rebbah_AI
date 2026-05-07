@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import status
 
-from ..models import NLUFallbackLog, RetrainingLog
+from ..models import NLUFallbackLog, RetrainingLog, ProductVector
 from ..permissions import IsAdminUser
 from ..serializers.mlops import (
     NLUFallbackLogListSerializer,
