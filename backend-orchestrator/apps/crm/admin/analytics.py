@@ -3,7 +3,7 @@ from django.conf import settings as _settings
 from django.contrib import admin, messages as _messages
 from django.utils.html import format_html
 import json
-from ..models import NLUFallbackLog, ProductVector
+from ..models import NLUFallbackLog, ProductVector, RetrainingLog
 
 
 def _vision_base():
@@ -56,6 +56,22 @@ class NLUFallbackLogAdmin(admin.ModelAdmin):
             return '-'
         return format_html('<pre>{}</pre>', json.dumps(obj.gemini_entities, indent=2, ensure_ascii=False))
     pretty_gemini_entities.short_description = 'Entites Gemini'
+
+
+@admin.register(RetrainingLog)
+class RetrainingLogAdmin(admin.ModelAdmin):
+    list_display = ('run_number', 'status', 'deployed', 'old_f1', 'new_f1', 'f1_improvement', 'started_at')
+    list_filter = ('status', 'deployed', 'started_at')
+    readonly_fields = ('training_report', 'started_at', 'finished_at')
+    ordering = ('-started_at',)
+    
+    def f1_improvement(self, obj):
+        if obj.new_f1 and obj.old_f1:
+            diff = obj.new_f1 - obj.old_f1
+            color = 'green' if diff > 0 else 'gray'
+            return format_html('<span style="color:{}; font-weight:bold;">{:+.4f}</span>', color, diff)
+        return '-'
+    f1_improvement.short_description = 'Amélioration F1'
 
 
 @admin.register(ProductVector)

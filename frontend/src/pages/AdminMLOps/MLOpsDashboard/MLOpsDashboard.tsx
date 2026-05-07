@@ -5,7 +5,7 @@ import KpiCard from '../../../components/dashboard/KpiCard';
 import type { KpiData } from '../../../types';
 import { mlopsApi } from '../../../api/mlopsApi';
 import type { MLOpsStats, ModelsHealthResponse } from '../../../types/mlops';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, AreaChart, Area, CartesianGrid } from 'recharts';
 
 export default function MLOpsDashboard() {
   const [stats, setStats] = useState<MLOpsStats | null>(null);
@@ -122,22 +122,61 @@ export default function MLOpsDashboard() {
       {/* Charts / Data */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
         
+        {/* Fallbacks History Chart */}
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Historique des Fallbacks (7j)</h3>
+          <div className="h-64">
+            {stats && stats.sparkline_7d.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stats.sparkline_7d.map((val, i) => ({ day: `J-${6-i}`, count: val }))}>
+                  <defs>
+                    <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0f6885" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#0f6885" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                  <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  />
+                  <Area type="monotone" dataKey="count" stroke="#0f6885" strokeWidth={3} fillOpacity={1} fill="url(#colorCount)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+               <div className="flex items-center justify-center h-full text-gray-400">Aucune donnée disponible</div>
+            )}
+          </div>
+        </div>
+
         {/* Reasons Chart */}
         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <h3 className="text-lg font-bold text-gray-900 mb-4">Raisons des Fallbacks (30j)</h3>
           <div className="h-64">
             {stats && stats.fallback_by_reason.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stats.fallback_by_reason} layout="vertical" margin={{ top: 0, right: 0, left: 40, bottom: 0 }}>
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey="trigger_reason" tick={{ fontSize: 12 }} width={120} />
-                  <Tooltip cursor={{ fill: '#f8fafc' }} />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                <PieChart>
+                  <Pie
+                    data={stats.fallback_by_reason}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={5}
+                    dataKey="count"
+                    nameKey="trigger_reason"
+                    label={({ payload, percent }: any) => `${payload.trigger_reason} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
                     {stats.fallback_by_reason.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={index === 0 ? '#ef4444' : '#0f6885'} />
+                      <Cell key={`cell-${index}`} fill={['#ef4444', '#f97316', '#eab308', '#3b82f6', '#8b5cf6'][index % 5]} />
                     ))}
-                  </Bar>
-                </BarChart>
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  />
+                </PieChart>
               </ResponsiveContainer>
             ) : (
                <div className="flex items-center justify-center h-full text-gray-400">Aucune donnée disponible</div>
@@ -146,7 +185,7 @@ export default function MLOpsDashboard() {
         </div>
 
         {/* Retraining Status */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <div className="lg:col-span-2 bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <h3 className="text-lg font-bold text-gray-900 mb-4">Dernier Entraînement</h3>
           {stats?.last_retraining ? (
             <div className="space-y-4">
