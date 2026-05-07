@@ -212,7 +212,7 @@ def get_color_from_variation(variation_id, products: list) -> str | None:
 
 # ─── Matching ────────────────────────────────────────────────────────────────
 
-def find_product(products: list, prod_name: str, vision_variation_id: str = None) -> tuple:
+def find_product(products: list, prod_name: str, vision_variation_id: str | None = None) -> tuple:
     """
     Try to match a product from the catalog.
 

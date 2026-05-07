@@ -41,7 +41,7 @@ class ContextManager:
         key = self._get_key(user_id)
         data = self.redis_client.get(key)
         if data:
-            return json.loads(data)
+            return json.loads(data)  # type: ignore[arg-type]  # redis sync client always returns str with decode_responses=True
         return []
 
     def get_recent_context(self, user_id, n=5):

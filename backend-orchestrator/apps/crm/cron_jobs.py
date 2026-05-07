@@ -33,6 +33,8 @@ class ExpireConversationsCronJob(CronJobBase):
         count = 0
         for conv in expired:
             try:
+                if conv.completed_at is None:
+                    continue
                 elapsed = (now - conv.completed_at).total_seconds() / 60
                 if elapsed > GRACE_PERIOD_MINUTES:
                     conv.state = "COMPLETED"
