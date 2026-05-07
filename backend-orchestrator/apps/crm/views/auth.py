@@ -53,7 +53,13 @@ class LoginView(APIView):
             company = profile.company
         except Exception:
             return Response(
-                {'error': 'Aucun profil ou company associé à cet utilisateur.'},
+                {'error': 'Aucun profil associé à cet utilisateur.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not company and profile.role != 'admin':
+            return Response(
+                {'error': 'Aucune entreprise associée.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -68,9 +74,10 @@ class LoginView(APIView):
                 'username': user.username,
                 'email': user.email,
             },
-            'shop_id': company.shop_id,
-            'company_name': company.name,
-            'dashboard_token': company.dashboard_token,
+            'role': profile.role,
+            'shop_id': company.shop_id if company else None,
+            'company_name': company.name if company else 'TikTak AI (Admin)',
+            'dashboard_token': company.dashboard_token if company else None,
         })
 
 
@@ -110,7 +117,7 @@ class MeView(APIView):
                 'shop_id': company.shop_id,
                 'name': company.name,
                 'is_active': company.is_active,
-            },
+            } if company else None,
             'role': user.profile.role,
         })
 

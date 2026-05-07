@@ -42,7 +42,7 @@ class UserProfile(models.Model):
     ]
 
     user       = models.OneToOneField('auth.User', on_delete=models.CASCADE, related_name='profile')
-    company    = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='users')
+    company    = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='users', null=True, blank=True)
     role       = models.CharField(max_length=20, choices=ROLE_CHOICES, default='owner')
     created_at = models.DateTimeField(auto_now_add=True)
 
