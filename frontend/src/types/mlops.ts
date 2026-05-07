@@ -11,6 +11,7 @@ export interface MLOpsStats {
   fallback_by_reason: FallbackReasonStat[];
   sparkline_7d: number[];
   last_retraining: RetrainingLog | null;
+  total_embeddings: number;
 }
 
 export interface ModelHealth {

@@ -61,6 +61,12 @@ export default function MLOpsDashboard() {
       icon: <Activity className="w-5 h-5" />,
       bg: 'bg-emerald-50', text: 'text-emerald-600', sparkline: [0,0,0],
     },
+    {
+      label: 'Vecteurs Stockés', value: String(stats.total_embeddings || 0),
+      delta: '', up: true, sub: 'Base Qdrant (CLIP)',
+      icon: <Server className="w-5 h-5" />,
+      bg: 'bg-cyan-50', text: 'text-cyan-600', sparkline: [0,0,0],
+    },
   ] : [];
 
   return (
@@ -115,7 +121,7 @@ export default function MLOpsDashboard() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5 mb-6 sm:mb-7">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 sm:gap-5 mb-6 sm:mb-7">
         {kpiCards.map((k) => <KpiCard key={k.label} k={k} />)}
       </div>
 

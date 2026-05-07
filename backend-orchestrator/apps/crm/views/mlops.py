@@ -60,6 +60,8 @@ def mlops_stats(request):
     last_retrain = RetrainingLog.objects.first()
     last_retrain_data = RetrainingLogSerializer(last_retrain).data if last_retrain else None
 
+    total_embeddings = ProductVector.objects.count()
+
     return Response({
         'reviewed_count':      reviewed_count,
         'pending_review':      pending_review,
@@ -68,6 +70,7 @@ def mlops_stats(request):
         'fallback_by_reason':  by_reason,
         'sparkline_7d':        sparkline,
         'last_retraining':     last_retrain_data,
+        'total_embeddings':    total_embeddings,
     })
 
 
