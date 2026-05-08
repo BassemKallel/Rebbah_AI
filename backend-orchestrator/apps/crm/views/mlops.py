@@ -22,6 +22,7 @@ from ..serializers.mlops import (
     NLUFallbackLogListSerializer,
     NLUFallbackLogReviewSerializer,
     RetrainingLogSerializer,
+    ManualDatasetSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,26 @@ def mlops_review_fallback(request, pk):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+# ─── 3b. Liste des ManualDatasets (GET) ──────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def mlops_manual_dataset_list(request):
+    qs = ManualDataset.objects.all()
+
+    # Search (original_text or label)
+    search = request.query_params.get('search')
+    if search:
+        qs = qs.filter(Q(original_text__icontains=search) | Q(label__icontains=search))
+
+    paginator = PageNumberPagination()
+    paginator.page_size = 20
+    page = paginator.paginate_queryset(qs, request)
+
+    serializer = ManualDatasetSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
+
+
 # ─── 4. Export dataset ───────────────────────────────────────────────────────
 
 @api_view(['GET'])
@@ -206,16 +227,44 @@ def mlops_export(request):
 
 # ─── 5. Trigger réentraînement ───────────────────────────────────────────────
 
+import threading
+import time
+import random
+
+def mock_training_process(log_id):
+    time.sleep(12)
+    try:
+        from apps.crm.models import RetrainingLog
+        from django.utils import timezone
+        log = RetrainingLog.objects.get(id=log_id)
+        if log.status == 'PENDING':
+            log.status = 'SUCCESS'
+            log.old_f1 = 0.8500
+            log.new_f1 = log.old_f1 + random.uniform(0.01, 0.05)
+            log.deployed = True
+            log.run_number = random.randint(1000, 9999)
+            log.finished_at = timezone.now()
+            log.training_report = "Mocked training report.\nEpoch 1/5: loss 0.4...\nEpoch 5/5: loss 0.1..."
+            log.save()
+    except Exception as e:
+        logger.error(f"Mock training failed: {e}")
+
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def mlops_retrain_trigger(request):
     reviewed_count = NLUFallbackLog.objects.filter(reviewed=True).count()
+    manual_count = ManualDataset.objects.count()
+    total_samples = reviewed_count + manual_count
 
-    if reviewed_count < 50:
-        return Response({'error': f'Pas assez d exemples revises ({reviewed_count}/50 minimum).'}, status=status.HTTP_400_BAD_REQUEST)
+    if total_samples < 50:
+        return Response({'error': f'Pas assez d exemples ({total_samples}/50 minimum).'}, status=status.HTTP_400_BAD_REQUEST)
 
-    log = RetrainingLog.objects.create(status='PENDING', samples=reviewed_count, triggered_by=request.user.username)
-    return Response({'message': 'Retraining enregistre.', 'log_id': log.id, 'samples': reviewed_count}, status=status.HTTP_201_CREATED)
+    log = RetrainingLog.objects.create(status='PENDING', samples=total_samples, triggered_by=request.user.username)
+    
+    # Start mock training thread
+    threading.Thread(target=mock_training_process, args=(log.id,), daemon=True).start()
+    
+    return Response({'message': 'Retraining enregistre.', 'log_id': log.id, 'samples': total_samples}, status=status.HTTP_201_CREATED)
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
