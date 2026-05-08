@@ -3,7 +3,7 @@ from django.conf import settings as _settings
 from django.contrib import admin, messages as _messages
 from django.utils.html import format_html
 import json
-from ..models import NLUFallbackLog, ProductVector, RetrainingLog
+from ..models import NLUFallbackLog, ProductVector, RetrainingLog, ManualDataset
 
 
 def _vision_base():
@@ -72,6 +72,20 @@ class RetrainingLogAdmin(admin.ModelAdmin):
             color = 'green' if diff > 0 else 'gray'
             return format_html('<span style="color:{}; font-weight:bold;">{:+.4f}</span>', color, diff)
         return '-'
+
+
+@admin.register(ManualDataset)
+class ManualDatasetAdmin(admin.ModelAdmin):
+    list_display  = ('original_text_preview', 'label', 'source', 'created_at')
+    list_filter   = ('source', 'label', 'created_at')
+    search_fields = ('original_text', 'label')
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+    readonly_fields = ('created_at',)
+
+    @admin.display(description='Texte Original')
+    def original_text_preview(self, obj):
+        return obj.original_text[:80] + '...' if len(obj.original_text) > 80 else obj.original_text
 
 
 @admin.register(ProductVector)

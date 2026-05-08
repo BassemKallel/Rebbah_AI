@@ -2,7 +2,7 @@
 serializers/mlops.py — Sérialiseurs pour les endpoints Admin MLOps
 """
 from rest_framework import serializers
-from ..models import NLUFallbackLog, RetrainingLog
+from ..models import NLUFallbackLog, RetrainingLog, ManualDataset
 
 class NLUFallbackLogListSerializer(serializers.ModelSerializer):
     """
@@ -72,3 +72,11 @@ class RetrainingLogSerializer(serializers.ModelSerializer):
         if obj.old_f1 and obj.new_f1:
             return round(obj.new_f1 - obj.old_f1, 4)
         return None
+
+class ManualDatasetSerializer(serializers.ModelSerializer):
+    """
+    Sérialiseur pour la table ManualDataset.
+    """
+    class Meta:
+        model = ManualDataset
+        fields = ['id', 'original_text', 'label', 'source', 'created_at']

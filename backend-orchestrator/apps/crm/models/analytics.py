@@ -34,6 +34,22 @@ class NLUFallbackLog(models.Model):
         return f"[{self.trigger_reason}] {self.tunbert_intent} {arrow} {self.gemini_intent} | '{self.original_text[:40]}'"
 
 
+class ManualDataset(models.Model):
+    """Base de données annotée manuellement (importée ou créée via admin)."""
+    original_text = models.TextField(unique=True)
+    label         = models.CharField(max_length=50)
+    source        = models.CharField(max_length=50, default='CSV Import')
+    created_at    = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Manual Dataset Log'
+        verbose_name_plural = 'Manual Dataset Logs'
+
+    def __str__(self):
+        return f"[{self.source}] {self.label} | '{self.original_text[:40]}'"
+
+
 class ProductVector(models.Model):
     """Read-only mirror of products_vector table (managed by vision-service)."""
     product_id   = models.CharField(max_length=255)

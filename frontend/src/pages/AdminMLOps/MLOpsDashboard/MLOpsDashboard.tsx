@@ -5,7 +5,7 @@ import KpiCard from '../../../components/dashboard/KpiCard';
 import type { KpiData } from '../../../types';
 import { mlopsApi } from '../../../api/mlopsApi';
 import type { MLOpsStats, ModelsHealthResponse } from '../../../types/mlops';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, AreaChart, Area, CartesianGrid } from 'recharts';
+import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 
 export default function MLOpsDashboard() {
   const [stats, setStats] = useState<MLOpsStats | null>(null);
@@ -162,27 +162,19 @@ export default function MLOpsDashboard() {
           <div className="h-64">
             {stats && stats.fallback_by_reason.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={stats.fallback_by_reason}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={5}
-                    dataKey="count"
-                    nameKey="trigger_reason"
-                    label={({ payload, percent }: any) => `${payload.trigger_reason} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {stats.fallback_by_reason.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={['#ef4444', '#f97316', '#eab308', '#3b82f6', '#8b5cf6'][index % 5]} />
-                    ))}
-                  </Pie>
+                <BarChart data={stats.fallback_by_reason} layout="vertical" margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="trigger_reason" tick={{ fontSize: 12, fill: '#6b7280', fontWeight: 600 }} width={140} axisLine={false} tickLine={false} />
                   <Tooltip 
+                    cursor={{ fill: '#f8fafc', radius: 8 }}
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                   />
-                </PieChart>
+                  <Bar dataKey="count" radius={[0, 8, 8, 0]} barSize={24}>
+                    {stats.fallback_by_reason.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={['#0f6885', '#164e63', '#0e7490', '#0891b2', '#06b6d4'][index % 5]} />
+                    ))}
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
             ) : (
                <div className="flex items-center justify-center h-full text-gray-400">Aucune donnée disponible</div>

@@ -47,6 +47,21 @@ export interface PaginatedFallbacks {
   results: NLUFallbackLog[];
 }
 
+export interface ManualDataset {
+  id: number;
+  original_text: string;
+  label: string;
+  source: string;
+  created_at: string;
+}
+
+export interface PaginatedManualDatasets {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: ManualDataset[];
+}
+
 export interface PerClassMetric {
   intent: string;
   precision: number;

@@ -1,5 +1,5 @@
 import api from './axiosInstance';
-import { MLOpsStats, PaginatedFallbacks, RetrainingStatus, ModelsHealthResponse } from '../types/mlops';
+import { MLOpsStats, PaginatedFallbacks, RetrainingStatus, ModelsHealthResponse, PaginatedManualDatasets } from '../types/mlops';
 
 export const mlopsApi = {
   // 1. Dashboard Stats
@@ -23,6 +23,15 @@ export const mlopsApi = {
     page_size?: number 
   }): Promise<PaginatedFallbacks> => {
     const { data } = await api.get('/api/v1/crm/admin/mlops/fallbacks/', { params });
+    return data;
+  },
+
+  // 2b. Manual Datasets List
+  getManualDatasets: async (params?: {
+    search?: string;
+    page?: number;
+  }): Promise<PaginatedManualDatasets> => {
+    const { data } = await api.get('/api/v1/crm/admin/mlops/manual-dataset/', { params });
     return data;
   },
 
@@ -50,11 +59,7 @@ export const mlopsApi = {
   importDataset: async (file: File): Promise<{ message: string; imported: number; updated: number }> => {
     const formData = new FormData();
     formData.append('file', file);
-    const { data } = await api.post('/api/v1/crm/admin/mlops/dataset/import/', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    });
+    const { data } = await api.post('/api/v1/crm/admin/mlops/dataset/import/', formData);
     return data;
   },
 
