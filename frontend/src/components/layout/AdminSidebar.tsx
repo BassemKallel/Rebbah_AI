@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { BarChart3, CheckSquare, Download, RefreshCw, X, LogOut } from 'lucide-react';
+import { BarChart3, CheckSquare, Download, RefreshCw, X, LogOut, Database } from 'lucide-react';
 import { useAuth } from '../../providers/AuthProvider';
 
 const ADMIN_NAV_ITEMS = [
   { to: '/admin/mlops', end: true, icon: BarChart3, label: 'Dashboard MLOps' },
   { to: '/admin/review', end: false, icon: CheckSquare, label: 'Révision labels' },
-  { to: '/admin/export', end: false, icon: Download, label: 'Export dataset' },
+  { to: '/admin/manual-dataset', end: false, icon: Database, label: 'Données manuelles' },
   { to: '/admin/retrain', end: false, icon: RefreshCw, label: 'Réentraînement' },
 ];
 

@@ -18,8 +18,8 @@ import Profile from './pages/Profile/Profile';
 import AdminMLOpsLayout from './pages/AdminMLOps/AdminMLOpsLayout';
 import MLOpsDashboard from './pages/AdminMLOps/MLOpsDashboard/MLOpsDashboard';
 import PredictionReview from './pages/AdminMLOps/PredictionReview/PredictionReview';
-import DatasetExport from './pages/AdminMLOps/DatasetExport/DatasetExport';
 import Retraining from './pages/AdminMLOps/Retraining/Retraining';
+import ManualDatasetView from './pages/AdminMLOps/ManualDataset/ManualDatasetView';
 
 
 function App() {
@@ -57,7 +57,7 @@ function App() {
               <Route path="/admin/*" element={<AdminMLOpsLayout />}>
                 <Route path="mlops" element={<MLOpsDashboard />} />
                 <Route path="review" element={<PredictionReview />} />
-                <Route path="export" element={<DatasetExport />} />
+                <Route path="manual-dataset" element={<ManualDatasetView />} />
                 <Route path="retrain" element={<Retraining />} />
               </Route>
             </Route>
