@@ -392,6 +392,7 @@ def generate_llm_response(
     )
 
     # ── Call Gemini ───────────────────────────────────────────────────────
+    response = None
     try:
         from google import genai
 
@@ -445,7 +446,7 @@ def generate_llm_response(
             summary = "\n".join(f"- {k}: {v}" for k, v in merged.items() if not k.startswith("_"))
             
             # Simple language detection based on Gemini's original text
-            is_arabic = any('\u0600' <= c <= '\u06FF' for c in result.get("response_text", ""))
+            is_arabic = any('\u0600' <= c <= '\u06FF' for c in str(result.get("response_text", "")))
             
             if is_arabic:
                 result["response_text"] = f"يعيشك، قيدت كل المعطيات. هاو التلخيص متاعك:\n{summary}\n\nنأكدلك الطلبية؟ (نعم/لا)"
@@ -473,7 +474,7 @@ def generate_llm_response(
     except json.JSONDecodeError as e:
         logger.error(
             f"[LLM] JSON parse error for shop={company.shop_id}: {e} "
-            f"| raw={response.text[:300] if 'response' in dir() else 'N/A'}"
+            f"| raw={response.text[:300] if response and hasattr(response, 'text') else 'N/A'}"
         )
         result["response_text"] = _ERROR_MESSAGES[lang]['retry']
         result["error"] = True

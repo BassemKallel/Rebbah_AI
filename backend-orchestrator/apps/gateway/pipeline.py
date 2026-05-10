@@ -189,7 +189,7 @@ class MessagePipeline:
         with transaction.atomic():
             conversation = (
                 Conversation.objects
-                .select_for_update()
+                .select_for_update(of=('self',))
                 .filter(
                     sender_id=user_id,
                     state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
@@ -298,7 +298,7 @@ class MessagePipeline:
         vision_variation_id = None
 
         if image_file or image_url:
-            vision_result = ai_service.call_vision(shop_id, image_url=image_url, image_file=image_file if image_file else None)
+            vision_result = ai_service.call_vision(shop_id, image_url=str(image_url) if image_url else None, image_file=image_file if image_file else None)
             if vision_result:
                 extracted_entities["product"] = f"Article_From_Image_{vision_result['product_id']}"
                 matched_image_url = vision_result.get("image_url")
@@ -336,7 +336,7 @@ class MessagePipeline:
             context_manager.add_message(
                 user_id, role="user", text=text,
                 intent=extracted_intent,
-                confidence=intent_confidence,
+                confidence=float(intent_confidence or 0.0),
                 entities=extracted_entities,
             )
             # Entity filtering & guards
@@ -441,7 +441,7 @@ class MessagePipeline:
             try:
                 products = tiktak_service.get_products(shop_id)
                 matched_product, color_from_vision, candidates = tiktak_service.find_product(
-                    products, prod_name, vision_variation_id
+                    products, prod_name, str(vision_variation_id) if vision_variation_id else None
                 )
 
                 # Pre-fill color from vision if not yet in context
@@ -952,6 +952,11 @@ class MessagePipeline:
                             and not k.startswith('_')
                             and v
                         }
+                        if not lead:
+                            lead = Lead.objects.create(platform_id=user_id)
+                            conversation.lead = lead
+                            conversation.save(update_fields=['lead'])
+
                         lead.create_pending_order(
                             shop_id=shop_id,
                             product_id=matched_product["id"] if matched_product else None,

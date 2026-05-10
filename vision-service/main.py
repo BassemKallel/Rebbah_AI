@@ -148,7 +148,7 @@ def _embed_image(image: Image.Image) -> list:
     return image_features.squeeze().cpu().tolist()
 
 
-async def _download_and_embed(image_url: str) -> list:
+async def _download_and_embed(image_url: str) -> tuple[list, Image.Image]:
     """Download image async + compute embedding."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.get(image_url)
