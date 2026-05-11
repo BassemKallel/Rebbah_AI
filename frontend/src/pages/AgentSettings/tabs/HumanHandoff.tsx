@@ -3,6 +3,7 @@ import { Loader2, Power, PowerOff, AlertCircle, CheckCircle } from 'lucide-react
 import api from '../../../api/axiosInstance';
 import { toggleBot } from '../../../api/handoffApi';
 import { useAuth } from '../../../providers/AuthProvider';
+import toast from 'react-hot-toast';
 
 interface BotConfig {
   bot_enabled: boolean;
@@ -17,7 +18,6 @@ const HumanHandoff = () => {
   const [botEnabled, setBotEnabled] = useState<boolean>(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   /* ── Load current bot config ── */
   const loadConfig = useCallback(async () => {
@@ -28,7 +28,7 @@ const HumanHandoff = () => {
       setConfig(data);
       setBotEnabled(data.bot_enabled);
     } catch (err) {
-      setToast({ type: 'error', message: 'Impossible de charger la configuration du bot.' });
+      toast.error('Impossible de charger la configuration du bot.');
     } finally {
       setLoading(false);
     }
@@ -42,32 +42,23 @@ const HumanHandoff = () => {
     // Optimistic UI — toggle immediately
     setBotEnabled(enable);
     setSaving(true);
-    setToast(null);
     try {
       const { data } = await toggleBot(shopId, enable);
       setConfig(prev => prev ? { ...prev, bot_enabled: data.bot_enabled, bot_disabled_at: data.bot_disabled_at } : prev);
       setBotEnabled(data.bot_enabled);
-      setToast({
-        type: 'success',
-        message: enable
-          ? 'Bot réactivé — toutes les conversations reviennent au bot automatiquement.'
-          : 'Bot désactivé — toutes les conversations sont maintenant en mode manuel. Vous devez répondre manuellement.',
-      });
+      if (enable) {
+        toast.success('Bot réactivé — toutes les conversations reviennent au bot automatiquement.', { duration: 5000 });
+      } else {
+        toast.success('Bot désactivé — toutes les conversations sont maintenant en mode manuel. Vous devez répondre manuellement.', { duration: 6000 });
+      }
     } catch (err) {
       // Rollback on error
       setBotEnabled(!enable);
-      setToast({ type: 'error', message: 'Impossible de modifier l\'état du bot.' });
+      toast.error('Impossible de modifier l\'état du bot.');
     } finally {
       setSaving(false);
     }
   };
-
-  /* ── Auto-dismiss toast ── */
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   if (loading) {
     return (
@@ -92,20 +83,6 @@ const HumanHandoff = () => {
 
   return (
     <div className="max-w-3xl">
-
-      {/* Toast */}
-      {toast && (
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl mb-6 text-sm font-medium border ${
-          toast.type === 'success'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : 'bg-red-50 border-red-200 text-red-800'
-        }`}>
-          {toast.type === 'success'
-            ? <CheckCircle className="w-4 h-4 flex-shrink-0" />
-            : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
-          {toast.message}
-        </div>
-      )}
 
       <h1 className="text-[22px] font-extrabold text-gray-800 mb-1">Human Handoff</h1>
       <p className="text-[15px] font-medium text-gray-400 mb-8">

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../providers/AuthProvider';
 import api from '../../api/axiosInstance';
+import toast from 'react-hot-toast';
 
 const Profile: React.FC = () => {
   const { username, companyName, shopId } = useAuth();
@@ -20,8 +21,6 @@ const Profile: React.FC = () => {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [pwLoading, setPwLoading] = useState(false);
-  const [pwError, setPwError] = useState<string | null>(null);
-  const [pwSuccess, setPwSuccess] = useState(false);
 
   const initials = username ? username.slice(0, 2).toUpperCase() : 'TK';
 
@@ -29,31 +28,28 @@ const Profile: React.FC = () => {
     if (shopId) {
       navigator.clipboard.writeText(shopId);
       setCopied(true);
+      toast.success('Shop ID copié !', { icon: '📋' });
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
   const handlePwChange = (field: string, value: string) => {
     setPwForm((prev) => ({ ...prev, [field]: value }));
-    setPwError(null);
-    setPwSuccess(false);
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPwError(null);
-    setPwSuccess(false);
 
     if (!pwForm.current_password || !pwForm.new_password || !pwForm.confirm_password) {
-      setPwError('Tous les champs sont requis.');
+      toast.error('Tous les champs sont requis.');
       return;
     }
     if (pwForm.new_password !== pwForm.confirm_password) {
-      setPwError('Les nouveaux mots de passe ne correspondent pas.');
+      toast.error('Les nouveaux mots de passe ne correspondent pas.');
       return;
     }
     if (pwForm.new_password.length < 8) {
-      setPwError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+      toast.error('Le nouveau mot de passe doit contenir au moins 8 caractères.');
       return;
     }
 
@@ -64,10 +60,10 @@ const Profile: React.FC = () => {
         new_password: pwForm.new_password,
         confirm_password: pwForm.confirm_password,
       });
-      setPwSuccess(true);
+      toast.success('Mot de passe modifié avec succès !');
       setPwForm({ current_password: '', new_password: '', confirm_password: '' });
     } catch (err: any) {
-      setPwError(err?.response?.data?.error || 'Une erreur est survenue.');
+      toast.error(err?.response?.data?.error || 'Une erreur est survenue.');
     } finally {
       setPwLoading(false);
     }
@@ -283,19 +279,6 @@ const Profile: React.FC = () => {
                   <p className="text-[11px] text-red-500 font-semibold mt-1">Les mots de passe ne correspondent pas</p>
                 )}
               </div>
-
-              {/* Error / Success */}
-              {pwError && (
-                <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-                  <p className="text-sm font-semibold text-red-600">{pwError}</p>
-                </div>
-              )}
-              {pwSuccess && (
-                <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                  <p className="text-sm font-semibold text-emerald-700">Mot de passe modifié avec succès !</p>
-                </div>
-              )}
 
               {/* Submit */}
               <div className="flex justify-end pt-1">

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, Save } from 'lucide-react';
 import { useBotConfig } from '../../../hooks/useBotConfig';
-import Toast from '../../../components/ui/Toast';
 import { useAuth } from '../../../providers/AuthProvider';
+import toast from 'react-hot-toast';
 
 const BotConfiguration = () => {
   const { shopId } = useAuth();
@@ -16,7 +16,6 @@ const BotConfiguration = () => {
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [toast, setToast] = useState<{ type: string; message: string } | null>(null);
 
   useEffect(() => {
     if (config) {
@@ -34,22 +33,15 @@ const BotConfiguration = () => {
 
   const handleSave = async () => {
     setIsSaving(true);
-    setToast(null);
 
     const result = await patchConfig(formData);
 
     setIsSaving(false);
 
     if (result.success) {
-      setToast({
-        type: 'success',
-        message: 'Bot configuration saved successfully!'
-      });
+      toast.success('Bot configuration saved successfully!');
     } else {
-      setToast({
-        type: 'error',
-        message: result.error || 'Failed to save configuration'
-      });
+      toast.error(result.error || 'Failed to save configuration');
     }
   };
 
@@ -86,13 +78,6 @@ const BotConfiguration = () => {
 
   return (
     <div className="max-w-3xl">
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
 
       <h1 className="text-[22px] font-extrabold text-gray-800 mb-1">Bot Configuration</h1>
       <p className="text-[15px] font-medium text-gray-400 mb-8">

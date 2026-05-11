@@ -3,7 +3,7 @@ import { Loader2, RotateCcw, Lock } from 'lucide-react';
 import { useTemplates } from '../../../hooks/useTemplates';
 import DynamicTemplate from './DynamicTemplate';
 import CustomToggle from './CustomToggle';
-import Toast from '../../../components/ui/Toast';
+import toast from 'react-hot-toast';
 
 /**
  * TemplateEditor - Composant réutilisable pour gérer les templates.
@@ -35,7 +35,6 @@ const TemplateEditor = ({
 
   const [useCustom, setUseCustom] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [toast, setToast] = useState<{ type: string; message: string } | null>(null);
 
   const loading = loadingSystem || loadingCustom;
 
@@ -61,7 +60,6 @@ const TemplateEditor = ({
 
   const handleSave = async (templateContent) => {
     setIsSaving(true);
-    setToast(null);
 
     // Correction : alignement strict avec les champs attendus par l'API
     const templateData = {
@@ -84,15 +82,9 @@ const TemplateEditor = ({
     setIsSaving(false);
 
     if (result.success) {
-      setToast({
-        type: 'success',
-        message: 'Template saved successfully!'
-      });
+      toast.success('Template saved successfully!');
     } else {
-      setToast({
-        type: 'error',
-        message: result.error || 'Failed to save template'
-      });
+      toast.error(result.error || 'Failed to save template');
     }
   };
 
@@ -104,7 +96,6 @@ const TemplateEditor = ({
     }
 
     setIsSaving(true);
-    setToast(null);
 
     const result = await remove(customTemplate.id);
 
@@ -112,15 +103,9 @@ const TemplateEditor = ({
 
     if (result.success) {
       setUseCustom(false);
-      setToast({
-        type: 'success',
-        message: 'Reset to default template successfully!'
-      });
+      toast.success('Reset to default template successfully!');
     } else {
-      setToast({
-        type: 'error',
-        message: result.error || 'Failed to reset template'
-      });
+      toast.error(result.error || 'Failed to reset template');
     }
   };
 
@@ -148,14 +133,6 @@ const TemplateEditor = ({
 
   return (
     <div className="flex flex-col gap-5">
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
-
       {/* Section Header */}
       <div>
         <h3 className="text-base font-bold text-gray-800 mb-1">{label}</h3>
