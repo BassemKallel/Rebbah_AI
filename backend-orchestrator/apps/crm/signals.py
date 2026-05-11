@@ -91,3 +91,50 @@ def _clear_redis_cache(shop_id: str):
             logger.debug(f"[SIGNAL] No Redis cache keys found for shop={shop_id}")
     except Exception as exc:
         logger.warning(f"[SIGNAL] Redis cache cleanup failed for shop={shop_id}: {exc}")
+
+
+from django.db.models.signals import post_save
+
+@receiver(post_save, sender='crm.Company')
+def initialize_company_setup(sender, instance, created, **kwargs):
+    """
+    Triggered when a Company is created or updated.
+    If created:
+      1. Generates a default BotConfiguration.
+      2. Associates it with the Company.
+      3. Syncs the catalog.
+    """
+    if created:
+        from apps.crm.models import BotConfiguration
+        from apps.gateway.services import tiktak_service
+        from django.core.cache import cache
+
+        logger.info(f"[SIGNAL] New Company '{instance.name}' created — initializing setup...")
+
+        # 1. Create BotConfiguration
+        # Avoid creating duplicate if shop_id somehow already exists
+        bot_config, _ = BotConfiguration.objects.get_or_create(
+            shop_id=instance.shop_id,
+            defaults={
+                'shop_name': instance.name,
+                'ai_agent_name': 'Tiktak AI',
+                'language': 'FR'
+            }
+        )
+
+        # 2. Associate with Company
+        instance.bot_config = bot_config
+        instance.save(update_fields=['bot_config'])
+        logger.info(f"[SIGNAL] Default BotConfiguration linked for shop={instance.shop_id}")
+
+        # 3. Sync Catalog automatically
+        try:
+            # Clear old cache if it existed for any reason
+            cache_key = f"tiktak_products:{instance.shop_id}"
+            cache.delete(cache_key)
+            
+            # Fetch products from API
+            tiktak_service.get_products(instance.shop_id)
+            logger.info(f"[SIGNAL] Catalog sync triggered successfully for shop={instance.shop_id}")
+        except Exception as e:
+            logger.error(f"[SIGNAL] Failed to sync catalog for shop={instance.shop_id}: {e}")
