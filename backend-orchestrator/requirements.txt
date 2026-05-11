@@ -9,3 +9,4 @@ google-genai>=1.0.0
 whitenoise
 djangorestframework-simplejwt
 cryptography
+openai==1.55.0

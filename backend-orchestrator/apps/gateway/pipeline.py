@@ -674,44 +674,12 @@ class MessagePipeline:
         ).first()
 
         if not conversation:
-            # ── Option B: Returning client detection ─────────────────────
-            # Before creating a brand-new Lead, check if this sender already
-            # has a recently completed conversation (< 30 days). If so, reuse
-            # the existing Lead to keep a unified customer profile in the CRM.
-            REOPEN_WINDOW_DAYS = 30
-            cutoff_date = timezone.now() - timedelta(days=REOPEN_WINDOW_DAYS)
-
-            recent_completed = Conversation.objects.filter(
-                sender_id=user_id,
-                shop_id=shop_id,
-                state="COMPLETED",
-                completed_at__gte=cutoff_date,
-            ).order_by('-completed_at').first()
-
-            if recent_completed and recent_completed.lead:
-                # Returning client — new conversation linked to existing Lead
-                lead = recent_completed.lead
-                conversation = Conversation.objects.create(
-                    lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
-                    shop_id=shop_id, state="LLM_ACTIVE"
-                )
-                # Pre-load known client info into Redis so Gemini knows them
-                known = {}
-                if lead.name:         known["name"] = lead.name
-                if lead.phone_number: known["phone_number"] = lead.phone_number
-                if known:
-                    context_manager.preload_context(user_id, known, shop_id=shop_id)
-                logger.info(
-                    f"[LLM PIPELINE] Returning client — reopened lead #{lead.id} "
-                    f"(sender={user_id}, shop={shop_id})"
-                )
-            else:
-                # Brand-new client (or inactive > 30 days) — fresh Lead
-                lead = Lead.objects.create(platform_id=user_id)
-                conversation = Conversation.objects.create(
-                    lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
-                    shop_id=shop_id, state="LLM_ACTIVE"
-                )
+            # Toujours créer un nouveau Lead pour chaque nouvelle conversation
+            lead = Lead.objects.create(platform_id=user_id)
+            conversation = Conversation.objects.create(
+                lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
+                shop_id=shop_id, state="LLM_ACTIVE"
+            )
         else:
             lead = conversation.lead
 
@@ -898,23 +866,26 @@ class MessagePipeline:
             return _check_stock_and_resolve(products, product_name, color, size)
 
 
-        if state_before == "LLM_CONFIRMING":
-            user_text_normalized = text.lower().strip().rstrip("!.,؟?")
-            words = user_text_normalized.split()
+        user_text_normalized = text.lower().strip().rstrip("!.,؟?")
+        words = user_text_normalized.split()
 
-            # Mots de confirmation explicites (client doit VRAIMENT confirmer)
-            has_confirm_word = (
-                user_text_normalized in _CONFIRM_WORDS or
-                any(w in _CONFIRM_WORDS for w in words)
-            )
+        # Mots de confirmation explicites (client doit VRAIMENT confirmer)
+        has_confirm_word = (
+            user_text_normalized in _CONFIRM_WORDS or
+            any(w in _CONFIRM_WORDS for w in words)
+        )
 
-            # Mots de correction/refus: "pas", "non", "la", "ghalta", "mش", "faux"
-            _DENY_WORDS = {"non", "no", "la", "le", "pas", "ghalta", "faux", "false", "mش", "mech"}
-            has_deny_word = any(w in _DENY_WORDS for w in words)
+        # Mots de correction/refus: "pas", "non", "la", "ghalta", "mش", "faux"
+        _DENY_WORDS = {"non", "no", "la", "le", "pas", "ghalta", "faux", "false", "mش", "mech"}
+        has_deny_word = any(w in _DENY_WORDS for w in words)
 
-            # La confirmation nécessite un mot positif ET l'absence de négation
-            # On n'utilise JAMAIS order_ready seul : c'est toujours le client qui confirme
-            is_confirmation = has_confirm_word and not has_deny_word
+        # La confirmation nécessite un mot positif ET l'absence de négation
+        # On n'utilise JAMAIS order_ready seul : c'est toujours le client qui confirme
+        is_confirmation = has_confirm_word and not has_deny_word
+
+        # On rentre dans le bloc de finalisation si on était déjà en CONFIRMING,
+        # OU BIEN si le client dit "oui" et que Gemini est d'accord (cas de desync/fallback)
+        if state_before == "LLM_CONFIRMING" or (is_confirmation and llm_result.get("order_ready")):
 
             if is_confirmation:
                 # ── Phase B: Stock check → then create order ──────────────
