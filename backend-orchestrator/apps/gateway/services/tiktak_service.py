@@ -81,15 +81,14 @@ def normalize_tiktak_products(results: list) -> list:
 
 # ─── Fetching ────────────────────────────────────────────────────────────────
 
-def get_products(shop_id: str) -> list:
+def get_products(shop_id: str, api_token: str = None) -> list:
     """
     Return the full product list for a shop, using Redis cache when available.
     Paginates through all TikTak API pages (max 10).
-
-    The TikTak PRO API is public — no authentication required.
-
+    
     Args:
         shop_id: The shop identifier on the Tiktak platform.
+        api_token: Deprecated — TikTak PRO API is public. Kept for backward compat.
     """
     cache_key = f"tiktak_products:{shop_id}"
     products = cache.get(cache_key)
@@ -116,13 +115,15 @@ def get_products(shop_id: str) -> list:
 
                 elif resp.status_code == 401:
                     logger.error(
-                        f"[TIKTAK] 401 Unauthorized pour shop_id={shop_id}."
+                        f"[TIKTAK] 401 Unauthorized — token expired or invalid "
+                        f"for shop_id={shop_id}. Veuillez renouveler le token."
                     )
                     break
 
                 elif resp.status_code == 403:
                     logger.error(
-                        f"[TIKTAK] 403 Forbidden — access denied for shop_id={shop_id}."
+                        f"[TIKTAK] 403 Forbidden — access denied for shop_id={shop_id}. "
+                        f"Le token n'a pas les permissions requises."
                     )
                     break
 
@@ -212,7 +213,7 @@ def get_color_from_variation(variation_id, products: list) -> str | None:
 
 # ─── Matching ────────────────────────────────────────────────────────────────
 
-def find_product(products: list, prod_name: str, vision_variation_id: str | None = None) -> tuple:
+def find_product(products: list, prod_name: str, vision_variation_id: str = None) -> tuple:
     """
     Try to match a product from the catalog.
 

@@ -2,8 +2,6 @@
 Multi-shop product sync worker.
 Reads all active companies from the crm_company table,
 then syncs each shop's catalog via the TikTak API → Vision Service pipeline.
-
-NOTE: The TikTak PRO API is public — no authentication token required.
 """
 import os
 import time
@@ -90,25 +88,33 @@ def get_existing_vectors(shop_id):
 # ── TikTak API ───────────────────────────────────────────────────────────────
 
 def fetch_products(shop_id):
-    """Fetch all products for a shop with pagination. No auth required."""
-    url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
+    """
+    Fetch all products for a shop with pagination.
+    Builds each page URL explicitly with page_size=100 and page=N to ensure
+    page_size is not lost when following the 'next' URL (which omits it).
+    """
+    base_url = f"{TIKTAK_API_BASE_URL}/api/v1/products-read/"
     all_results = []
-    params = {"company": shop_id}
-    page_count = 0
+    page = 1
+    page_size = 100
 
-    while url and page_count < 50:
+    while page <= 200:  # safety cap: 200 x 100 = 20 000 items max
         try:
-            if page_count == 0:
-                resp = requests.get(url, params=params, timeout=10)
-            else:
-                resp = requests.get(url, timeout=10)
+            params = {"company": shop_id, "page_size": page_size, "page": page}
+            resp = requests.get(base_url, params=params, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            all_results.extend(data.get("results", []))
-            url = data.get("next")
-            page_count += 1
+            batch = data.get("results", [])
+            if not batch:
+                break  # empty page = done
+            all_results.extend(batch)
+            total = data.get("count", "?")
+            logger.info(f"  Page {page}: +{len(batch)} items (total fetched: {len(all_results)}/{total})")
+            if not data.get("next"):
+                break  # no more pages
+            page += 1
         except requests.exceptions.RequestException as e:
-            logger.error(f"  Erreur page {page_count}: {e}")
+            logger.error(f"  Erreur page {page}: {e}")
             break
 
     return all_results
@@ -123,8 +129,9 @@ def vectorize_image(image_url, product_id, shop_id, variation_id):
         "shop_id":         str(shop_id),
         "store_image_url": image_url,
     }
+    url = f"{VISION_SERVICE_URL.rstrip('/')}/vectorize"
     try:
-        response = requests.post(VISION_SERVICE_URL, json=payload, timeout=30)
+        response = requests.post(url, json=payload, timeout=30)
         response.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
@@ -138,7 +145,7 @@ def sync_shop(shop_id, shop_name):
     """Sync a single shop's catalog."""
     logger.info(f"── Syncing [{shop_name}] (shop_id={shop_id}) ──")
 
-    # Pre-load already-indexed (variation_id, image_url) to avoid re-encoding
+    # Pre-load already-indexed (parent_id, image_url) to avoid re-encoding
     existing_vectors = get_existing_vectors(shop_id)
 
     raw_results = fetch_products(shop_id)
@@ -165,20 +172,17 @@ def sync_shop(shop_id, shop_name):
                 variation_id = product.get("id")
                 # Skip if parent+image already indexed (regardless of which child
                 # arrived first — API order may vary between cycles)
-                if (str(parent_id), image_url) in existing_vectors:
+                dedup_key = (str(parent_id), image_url)
+                if dedup_key in seen_images:
                     skipped_count += 1
                     continue
-                dedup_key = (str(parent_id), image_url)
-                if dedup_key not in seen_images:
-                    seen_images.add(dedup_key)
-                    if vectorize_image(image_url, parent_id, shop_id, variation_id):
-                        success_count += 1
-                        existing_vectors.add(dedup_key)  # prevent re-send this cycle
-                    else:
-                        failure_count += 1
-                    time.sleep(0.5)
+                seen_images.add(dedup_key)
+                if vectorize_image(image_url, parent_id, shop_id, variation_id):
+                    success_count += 1
+                    existing_vectors.add(dedup_key)  # prevent re-send this cycle
                 else:
-                    skipped_count += 1
+                    failure_count += 1
+                time.sleep(0.3)
             continue
 
         # ── Parent product ───────────────────────────────────────────────────
