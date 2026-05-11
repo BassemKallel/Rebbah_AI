@@ -937,6 +937,9 @@ class MessagePipeline:
                             and not k.startswith('_')
                             and v
                         }
+                        # RÉSILIENCE : Si le produit n'a pas été matché (ex: nom en arabe), on le garde en clair !
+                        if not matched_product and current_context.get("product"):
+                            extra_data["unmatched_product"] = current_context["product"]
                         if not lead:
                             lead = Lead.objects.create(platform_id=user_id)
                             conversation.lead = lead
