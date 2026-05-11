@@ -27,38 +27,31 @@ class CompanyAdmin(admin.ModelAdmin):
         ('Bot Configuration', {'fields': ('bot_config',), 'description': 'Lier à une configuration de bot pour la personnalisation.'}),
     )
 
-    @admin.action(description="Synchroniser le catalogue de la boutique (API TikTak)")
+    @admin.action(description="Synchroniser le catalogue de la boutique (Vectorisation Vision Service)")
     def sync_catalog_action(self, request, queryset):
-        from apps.gateway.services import tiktak_service
-        from django.core.cache import cache
+        from apps.gateway.sync_views import sync_shop
         from django.contrib import messages
 
         success_count = 0
-        error_count = 0
+        fail_count = 0
 
         for company in queryset:
             try:
-                # Invalider le cache existant
-                cache_key = f"tiktak_products:{company.shop_id}"
-                cache.delete(cache_key)
-
-                # Forcer le téléchargement
-                tiktak_service.get_products(company.shop_id)
-                success_count += 1
-            except Exception as e:
-                error_count += 1
+                result = sync_shop(company)
                 self.message_user(
                     request,
-                    f"Erreur pour la boutique {company.name}: {str(e)}",
-                    level=messages.ERROR
+                    f"[{company.name}] Sync OK — {result['success']} produits vectorisés, "
+                    f"{result['failed']} erreurs, {result['skipped']} ignorés.",
+                    level=messages.SUCCESS if result['failed'] == 0 else messages.WARNING,
                 )
-
-        if success_count > 0:
-            self.message_user(
-                request,
-                f"Catalogue synchronisé avec succès pour {success_count} boutique(s).",
-                level=messages.SUCCESS
-            )
+                success_count += 1
+            except Exception as exc:
+                self.message_user(
+                    request,
+                    f"[{company.name}] Sync ECHEC : {exc}",
+                    level=messages.ERROR,
+                )
+                fail_count += 1
 
 
 @admin.register(UserProfile)

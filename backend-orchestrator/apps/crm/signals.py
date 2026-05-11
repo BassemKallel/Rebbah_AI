@@ -127,14 +127,16 @@ def initialize_company_setup(sender, instance, created, **kwargs):
         instance.save(update_fields=['bot_config'])
         logger.info(f"[SIGNAL] Default BotConfiguration linked for shop={instance.shop_id}")
 
-        # 3. Sync Catalog automatically
+        # 3. Sync Catalog & Vectorize images automatically
         try:
+            from apps.gateway.sync_views import sync_shop
+            
             # Clear old cache if it existed for any reason
             cache_key = f"tiktak_products:{instance.shop_id}"
             cache.delete(cache_key)
             
-            # Fetch products from API
-            tiktak_service.get_products(instance.shop_id)
-            logger.info(f"[SIGNAL] Catalog sync triggered successfully for shop={instance.shop_id}")
+            # Vectorize catalog
+            sync_result = sync_shop(instance)
+            logger.info(f"[SIGNAL] Catalog sync triggered successfully for shop={instance.shop_id}. Result: {sync_result}")
         except Exception as e:
             logger.error(f"[SIGNAL] Failed to sync catalog for shop={instance.shop_id}: {e}")
