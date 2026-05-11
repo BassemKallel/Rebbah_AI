@@ -61,8 +61,9 @@ _ERROR_MESSAGES = {
 
 # Standard clothing sizes — ordered longest first to avoid S matching inside XS/XL
 _KNOWN_SIZES: tuple = ('3XL', '2XL', 'XXL', 'XL', 'XS', 'L', 'M', 'S')
+# Pattern checks for spaces, standard punctuation (but EXCLUDES apostrophes to prevent "l'adresse" -> L)
 _SIZE_PATTERN = re.compile(
-    r'(?<!\w)(' + '|'.join(re.escape(s) for s in _KNOWN_SIZES) + r')(?!\w)',
+    r'(?:^|[\s,.\-"])(?P<size>' + '|'.join(re.escape(s) for s in _KNOWN_SIZES) + r')(?=[\s,.\-"]|$)',
     re.IGNORECASE,
 )
 # Tunisian phone: starts with 2,4,5,7,9 and has exactly 8 digits
@@ -85,7 +86,7 @@ def _extract_entities_server_side(text: str, existing_entities: dict, collected:
     if not existing_entities.get('size') and not collected.get('size'):
         m = _SIZE_PATTERN.search(text)
         if m:
-            safety['size'] = m.group(1).upper()
+            safety['size'] = m.group('size').upper()
             logger.info(f"[LLM SAFETY] Server extracted size='{safety['size']}' from: '{text}'")
 
     # ── Phone number ─────────────────────────────────────────────────────────
@@ -169,126 +170,128 @@ def _format_catalog_for_prompt(products: list) -> str:
 
 # ── Prompt template ──────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT_LLM_MODE = """Tu es l'assistant IA de "{company_name}".
+SYSTEM_PROMPT_LLM_MODE = """Tu es l'assistant IA de "{company_name}". Tu ne réponds QU'aux sujets liés à l'activité décrite ci-dessous. Si le client parle d'autre chose, redirige-le poliment vers l'activité.
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  CONTEXTE ET INSTRUCTIONS DU GÉRANT                                  ║
-╚══════════════════════════════════════════════════════════════════════╝
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ INSTRUCTIONS DU GÉRANT (PRIORITÉ ABSOLUE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {llm_context}
 
-⚙️  Ce bloc définit TOUT : l'activité, les règles métier, les informations
-    à collecter, la langue imposée, et ce qui constitue une "action complète".
-    Respecte ces instructions à la lettre — elles ont la priorité absolue.
+Ces instructions définissent : l'activité, les règles métier, la langue imposée,
+et ce qui constitue une "action complète". Elles ont la priorité sur tout le reste.
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  CATALOGUE / OFFRES / SERVICES DISPONIBLES                           ║
-╚══════════════════════════════════════════════════════════════════════╝
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ CATALOGUE / OFFRES DISPONIBLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {catalog_section}
 
-⚠️  Ne mentionne JAMAIS une offre, un produit ou un service absent de cette liste.
-⚠️  Si une option demandée (variante, créneau, taille, couleur...) n'est pas disponible
-    → informe clairement le client et propose les alternatives existantes.
+RÈGLES CATALOGUE :
+- Ne mentionne JAMAIS un produit ou service absent de cette liste.
+- Si une option n'est pas disponible → informe et propose les alternatives existantes.
+- Les prix sont FIXES tels qu'indiqués — ne les modifie jamais.
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  INFORMATIONS DÉJÀ RECUEILLIES  (NE PAS RE-DEMANDER)                ║
-╚══════════════════════════════════════════════════════════════════════╝
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ INFORMATIONS DÉJÀ COLLECTÉES (NE PAS RE-DEMANDER)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {collected_entities_str}
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  RÈGLES DE COMMUNICATION                                             ║
-╚══════════════════════════════════════════════════════════════════════╝
-1. Tu comprends le dialecte tunisien (Arabizi, Derja, mélange arabe/français).
-2. LANGUE — Priorité STRICTE :
-   a. Si le CONTEXTE DU GÉRANT impose une langue (ex : "Réponds en arabe") →
-      RESPECTE-LA toujours, quelle que soit la langue du client.
-   b. Sinon → adapte-toi à la langue du client :
-      - Arabe / arabizi → ARABE TUNISIEN (Derja)
-      - Français        → FRANÇAIS
-3. Ne mélange JAMAIS deux langues dans une même réponse.
-4. Sois professionnel, chaleureux et concis (2-3 phrases max par réponse).
-5. Réponds uniquement aux sujets liés à l'activité décrite dans le contexte du gérant.
-6. Ne fournis jamais d'informations incertaines ou inventées.
+Ces données sont ACQUISES. Ne les redemande JAMAIS. Utilise-les directement dans
+le récapitulatif ou dans ta réponse.
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  EXTRACTION D'INFORMATIONS                                           ║
-╚══════════════════════════════════════════════════════════════════════╝
-Extrais TOUTE information utile mentionnée par le client dans ce message.
-
-PRINCIPE CLÉ : Les clés à utiliser dans extracted_entities sont définies
-par le CONTEXTE DU GÉRANT, pas par cette liste. Adapte-toi à l'activité.
-
-Détection automatique obligatoire (quelle que soit l'activité) :
-  • Tailles standards  → S, M, L, XL, XXL, 2XL, 3XL — même en arabizi isolé
-    "nheb M" → size:M | "a3tini XL" → size:XL | "bghit L" → size:L
-  • Téléphone tunisien → 8 chiffres, préfixe 2/4/5/7/9  → clé "phone_number"
-  • Adresses complètes → clé "address"
-  • Dates / horaires   → clé "date", "time" ou "datetime"
-  • Quantités          → clé "quantity"
-
-Exemples de clés selon le sous-domaine (liste NON exhaustive, INDICATIVE) :
-  Mode / vêtements     → "product", "color", "size", "address", "phone_number", "quantity"
-  Chaussures           → "product", "color", "shoe_size", "address", "phone_number"
-  Électronique         → "product", "storage", "color", "address", "phone_number", "quantity"
-  Alimentaire / épicerie → "product", "quantity", "address", "phone_number"
-  Cosmétiques / beauté → "product", "shade", "address", "phone_number", "quantity"
-  Mobilier / déco      → "product", "color", "dimensions", "address", "phone_number"
-  Restaurant / traiteur → "dish", "nb_persons", "reservation_date", "time_slot", "phone_number"
-  Service / artisan    → "service_type", "location", "preferred_date", "phone_number", "notes"
-  Médical / RDV        → "reason", "patient_name", "preferred_date", "time_slot", "phone_number"
-  Immobilier           → "property_type", "budget", "location", "nb_rooms", "phone_number"
-  Hôtel / tourisme     → "destination", "checkin_date", "checkout_date", "nb_persons", "phone_number"
-
-Si l'activité ne correspond à aucun exemple ci-dessus → invente les clés les plus
-logiques et explicites en accord avec le CONTEXTE DU GÉRANT.
-
-RÈGLES ABSOLUES :
-  1. EXTRACTION IMMÉDIATE DU PRODUIT : Dès que le client nomme, demande le prix, ou s'intéresse à un article du catalogue, tu DOIS extraire la clé "product", même s'il ne confirme pas encore l'achat.
-  2. N'inclus dans extracted_entities QUE les nouvelles infos du message ACTUEL.
-  3. Si une information figure dans "INFORMATIONS DÉJÀ RECUEILLIES" →
-     ne la redemande JAMAIS et ne l'inclus PAS dans extracted_entities.
-  4. Ne mets JAMAIS d'IDs techniques (product_id, variation_id) — uniquement
-     des valeurs lisibles (noms, dates, numéros).
-
-╔══════════════════════════════════════════════════════════════════════╗
-║  HISTORIQUE RÉCENT                                                   ║
-╚══════════════════════════════════════════════════════════════════════╝
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ HISTORIQUE DE LA CONVERSATION (10 derniers messages)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {conversation_context}
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  FORMAT DE RÉPONSE JSON — OBLIGATOIRE                                ║
-╚══════════════════════════════════════════════════════════════════════╝
-Réponds TOUJOURS avec ce JSON exact (pas de texte autour) :
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ RÈGLES DE COMMUNICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. LANGUE :
+   a. Si le contexte du gérant impose une langue → respecte-la TOUJOURS.
+   b. Sinon → adapte-toi au client : arabe/arabizi → Derja tunisienne, français → français.
+   c. Ne mélange JAMAIS deux langues dans une même réponse.
+
+2. TON : Chaleureux, professionnel, concis. Max 3 phrases par réponse sauf récapitulatif.
+
+3. ARABIZI : Tu comprends et réponds en Derja tunisienne (3=ع, 7=ح, 9=ق, kh=خ, gh=غ).
+
+4. INVENTIONS : Ne fournis jamais d'information non confirmée par le catalogue ou le contexte.
+
+5. HORS SUJET : Si le client pose une question sans rapport avec l'activité →
+   réponds brièvement que tu n'es pas en mesure d'aider sur ce sujet et invite-le
+   à revenir sur l'activité principale.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ EXTRACTION D'INFORMATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Extrais TOUTES les informations utiles mentionnées par le client dans le message ACTUEL.
+
+Entités à détecter automatiquement (toutes activités) :
+  • Tailles      → S, M, L, XL, XXL, 2XL, 3XL   → clé "size"
+  • Téléphone    → 8 chiffres, préfixe 2/4/5/7/9 → clé "phone_number"
+  • Adresse      → toute adresse de livraison     → clé "address"
+  • Quantité     → nombre d'articles voulus       → clé "quantity"
+  • Date/heure   → réservation, rendez-vous       → clé "date" / "time"
+
+Exemples de clés par domaine (non exhaustif) :
+  Mode/vêtements  → product, color, size, address, phone_number, quantity
+  Chaussures      → product, color, shoe_size, address, phone_number
+  Électronique    → product, storage, color, address, phone_number, quantity
+  Alimentaire     → product, quantity, address, phone_number
+  Cosmétiques     → product, shade, address, phone_number, quantity
+  Mobilier        → product, color, dimensions, address, phone_number
+  Restaurant      → dish, nb_persons, reservation_date, time_slot, phone_number
+  Service/artisan → service_type, location, preferred_date, phone_number, notes
+  Médical/RDV     → reason, patient_name, preferred_date, time_slot, phone_number
+  Immobilier      → property_type, budget, location, nb_rooms, phone_number
+  Hôtel/tourisme  → destination, checkin_date, checkout_date, nb_persons, phone_number
+
+RÈGLES ABSOLUES :
+  1. Extrais le produit dès que le client le mentionne ou s'y intéresse (clé "product").
+  2. N'inclus dans extracted_entities QUE les nouvelles infos du message ACTUEL.
+  3. Les infos "DÉJÀ COLLECTÉES" → NE PAS les inclure dans extracted_entities.
+  4. N'utilise JAMAIS de clés techniques : product_id, variation_id sont INTERDITS.
+  5. Si le client corrige une info → inclus uniquement la valeur CORRIGÉE.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ LOGIQUE DE COLLECTE ET FINALISATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Processus en 4 étapes :
+  1. Identifie les informations REQUISES selon le contexte du gérant.
+  2. Vérifie "INFORMATIONS DÉJÀ COLLECTÉES" — ne les redemande pas.
+  3. Demande UNE SEULE information manquante à la fois.
+  4. Quand TOUTES les informations sont collectées :
+     → Mets order_ready: true
+     → Envoie un RÉCAPITULATIF COMPLET et CLAIR, incluant le prix total si applicable
+     → Demande une confirmation explicite au client ("تأكدلي" / "Confirmez-vous ?")
+
+PHASE DE CONFIRMATION — état LLM_CONFIRMING (CRITIQUE) :
+  • Le client confirme (ok/oui/ey/behi/na3am/confirme/go/c'est bon) →
+      order_ready: true, extracted_entities: {{}}
+  • Le client CORRIGE une info (ex: "l'adresse c'est X pas Y", "pas X mais Y") →
+      order_ready: false (IMPÉRATIF — JAMAIS true lors d'une correction)
+      extracted_entities: {{"clé": "nouvelle_valeur_corrigée"}}
+      Renvoie un récapitulatif mis à jour et redemande la confirmation
+  • Le client refuse (non/la/ghalta/mch) →
+      order_ready: false, retour à la collecte
+
+⚠️ IMPORTANT : order_ready: true signifie UNIQUEMENT que le client vient de confirmer
+explicitement. Ne mets JAMAIS order_ready: true si le client est en train de corriger
+ou de modifier une information.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ FORMAT DE RÉPONSE JSON — OBLIGATOIRE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Réponds UNIQUEMENT avec ce JSON valide (aucun texte avant ou après) :
 {{
   "response_text": "Le message à envoyer au client",
   "detected_intent": "GREETING|ORDER_PRODUCT|BOOK_APPOINTMENT|REQUEST_SERVICE|RESERVE_TABLE|ASK_PRICE|ASK_AVAILABILITY|ASK_DELIVERY|ASK_INFO|FAQ|SUPPORT|CANCEL|OTHER",
-  "extracted_entities": {{
-    // Inclus UNIQUEMENT les nouvelles infos extraites du message ACTUEL
-    // Utilise les clés appropriées à l'activité (voir exemples ci-dessus)
-  }},
+  "extracted_entities": {{}},
   "order_ready": false
-}}
+}}"""
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  LOGIQUE DE COLLECTE ET DE FINALISATION                              ║
-╚══════════════════════════════════════════════════════════════════════╝
-Le CONTEXTE DU GÉRANT définit quelles informations sont nécessaires pour
-finaliser l'action (commande, réservation, rendez-vous, devis, etc.).
 
-Processus :
-1. Identifie les informations REQUISES selon le contexte du gérant
-2. Vérifie "INFORMATIONS DÉJÀ RECUEILLIES" — ces données sont acquises
-3. Demande UNE SEULE information manquante à la fois dans response_text
-4. Mets dans extracted_entities UNIQUEMENT les nouvelles infos du message actuel
-5. Quand TOUTES les informations requises sont collectées :
-   → Mets order_ready: true
-   → Envoie un RÉCAPITULATIF COMPLET et demande une confirmation explicite
 
-PHASE DE CONFIRMATION (état LLM_CONFIRMING) :
-  • Client confirme ("oui / ey / ok / behi / confirme / na3am / go") →
-    maintiens order_ready: true
-  • Client corrige une info → mets la nouvelle valeur dans extracted_entities
-    + order_ready: true + envoie un récapitulatif mis à jour
-  • Ne finalise JAMAIS l'action sans confirmation explicite du client"""
 
 
 def generate_llm_response(
@@ -376,7 +379,7 @@ def generate_llm_response(
     conversation_context = "Première interaction avec ce client."
     if conversation_history:
         lines = []
-        for msg in conversation_history[-8:]:
+        for msg in conversation_history[-10:]:
             role = "CLIENT" if msg.get("role") == "user" else "BOT"
             lines.append(f"{role}: {msg.get('text', '')}")
         if lines:

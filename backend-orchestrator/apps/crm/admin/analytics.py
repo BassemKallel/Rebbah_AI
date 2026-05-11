@@ -202,12 +202,10 @@ class PipelineLogAdmin(admin.ModelAdmin):
     def log_count(self, obj):
         if not obj.log_messages:
             return '—'
-        count = obj.log_messages.count('\n') + 1
-        has_err = '[ERROR]' in obj.log_messages or '[WARNING]' in obj.log_messages
-        color = '#e74c3c' if '[ERROR]' in obj.log_messages else ('#e67e22' if '[WARNING]' in obj.log_messages else '#27ae60')
+        # Format the actual logs nicely with a max-height to avoid breaking the table
         return format_html(
-            '<span style="color:{};font-weight:bold">{} lignes</span>',
-            color, count,
+            '<div style="max-height:120px; overflow-y:auto; max-width:400px; white-space:pre-wrap; font-family:monospace; font-size:11px; background:#1e1e1e; color:#d4d4d4; padding:6px; border:1px solid #333; border-radius:4px;">{}</div>',
+            obj.log_messages
         )
     log_count.short_description = 'Logs'
 

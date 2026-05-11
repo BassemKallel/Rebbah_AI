@@ -721,7 +721,7 @@ class MessagePipeline:
 
         # ── 2. Hot Memory: conversation history from Redis ───────────────────
         # shop_id passed for tenant-scoped Redis key: chat_context:{shop_id}:{user_id}
-        conversation_history = context_manager.get_recent_context(user_id, n=8, shop_id=shop_id)
+        conversation_history = context_manager.get_recent_context(user_id, n=10, shop_id=shop_id)
 
         # ── 2b. Vision: identify product from image ──────────────────────
         matched_image_url = None
@@ -900,7 +900,21 @@ class MessagePipeline:
 
         if state_before == "LLM_CONFIRMING":
             user_text_normalized = text.lower().strip().rstrip("!.,؟?")
-            is_confirmation = user_text_normalized in _CONFIRM_WORDS
+            words = user_text_normalized.split()
+
+            # Mots de confirmation explicites (client doit VRAIMENT confirmer)
+            has_confirm_word = (
+                user_text_normalized in _CONFIRM_WORDS or
+                any(w in _CONFIRM_WORDS for w in words)
+            )
+
+            # Mots de correction/refus: "pas", "non", "la", "ghalta", "mش", "faux"
+            _DENY_WORDS = {"non", "no", "la", "le", "pas", "ghalta", "faux", "false", "mش", "mech"}
+            has_deny_word = any(w in _DENY_WORDS for w in words)
+
+            # La confirmation nécessite un mot positif ET l'absence de négation
+            # On n'utilise JAMAIS order_ready seul : c'est toujours le client qui confirme
+            is_confirmation = has_confirm_word and not has_deny_word
 
             if is_confirmation:
                 # ── Phase B: Stock check → then create order ──────────────
