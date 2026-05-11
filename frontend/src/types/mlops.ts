@@ -12,6 +12,7 @@ export interface MLOpsStats {
   sparkline_7d: number[];
   last_retraining: RetrainingLog | null;
   total_embeddings: number;
+  manual_count: number;
 }
 
 export interface ModelHealth {

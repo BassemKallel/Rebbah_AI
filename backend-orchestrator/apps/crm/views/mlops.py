@@ -63,6 +63,8 @@ def mlops_stats(request):
 
     total_embeddings = ProductVector.objects.count()
 
+    manual_count = ManualDataset.objects.count()
+
     return Response({
         'reviewed_count':      reviewed_count,
         'pending_review':      pending_review,
@@ -72,6 +74,7 @@ def mlops_stats(request):
         'sparkline_7d':        sparkline,
         'last_retraining':     last_retrain_data,
         'total_embeddings':    total_embeddings,
+        'manual_count':        manual_count,
     })
 
 

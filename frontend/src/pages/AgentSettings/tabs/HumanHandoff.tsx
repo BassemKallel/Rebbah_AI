@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, Power, PowerOff, AlertCircle, CheckCircle } from 'lucide-react';
+import { Loader2, Power, PowerOff } from 'lucide-react';
 import api from '../../../api/axiosInstance';
 import { toggleBot } from '../../../api/handoffApi';
 import { useAuth } from '../../../providers/AuthProvider';

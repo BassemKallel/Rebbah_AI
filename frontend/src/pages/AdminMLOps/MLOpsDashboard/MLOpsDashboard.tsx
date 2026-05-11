@@ -5,7 +5,7 @@ import KpiCard from '../../../components/dashboard/KpiCard';
 import type { KpiData } from '../../../types';
 import { mlopsApi } from '../../../api/mlopsApi';
 import type { MLOpsStats, ModelsHealthResponse } from '../../../types/mlops';
-import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
+import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie, Legend } from 'recharts';
 
 export default function MLOpsDashboard() {
   const [stats, setStats] = useState<MLOpsStats | null>(null);
@@ -67,7 +67,21 @@ export default function MLOpsDashboard() {
       icon: <Server className="w-5 h-5" />,
       bg: 'bg-cyan-50', text: 'text-cyan-600', sparkline: [0,0,0],
     },
+    {
+      label: 'Dataset (Manuel)', value: String(stats.manual_count || 0),
+      delta: '', up: true, sub: 'Données importées/saisies',
+      icon: <Database className="w-5 h-5" />,
+      bg: 'bg-purple-50', text: 'text-purple-600', sparkline: [0,0,0],
+    },
   ] : [];
+
+  const pieData = stats ? [
+    { name: 'Fallbacks Validés', value: stats.reviewed_count },
+    { name: 'Données Manuelles', value: stats.manual_count || 0 },
+    { name: 'À Réviser', value: stats.pending_review },
+  ].filter(d => d.value > 0) : [];
+  
+  const COLORS = ['#0f6885', '#0891b2', '#f59e0b'];
 
   return (
     <div className="min-h-full bg-gray-50 pb-8">
@@ -121,7 +135,7 @@ export default function MLOpsDashboard() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 sm:gap-5 mb-6 sm:mb-7">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 sm:gap-5 mb-6 sm:mb-7">
         {kpiCards.map((k) => <KpiCard key={k.label} k={k} />)}
       </div>
 
@@ -182,8 +196,40 @@ export default function MLOpsDashboard() {
           </div>
         </div>
 
+        {/* Dataset Composition Pie Chart */}
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Composition du Dataset Global</h3>
+          <div className="h-64">
+            {pieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  />
+                  <Legend verticalAlign="bottom" height={36}/>
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+               <div className="flex items-center justify-center h-full text-gray-400">Aucune donnée disponible</div>
+            )}
+          </div>
+        </div>
+
         {/* Retraining Status */}
-        <div className="lg:col-span-2 bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
           <h3 className="text-lg font-bold text-gray-900 mb-4">Dernier Entraînement</h3>
           {stats?.last_retraining ? (
             <div className="space-y-4">
