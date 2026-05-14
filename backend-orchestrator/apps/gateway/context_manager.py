@@ -4,7 +4,7 @@ ContextManager — Hot memory layer using Redis.
 Stores the last N messages of a conversation with intent/entities
 for fast access by the pipeline and Gemini fallback prompt.
 
-Schema per user (key: chat_context:{shop_id}:{user_id}, TTL=1h):
+Schema per user (key: chat_context:{shop_id}:{user_id}, TTL=24h):
 [
   {"role": "user", "text": "...", "intent": "ORDER_PRODUCT", "confidence": 0.95,
    "entities": {"product": "pull", "color": "noir"}},
@@ -38,7 +38,7 @@ class ContextManager:
     def __init__(self):
         self.redis_client = redis.Redis(connection_pool=_pool)
         self.ttl = 3600   # 1 hour
-        self.max_history = 10
+        self.max_history = 6
 
     # ── Key builder ──────────────────────────────────────────────────────────
 
@@ -59,10 +59,36 @@ class ContextManager:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def get_context(self, user_id: str, shop_id: str = None) -> list:
-        """Retrieve full conversation history for a user."""
-        data = self.redis_client.get(self._get_key(user_id, shop_id))
+        """Retrieve full conversation history for a user. Fallbacks to DB on cache miss."""
+        key = self._get_key(user_id, shop_id)
+        data = self.redis_client.get(key)
+        
         if data:
             return json.loads(data)
+            
+        # ── Cache Miss: Restore from PostgreSQL ───────────────────────────
+        if shop_id:
+            try:
+                from apps.crm.models.conversation import Conversation
+                conversation = Conversation.objects.filter(
+                    sender_id=user_id,
+                    shop_id=shop_id,
+                    state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "LLM_ACTIVE", "LLM_CONFIRMING"]
+                ).order_by('-created_at').first()
+                
+                if conversation:
+                    db_messages = list(conversation.messages.order_by('-created_at')[:self.max_history])
+                    db_messages.reverse()  # Chronological order
+                    
+                    history = [{"role": m.sender.lower(), "text": m.text} for m in db_messages]
+                    
+                    if history:
+                        self.redis_client.setex(key, self.ttl, json.dumps(history))
+                        return history
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to restore DB context for {user_id}: {e}")
+                
         return []
 
     def get_recent_context(self, user_id: str, n: int = 5, shop_id: str = None) -> list:

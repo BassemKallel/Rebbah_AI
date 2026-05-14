@@ -15,6 +15,8 @@ Each company uses its OWN Gemini API key (isolation of consumption).
 import re
 import json
 import logging
+from apps.crm.models.analytics import ItemVector
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +61,21 @@ _ERROR_MESSAGES = {
 
 # ── Server-side entity extraction (safety net for Gemini misses) ─────────────
 
-# Standard clothing sizes — ordered longest first to avoid S matching inside XS/XL
-_KNOWN_SIZES: tuple = ('3XL', '2XL', 'XXL', 'XL', 'XS', 'L', 'M', 'S')
-# Pattern checks for spaces, standard punctuation (but EXCLUDES apostrophes to prevent "l'adresse" -> L)
-_SIZE_PATTERN = re.compile(
-    r'(?:^|[\s,.\-"])(?P<size>' + '|'.join(re.escape(s) for s in _KNOWN_SIZES) + r')(?=[\s,.\-"]|$)',
+# Standard clothing sizes
+_KNOWN_SIZES_MULTI: tuple = ('3XL', '2XL', 'XXL', 'XL', 'XS')
+_KNOWN_SIZES_SINGLE: tuple = ('L', 'M', 'S')
+
+# Match multi-letter sizes case-insensitively (e.g. xl, Xxl)
+_SIZE_PATTERN_MULTI = re.compile(
+    r'(?:^|[\s,.\-"])(?P<size>' + '|'.join(re.escape(s) for s in _KNOWN_SIZES_MULTI) + r')(?=[\s,.\-"]|$)',
     re.IGNORECASE,
 )
+
+# Match single-letter sizes (L, M, S) ONLY if uppercase OR preceded by 'taille', 'size', 'kobr', etc.
+_SIZE_PATTERN_SINGLE = re.compile(
+    r'(?:(?:taille|size|kobr|nheb)\s+(?P<size_ci>[lmsLMS])(?=[\s,.\-"]|$))|(?:^|[\s,.\-"])(?P<size_cs>[LMS])(?=[\s,.\-"]|$)'
+)
+
 # Tunisian phone: starts with 2,4,5,7,9 and has exactly 8 digits
 _PHONE_PATTERN = re.compile(r'(?<!\d)([2457-9]\d{7})(?!\d)')
 
@@ -84,10 +94,19 @@ def _extract_entities_server_side(text: str, existing_entities: dict, collected:
 
     # ── Size ─────────────────────────────────────────────────────────────────
     if not existing_entities.get('size') and not collected.get('size'):
-        m = _SIZE_PATTERN.search(text)
-        if m:
-            safety['size'] = m.group('size').upper()
+        # Check multi-letter sizes first (XL, XXL, XS...)
+        m_multi = _SIZE_PATTERN_MULTI.search(text)
+        if m_multi:
+            safety['size'] = m_multi.group('size').upper()
             logger.info(f"[LLM SAFETY] Server extracted size='{safety['size']}' from: '{text}'")
+        else:
+            # Check single-letter sizes (L, M, S)
+            m_single = _SIZE_PATTERN_SINGLE.search(text)
+            if m_single:
+                size_val = m_single.group('size_ci') or m_single.group('size_cs')
+                if size_val:
+                    safety['size'] = size_val.upper()
+                    logger.info(f"[LLM SAFETY] Server extracted size='{safety['size']}' from: '{text}'")
 
     # ── Phone number ─────────────────────────────────────────────────────────
     if not existing_entities.get('phone_number') and not collected.get('phone_number'):
@@ -101,18 +120,12 @@ def _extract_entities_server_side(text: str, existing_entities: dict, collected:
 
 def _format_catalog_for_prompt(products: list) -> str:
     """
-    Format the product catalog as compact text for the LLM system prompt.
+    Format the RAG product catalog as compact text for the LLM system prompt.
 
-    Supports two product structures from tiktak_service.get_products():
-      1. Simple products (no variations): declinaisons=[] or variations=[]
-         Uses product-level stock and price.
-         Output: "- Jeu Ken T7ebni | 59 TND"
-      2. Products with variations: declinaisons=[...] or variations=[...]
-         Groups in-stock variations by color/size.
-         Output: "- Pull Polo | 42 TND | Marron(S/M/L)"
+    Expects the Visual RAG format (from ItemVector.metadata):
+      { name, price, description, in_stock }
 
-    Supports both TikTak API fields (price, declinaisons) and
-    internal format fields (base_price, variations).
+    Output example: "- T-Shirt Vintage | 45 TND"
     """
     lines = []
     for p in products:
@@ -133,7 +146,8 @@ def _format_catalog_for_prompt(products: list) -> str:
             product_stock = p.get("stock") or p.get("total_stock") or 0
             if product_stock <= 0 and not p.get("order_without_stock", False):
                 continue
-            lines.append(f"- {p['name']} | {price} TND")
+            id_str = f" | ID: {p['id']}" if p.get('id') else ""
+            lines.append(f"- {p['name']}{id_str} | {price} TND")
             continue
 
         # Case 2: Product with variations
@@ -161,7 +175,8 @@ def _format_catalog_for_prompt(products: list) -> str:
             else:
                 color_parts.append(color)
 
-        lines.append(f"- {p['name']} | {price} TND | {', '.join(color_parts)}")
+        id_str = f" | ID: {p['id']}" if p.get('id') else ""
+        lines.append(f"- {p['name']}{id_str} | {price} TND | {', '.join(color_parts)}")
 
     if not lines:
         return "Aucun produit disponible en stock actuellement."
@@ -170,126 +185,51 @@ def _format_catalog_for_prompt(products: list) -> str:
 
 # ── Prompt template ──────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT_LLM_MODE = """Tu es l'assistant IA de "{company_name}". Tu ne réponds QU'aux sujets liés à l'activité décrite ci-dessous. Si le client parle d'autre chose, redirige-le poliment vers l'activité.
+SYSTEM_PROMPT_LLM_MODE = """⚠️ LANGUE (PRIORITÉ ABSOLUE) :
+Si le GÉRANT impose l'arabe → alphabet arabe (أ ب ت) obligatoirement.
+Si le GÉRANT impose le français → français obligatoirement.
+Sinon → adapte-toi (arabizi/arabe → arabe | français → français).
+Ex: "aslema" → "أسلامة", "bonjour" → "Bonjour". JAMAIS de mélange.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- INSTRUCTIONS DU GÉRANT (PRIORITÉ ABSOLUE)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tu es l'assistant de "{company_name}". Ne réponds qu'aux sujets liés à :
 {llm_context}
 
-Ces instructions définissent : l'activité, les règles métier, la langue imposée,
-et ce qui constitue une "action complète". Elles ont la priorité sur tout le reste.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- CATALOGUE / OFFRES DISPONIBLES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--- CATALOGUE / OFFRES ---
 {catalog_section}
+Règles : Aucun produit hors liste. Prix fixes. Propose alternatives si rupture.
 
-RÈGLES CATALOGUE :
-- Ne mentionne JAMAIS un produit ou service absent de cette liste.
-- Si une option n'est pas disponible → informe et propose les alternatives existantes.
-- Les prix sont FIXES tels qu'indiqués — ne les modifie jamais.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- INFORMATIONS DÉJÀ COLLECTÉES (NE PAS RE-DEMANDER)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--- INFOS DÉJÀ COLLECTÉES ---
 {collected_entities_str}
+(Acquises. Ne les redemande jamais.)
 
-Ces données sont ACQUISES. Ne les redemande JAMAIS. Utilise-les directement dans
-le récapitulatif ou dans ta réponse.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- HISTORIQUE DE LA CONVERSATION (10 derniers messages)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--- HISTORIQUE (6 derniers messages) ---
 {conversation_context}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- RÈGLES DE COMMUNICATION (PRIORITÉ ABSOLUE AU GÉRANT)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. LANGUE — LA RÈGLE DU GÉRANT EST LA LOI :
-   a. Si le CONTEXTE DU GÉRANT demande explicitement d'utiliser l'alphabet arabe (ex: "réponds en arabe même si le client parle arabizi"), tu DOIS utiliser les lettres arabes (مرحبا, كيفاش نعاونك).
-   b. Si le gérant ne précise rien → adapte-toi à l'alphabet du client (s'il écrit en français ou arabizi, réponds en alphabet latin. S'il écrit en arabe, réponds en arabe).
-   c. Ne mélange JAMAIS deux alphabets dans une même phrase.
+--- RÈGLES ---
+1. Ton chaleureux, concis (max 3 phrases).
+2. Ne rien inventer.
 
-2. TON : Chaleureux, professionnel, concis. Max 3 phrases par réponse sauf récapitulatif.
+--- EXTRACTION D'ENTITÉS ---
+Extrais TOUTES les nouvelles infos du message ACTUEL (size, phone_number, address, quantity, date/time, color...).
+Règles strictes :
+1. Liste `items` : Dès qu'un produit est choisi, format : [{{"product_id": "ID", "product_name": "Nom", "price": prix, "quantity": qte}}].
+2. N'inclus PAS les infos DÉJÀ COLLECTÉES.
+3. Si le client corrige une info, inclus SEULEMENT la valeur corrigée.
 
-3. ARABIZI (Dialecte tunisien en lettres latines) : Tu comprends parfaitement l'arabizi (3=ع, 7=ح, 9=ق, kh=خ). Mais pour TA réponse, réfère-toi TOUJOURS à la règle n°1 ci-dessus pour choisir ton alphabet.
+--- COLLECTE & FINALISATION ---
+1. Demande UNE SEULE info manquante à la fois selon les besoins du gérant.
+2. Si TOUT est collecté : mets order_ready=true, envoie un RÉCAPITULATIF avec le total, demande confirmation ("تأكدلي").
+3. Si le client CONFIRME ("ok", "oui", "ey") : order_ready=true, extracted_entities={{}}.
+4. Si le client CORRIGE/REFUSE ("non", "ghalta") : order_ready=false, extracted_entities={{"clé": "valeur corrigée"}}.
 
-4. INVENTIONS : Ne fournis jamais d'information non confirmée par le catalogue ou le contexte.
-
-5. HORS SUJET : Si le client pose une question sans rapport avec l'activité →
-   réponds brièvement que tu n'es pas en mesure d'aider sur ce sujet et invite-le
-   à revenir sur l'activité principale.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- EXTRACTION D'INFORMATIONS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Extrais TOUTES les informations utiles mentionnées par le client dans le message ACTUEL.
-
-Entités à détecter automatiquement (toutes activités) :
-  • Tailles      → S, M, L, XL, XXL, 2XL, 3XL   → clé "size"
-  • Téléphone    → 8 chiffres, préfixe 2/4/5/7/9 → clé "phone_number"
-  • Adresse      → toute adresse de livraison     → clé "address"
-  • Quantité     → nombre d'articles voulus       → clé "quantity"
-  • Date/heure   → réservation, rendez-vous       → clé "date" / "time"
-
-Exemples de clés par domaine (non exhaustif) :
-  Mode/vêtements  → product, color, size, address, phone_number, quantity
-  Chaussures      → product, color, shoe_size, address, phone_number
-  Électronique    → product, storage, color, address, phone_number, quantity
-  Alimentaire     → product, quantity, address, phone_number
-  Cosmétiques     → product, shade, address, phone_number, quantity
-  Mobilier        → product, color, dimensions, address, phone_number
-  Restaurant      → dish, nb_persons, reservation_date, time_slot, phone_number
-  Service/artisan → service_type, location, preferred_date, phone_number, notes
-  Médical/RDV     → reason, patient_name, preferred_date, time_slot, phone_number
-  Immobilier      → property_type, budget, location, nb_rooms, phone_number
-  Hôtel/tourisme  → destination, checkin_date, checkout_date, nb_persons, phone_number
-
-RÈGLES ABSOLUES :
-  1. Extrais le produit dès que le client le mentionne ou s'y intéresse (clé "product").
-  2. N'inclus dans extracted_entities QUE les nouvelles infos du message ACTUEL.
-  3. Les infos "DÉJÀ COLLECTÉES" → NE PAS les inclure dans extracted_entities.
-  4. N'utilise JAMAIS de clés techniques : product_id, variation_id sont INTERDITS.
-  5. Si le client corrige une info → inclus uniquement la valeur CORRIGÉE.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- LOGIQUE DE COLLECTE ET FINALISATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Processus en 4 étapes :
-  1. Identifie les informations REQUISES selon le contexte du gérant.
-  2. Vérifie "INFORMATIONS DÉJÀ COLLECTÉES" — ne les redemande pas.
-  3. Demande UNE SEULE information manquante à la fois.
-  4. Quand TOUTES les informations sont collectées :
-     → Mets order_ready: true
-     → Envoie un RÉCAPITULATIF COMPLET et CLAIR, incluant le prix total si applicable
-     → Demande une confirmation explicite au client ("تأكدلي" / "Confirmez-vous ?")
-
-PHASE DE CONFIRMATION — état LLM_CONFIRMING (CRITIQUE) :
-  • Le client confirme (ok/oui/ey/behi/na3am/confirme/go/c'est bon) →
-      order_ready: true, extracted_entities: {{}}
-  • Le client CORRIGE une info (ex: "l'adresse c'est X pas Y", "pas X mais Y") →
-      order_ready: false (IMPÉRATIF — JAMAIS true lors d'une correction)
-      extracted_entities: {{"clé": "nouvelle_valeur_corrigée"}}
-      Renvoie un récapitulatif mis à jour et redemande la confirmation
-  • Le client refuse (non/la/ghalta/mch) →
-      order_ready: false, retour à la collecte
-
-⚠️ IMPORTANT - RÈGLE SUR order_ready :
-Tu dois mettre order_ready: true dans DEUX cas précis UNIQUEMENT :
-1. Dès que tu as collecté TOUTES les infos et que tu envoies le récapitulatif initial.
-2. Quand le client vient de confirmer (oui/ok/ey).
-Ne mets JAMAIS order_ready: true si le client est en train de corriger une information.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- FORMAT DE RÉPONSE JSON — OBLIGATOIRE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Réponds UNIQUEMENT avec ce JSON valide (aucun texte avant ou après) :
+--- FORMAT JSON OBLIGATOIRE ---
+Réponds UNIQUEMENT avec ce JSON valide :
 {{
   "response_text": "Le message à envoyer au client",
   "detected_intent": "GREETING|ORDER_PRODUCT|BOOK_APPOINTMENT|REQUEST_SERVICE|RESERVE_TABLE|ASK_PRICE|ASK_AVAILABILITY|ASK_DELIVERY|ASK_INFO|FAQ|SUPPORT|CANCEL|OTHER",
   "extracted_entities": {{}},
-  "order_ready": false
+  "order_ready": false,
+  "carousel_items": ["id1", "id2"] // OPTIONNEL: Liste des ID des produits si tu recommandes des articles du catalogue. Limite à 5.
 }}"""
 
 
@@ -302,6 +242,7 @@ def generate_llm_response(
     shop_id: str = None,
     conversation_history: list = None,
     current_context: dict = None,
+    state_before: str = None,
 ) -> dict:
     """
     Generate a direct response using the company's Gemini API key.
@@ -330,6 +271,8 @@ def generate_llm_response(
         "order_ready": False,
         "error": False,
         "error_type": "none",
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
     }
 
     # ── Validate API key ──────────────────────────────────────────────────
@@ -350,11 +293,29 @@ def generate_llm_response(
     effective_shop = shop_id or getattr(company, 'shop_id', None)
     if effective_shop:
         try:
-            from .tiktak_service import get_products
-            products = get_products(effective_shop)
-            if products:
-                catalog_section = _format_catalog_for_prompt(products)
-                logger.debug(f"[LLM] Catalog injected: {len(products)} products for shop={effective_shop}")
+            
+            # Récupération EXCLUSIVE du nouveau catalogue Visual RAG
+            # Optimisation: Limite à 15 au lieu de 50 pour économiser drastiquement les tokens (Input)
+            rag_items = ItemVector.objects.filter(shop_id=effective_shop).order_by('-created_at')[:15]
+            rag_products = []
+            for item in rag_items:
+                meta = item.metadata or {}
+                name = meta.get("name")
+                if not name:
+                    continue
+                # On simule le format attendu par _format_catalog_for_prompt
+                rag_products.append({
+                    "id": item.item_id,
+                    "name": name,
+                    "base_price": str(meta.get("price", "Prix sur demande")),
+                    "variations": [],
+                    "stock": 100,  # En stock par défaut
+                    "active": True
+                })
+
+            if rag_products:
+                catalog_section = _format_catalog_for_prompt(rag_products)
+                logger.debug(f"[LLM] RAG Catalog injected: {len(rag_products)} products for shop={effective_shop}")
             else:
                 logger.debug(f"[LLM] No catalog for shop={effective_shop} — service-only business")
         except Exception as cat_err:
@@ -381,20 +342,28 @@ def generate_llm_response(
     conversation_context = "Première interaction avec ce client."
     if conversation_history:
         lines = []
-        for msg in conversation_history[-10:]:
+        for msg in conversation_history[-6:]:
             role = "CLIENT" if msg.get("role") == "user" else "BOT"
             lines.append(f"{role}: {msg.get('text', '')}")
         if lines:
             conversation_context = "\n".join(lines)
 
+    # ── Compilation du Contexte LLM (Ancien vs Nouveau) ──────────────────
+    llm_context_content = company.llm_context or "Aucun contexte spécifique fourni pour cette boutique."
+    if hasattr(company, 'bot_config') and company.bot_config:
+        llm_context_content = company.bot_config.get_compiled_llm_context()
+
     # ── Build prompt ──────────────────────────────────────────────────────
     system_prompt = SYSTEM_PROMPT_LLM_MODE.format(
         company_name=company.name,
-        llm_context=company.llm_context or "Aucun contexte spécifique fourni pour cette boutique.",
+        llm_context=llm_context_content,
         catalog_section=catalog_section,
         collected_entities_str=collected_entities_str,
         conversation_context=conversation_context,
     )
+
+    if state_before == "LLM_CONFIRMING":
+        system_prompt += "\n\n*** ATTENTION CRITIQUE ***\nLe client est dans l'étape finale de confirmation. S'il pose une question (ex: prix de livraison), réponds-lui, mais TU DOIS ABSOLUMENT lui redemander de confirmer la commande à la fin de ton message (ex: 'C'est bien ça ?', 'Est-ce que je confirme ?')."
 
     # ── Call Gemini ───────────────────────────────────────────────────────
     response = None
@@ -402,8 +371,11 @@ def generate_llm_response(
         from google import genai
 
         client = genai.Client(api_key=api_key)
+        import os
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=model_name,
             contents=f"CLIENT: {text}",
             config={
                 "system_instruction": system_prompt,
@@ -421,6 +393,7 @@ def generate_llm_response(
         result["response_text"] = data.get("response_text", "")
         result["detected_intent"] = data.get("detected_intent", "OTHER")
         result["order_ready"] = bool(data.get("order_ready", False))
+        result["carousel_items"] = data.get("carousel_items", [])
 
         # Extract non-null entities from THIS message only
         raw_entities = data.get("extracted_entities", {})
@@ -462,11 +435,18 @@ def generate_llm_response(
         try:
             usage = response.usage_metadata
             cached = getattr(usage, 'cached_content_token_count', 0) or 0
+            prompt_tokens = getattr(usage, 'prompt_token_count', 0)
+            completion_tokens = getattr(usage, 'candidates_token_count', 0)
+            
+            result["prompt_tokens"] = prompt_tokens
+            result["completion_tokens"] = completion_tokens
+            result["model_name"] = model_name
+            
             logger.info(
                 f"[LLM] shop={company.shop_id} intent={result['detected_intent']} "
-                f"tokens=prompt:{usage.prompt_token_count} "
+                f"tokens=prompt:{prompt_tokens} "
                 f"cached:{cached} "
-                f"output:{usage.candidates_token_count} "
+                f"output:{completion_tokens} "
                 f"new_entities={list(result['extracted_entities'].keys())} "
                 f"order_ready={result['order_ready']}"
             )

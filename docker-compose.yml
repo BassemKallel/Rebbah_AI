@@ -7,7 +7,7 @@ networks:
 services:
   backend-orchestrator:
     build: ./backend-orchestrator
-    container_name: backend-orchestrator
+    container_name: tiktak-ai-v2-backend
     restart: unless-stopped
     volumes:
       - ./backend-orchestrator:/app
@@ -18,8 +18,7 @@ services:
       - META_VERIFY_TOKEN=${META_VERIFY_TOKEN}
       - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY}
     command: >
-      sh -c "python fix_migrations.py &&
-             python manage.py migrate &&
+      sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
              python manage.py setup_initial_data &&
              (while true; do python manage.py expire_conversations; sleep 60; done) &
@@ -30,12 +29,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      nlu-service:
-        condition: service_started
       vision-service:
         condition: service_started
     ports:
-      - "8000:8000"
+      - "8010:8000"
     networks:
       - internal-net
       - db-net
@@ -44,32 +41,18 @@ services:
         limits:
           memory: 512m
 
-  nlu-service:
-    build: ./nlu-service
-    container_name: nlu-service
-    restart: unless-stopped
-    volumes:
-      - ./nlu-service:/app
-    ports:
-      - "8001:8001"
-    networks:
-      - internal-net
-    deploy:
-      resources:
-        limits:
-          memory: 2g
 
   frontend:
     build:
       context: ./frontend
       args:
         REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-https://ai.tiktakpro.com}
-    container_name: tiktak-frontend
+    container_name: tiktak-ai-v2-frontend
     restart: unless-stopped
     depends_on:
       - backend-orchestrator
     ports:
-      - "3000:3000"
+      - "3010:3000"
     networks:
       - internal-net
     deploy:
@@ -79,15 +62,17 @@ services:
 
   vision-service:
     build: ./vision-service
-    container_name: vision-service
+    container_name: tiktak-ai-v2-vision
     restart: unless-stopped
     env_file:
       - .env
     ports:
-      - "8002:8002"
+      - "8020:8002"
     networks:
       - internal-net
       - db-net
+    volumes:
+      - hf_cache:/root/.cache/huggingface
     deploy:
       resources:
         limits:
@@ -98,41 +83,10 @@ services:
               count: 1
               capabilities: [gpu]
 
-  sync-worker:
-    build: ./sync-worker
-    container_name: sync-worker
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      TIKTAK_API_BASE_URL: ${TIKTAK_API_BASE_URL}
-      VISION_SERVICE_URL: http://vision-service:8002/vectorize
-      POSTGRES_HOST: db
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    command: >
-      sh -c "echo '=== Sync Worker starting ===' &&
-            python sync.py &&
-            echo '=== Sync done. Next run in 24h ===' &&
-            sleep 86400"
-    depends_on:
-      db:
-        condition: service_healthy
-      vision-service:
-        condition: service_started
-    networks:
-      - internal-net
-      - db-net
-    deploy:
-      resources:
-        limits:
-          memory: 256m
 
   db:
     image: ankane/pgvector:v0.5.1
-    container_name: postgres-db
+    container_name: tiktak-ai-v2-postgres
     restart: unless-stopped
     env_file:
       - .env
@@ -143,7 +97,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5434:5432"
     networks:
       - db-net
     healthcheck:
@@ -158,10 +112,10 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: tiktak-redis
+    container_name: tiktak-ai-v2-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     command: redis-server --save 60 1 --loglevel warning
@@ -180,3 +134,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  hf_cache:
