@@ -1,11 +1,13 @@
 """
-TikTak Vision Service — CLIP-based image search with pgvector
+TikTak Vision Service — CLIP-based Image-to-Image search with pgvector
 
-Optimizations applied:
-- _embed_image() reused across all endpoints (no code duplication)
-- _search_similar_db() shared SQL helper
+Architecture:
+- Pure Image-to-Image similarity search (Visual RAG)
+- Text search has been removed: catalogue is injected directly in the LLM prompt
+- _embed_image() shared across all endpoints (no code duplication)
+- _search_similar_db() shared SQL helper with configurable threshold
 - Connection pool with context manager (no connection leaks)
-- DB initialization at startup (CREATE TABLE + HNSW index)
+- DB initialized at startup: CREATE TABLE crm_itemvector + HNSW index
 - httpx async for non-blocking image downloads
 """
 import io
@@ -77,61 +79,27 @@ def _init_database():
         cur = conn.cursor()
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS products_vector (
+            CREATE TABLE IF NOT EXISTS crm_itemvector (
                 id SERIAL PRIMARY KEY,
-                product_id   VARCHAR(255) NOT NULL,
-                variation_id VARCHAR(255),
+                item_id      VARCHAR(255) NOT NULL,
                 shop_id      VARCHAR(255) NOT NULL,
                 image_url    TEXT,
+                metadata     JSONB,
                 embedding    vector(512),
                 created_at   TIMESTAMP DEFAULT NOW(),
-                UNIQUE(product_id, image_url, shop_id)
+                UNIQUE(item_id, image_url, shop_id)
             );
-        """)
-        # ── Migrations for existing tables ────────────────────────────────
-        # Add created_at if missing
-        cur.execute("""
-            DO $$ BEGIN
-                ALTER TABLE products_vector ADD COLUMN created_at TIMESTAMP DEFAULT NOW();
-            EXCEPTION WHEN duplicate_column THEN NULL;
-            END $$;
-        """)
-        # Drop old UNIQUE(variation_id, shop_id) constraint if it exists,
-        # replace with UNIQUE(product_id, image_url, shop_id).
-        cur.execute("""
-            DO $$ DECLARE
-                c TEXT;
-            BEGIN
-                SELECT conname INTO c
-                FROM pg_constraint
-                WHERE conrelid = 'products_vector'::regclass
-                  AND contype = 'u'
-                  AND conname LIKE '%variation%';
-                IF c IS NOT NULL THEN
-                    EXECUTE 'ALTER TABLE products_vector DROP CONSTRAINT ' || c;
-                END IF;
-            EXCEPTION WHEN others THEN NULL;
-            END $$;
-        """)
-        cur.execute("""
-            DO $$ BEGIN
-                ALTER TABLE products_vector
-                    ADD CONSTRAINT products_vector_product_image_shop_unique
-                    UNIQUE (product_id, image_url, shop_id);
-            EXCEPTION WHEN duplicate_table THEN NULL;
-                     WHEN duplicate_object THEN NULL;
-            END $$;
         """)
         # HNSW index for fast cosine similarity search (O(log n) instead of O(n))
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_products_vector_embedding
-                ON products_vector
+            CREATE INDEX IF NOT EXISTS idx_crm_itemvector_embedding
+                ON crm_itemvector
                 USING hnsw (embedding vector_cosine_ops)
                 WITH (m = 16, ef_construction = 64);
         """)
         conn.commit()
         cur.close()
-    logger.info("[DB] Table and HNSW index initialized.")
+    logger.info("[DB] Table crm_itemvector and HNSW index initialized.")
 
 
 # ── CLIP Embedding ────────────────────────────────────────────────────────────
@@ -148,7 +116,8 @@ def _embed_image(image: Image.Image) -> list:
     return image_features.squeeze().cpu().tolist()
 
 
-async def _download_and_embed(image_url: str) -> list:
+
+async def _download_and_embed(image_url: str) -> tuple[list, Image.Image]:
     """Download image async + compute embedding."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.get(image_url)
@@ -159,16 +128,16 @@ async def _download_and_embed(image_url: str) -> list:
 
 # ── Database Search ───────────────────────────────────────────────────────────
 
-def _search_similar_db(embedding: list, shop_id: str = None, limit: int = 5) -> list:
-    """Search pgvector for similar product embeddings."""
+def _search_similar_db(embedding: list, shop_id: str = None, limit: int = 5, threshold: float = SIMILARITY_THRESHOLD) -> list:
+    """Search pgvector for similar item embeddings."""
     with get_db_connection() as conn:
         cur = conn.cursor()
         if shop_id:
             cur.execute(
                 """
-                SELECT product_id, variation_id, shop_id, image_url,
+                SELECT item_id, shop_id, image_url, metadata,
                        1 - (embedding <=> %s::vector) AS similarity
-                FROM products_vector
+                FROM crm_itemvector
                 WHERE shop_id = %s
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
@@ -178,9 +147,9 @@ def _search_similar_db(embedding: list, shop_id: str = None, limit: int = 5) -> 
         else:
             cur.execute(
                 """
-                SELECT product_id, variation_id, shop_id, image_url,
+                SELECT item_id, shop_id, image_url, metadata,
                        1 - (embedding <=> %s::vector) AS similarity
-                FROM products_vector
+                FROM crm_itemvector
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
                 """,
@@ -191,29 +160,27 @@ def _search_similar_db(embedding: list, shop_id: str = None, limit: int = 5) -> 
         all_scores = []
         for row in cur.fetchall():
             score = float(row[4])
-            product_id = row[0]
-            variation_id = row[1]
-            passed = score >= SIMILARITY_THRESHOLD
+            item_id = row[0]
+            passed = score >= threshold
 
             all_scores.append({
-                "product_id": product_id,
-                "variation_id": variation_id,
+                "item_id": item_id,
                 "score": score,
                 "passed": passed,
             })
 
-            if passed:
-                results.append({
-                    "product_id":       product_id,
-                    "variation_id":     variation_id,
-                    "shop_id":          row[2],
-                    "image_url":        row[3],
-                    "similarity_score": score,
-                })
+            results.append({
+                "item_id":          item_id,
+                "shop_id":          row[1],
+                "image_url":        row[2],
+                "metadata":         row[3] if row[3] else {},
+                "similarity_score": score,
+                "is_exact_match":   passed,
+            })
 
         # ── Detailed similarity logs for threshold tuning ─────────────────
         logger.info(
-            f"[VISION-SEARCH] shop_id={shop_id} | threshold={SIMILARITY_THRESHOLD} | "
+            f"[VISION-SEARCH] shop_id={shop_id} | threshold={threshold} | "
             f"candidates={len(all_scores)} | matches={len(results)}"
         )
         for i, s in enumerate(all_scores):
@@ -221,8 +188,7 @@ def _search_similar_db(embedding: list, shop_id: str = None, limit: int = 5) -> 
             logger.info(
                 f"[VISION-SEARCH]   #{i+1} {marker} | "
                 f"score={s['score']:.4f} | "
-                f"product_id={s['product_id']} | "
-                f"variation_id={s['variation_id']}"
+                f"item_id={s['item_id']}"
             )
         if not all_scores:
             logger.warning(f"[VISION-SEARCH] No embeddings found in DB for shop_id={shop_id}")
@@ -263,10 +229,17 @@ app = FastAPI(title="TikTak Vision Service", lifespan=lifespan)
 class ImageRequest(BaseModel):
     image_url: str
     limit: int = 5
-    product_id: Optional[str] = None
-    variation_id: Optional[str] = None
+    item_id: Optional[str] = None
     shop_id: Optional[str] = None
+    metadata: Optional[dict] = None
     store_image_url: Optional[str] = None
+
+class VectorizeTextRequest(BaseModel):
+    text_to_embed: str
+    item_id: str
+    shop_id: str
+    metadata: Optional[dict] = None
+    image_url: Optional[str] = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -278,28 +251,40 @@ def health_check():
 
 @app.post("/vectorize")
 async def predict_embedding(request: ImageRequest):
-    """Extract CLIP embedding from image URL and optionally save to DB."""
+    """Extract CLIP embedding from image URL (and text if provided), fuse them, and save to DB."""
     try:
-        embedding, _ = await _download_and_embed(request.image_url)
+        embedding_img, _ = await _download_and_embed(request.image_url)
+        
+        if request.text_to_embed:
+            embedding_txt = _embed_text(request.text_to_embed)
+            # FUSION MULTIMODALE : Moyenne des vecteurs (Texte + Image) pour une recherche parfaite
+            import torch
+            fused = torch.tensor(embedding_img) + torch.tensor(embedding_txt)
+            fused = fused / fused.norm(p=2, dim=-1, keepdim=True)
+            embedding = fused.tolist()
+        else:
+            embedding = embedding_img
+            
         status_msg = "success"
 
-        # Save to database if product details provided
-        if request.product_id and request.shop_id:
+        # Save to database if item details provided
+        if request.item_id and request.shop_id:
+            import json
+            final_url = request.store_image_url or request.image_url
             try:
                 with get_db_connection() as conn:
                     cur = conn.cursor()
                     cur.execute(
                         """
-                        INSERT INTO products_vector (product_id, variation_id, shop_id, image_url, embedding, created_at)
-                        VALUES (%s, %s, %s, %s, %s::vector, NOW())
-                        ON CONFLICT (product_id, image_url, shop_id)
+                        INSERT INTO crm_itemvector (item_id, shop_id, image_url, metadata, embedding, created_at)
+                        VALUES (%s, %s, %s, %s::jsonb, %s::vector, NOW())
+                        ON CONFLICT (item_id, image_url, shop_id)
                         DO UPDATE SET
-                            variation_id = EXCLUDED.variation_id,
+                            metadata     = EXCLUDED.metadata,
                             embedding    = EXCLUDED.embedding,
                             created_at   = NOW();
                         """,
-                        (request.product_id, request.variation_id, request.shop_id,
-                         request.store_image_url, embedding),
+                        (request.item_id, request.shop_id, final_url, json.dumps(request.metadata or {}), embedding),
                     )
                     conn.commit()
                     cur.close()
@@ -307,13 +292,59 @@ async def predict_embedding(request: ImageRequest):
             except psycopg2.Error as db_e:
                 status_msg = f"success but failed to save to db: {str(db_e)}"
 
-        return {"status": status_msg, "embedding": embedding, "dimensions": len(embedding)}
+        return {
+            "status": status_msg,
+            "dimensions": len(embedding),
+            "payload": {
+                "item_id": request.item_id,
+                "shop_id": request.shop_id,
+                "image_url": final_url if request.item_id else request.image_url,
+                "metadata": request.metadata
+            }
+        }
 
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except httpx.HTTPError as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
+@app.post("/vectorize-text")
+async def vectorize_text(request: VectorizeTextRequest):
+    """Extract CLIP embedding from a text description and save to DB."""
+    try:
+        embedding = _embed_text(request.text_to_embed)
+        import json
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO crm_itemvector (item_id, shop_id, image_url, metadata, embedding, created_at)
+                VALUES (%s, %s, %s, %s::jsonb, %s::vector, NOW())
+                ON CONFLICT (item_id, image_url, shop_id)
+                DO UPDATE SET
+                    metadata     = EXCLUDED.metadata,
+                    embedding    = EXCLUDED.embedding,
+                    created_at   = NOW();
+                """,
+                (request.item_id, request.shop_id, "text_only", json.dumps(request.metadata or {}), embedding),
+            )
+            conn.commit()
+            cur.close()
+            
+        return {
+            "status": "success",
+            "dimensions": len(embedding),
+            "payload": {
+                "item_id": request.item_id,
+                "shop_id": request.shop_id,
+                "image_url": "text_only",
+                "metadata": request.metadata
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @app.post("/search-similar")
 async def search_similar_products(request: ImageRequest):
@@ -325,7 +356,6 @@ async def search_similar_products(request: ImageRequest):
         return {
             "status": "success",
             "results": results,
-            "threshold": SIMILARITY_THRESHOLD,
             "total_matches": len(results),
         }
 
@@ -333,6 +363,60 @@ async def search_similar_products(request: ImageRequest):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except httpx.HTTPError as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.post("/vectorize-upload")
+async def vectorize_upload(
+    image: UploadFile = File(...),
+    item_id: str = Form(...),
+    shop_id: str = Form(...),
+    metadata: str = Form("{}"),  # JSON passé sous forme de string
+    image_url: str = Form("uploaded_file"), # URL de l'image (Optionnel)
+):
+    """Extract CLIP embedding from uploaded image file and save to DB."""
+    import json
+    try:
+        contents = await image.read()
+        pil_image = Image.open(io.BytesIO(contents)).convert("RGB")
+        embedding = _embed_image(pil_image)
+        
+        try:
+            metadata_dict = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata_dict = {}
+
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO crm_itemvector (item_id, shop_id, image_url, metadata, embedding, created_at)
+                VALUES (%s, %s, %s, %s::jsonb, %s::vector, NOW())
+                ON CONFLICT (item_id, image_url, shop_id)
+                DO UPDATE SET
+                    metadata     = EXCLUDED.metadata,
+                    embedding    = EXCLUDED.embedding,
+                    created_at   = NOW();
+                """,
+                (item_id, shop_id, image_url, json.dumps(metadata_dict), embedding),
+            )
+            conn.commit()
+            cur.close()
+
+        return {
+            "status": "success", 
+            "dimensions": len(embedding),
+            "product": {
+                "item_id": item_id,
+                "shop_id": shop_id,
+                "image_url": image_url,
+                "metadata": metadata_dict
+            }
+        }
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
@@ -375,11 +459,11 @@ def clear_vectors(shop_id: Optional[str] = None):
             cur = conn.cursor()
             if shop_id:
                 cur.execute(
-                    "DELETE FROM products_vector WHERE shop_id = %s RETURNING id;",
+                    "DELETE FROM crm_itemvector WHERE shop_id = %s RETURNING id;",
                     (shop_id,),
                 )
             else:
-                cur.execute("DELETE FROM products_vector RETURNING id;")
+                cur.execute("DELETE FROM crm_itemvector RETURNING id;")
             deleted = cur.rowcount
             conn.commit()
             cur.close()
@@ -405,12 +489,12 @@ def vectors_stats(shop_id: Optional[str] = None):
             cur = conn.cursor()
             if shop_id:
                 cur.execute(
-                    "SELECT COUNT(*) FROM products_vector WHERE shop_id = %s;",
+                    "SELECT COUNT(*) FROM crm_itemvector WHERE shop_id = %s;",
                     (shop_id,),
                 )
             else:
                 cur.execute(
-                    "SELECT shop_id, COUNT(*) FROM products_vector GROUP BY shop_id ORDER BY shop_id;"
+                    "SELECT shop_id, COUNT(*) FROM crm_itemvector GROUP BY shop_id ORDER BY shop_id;"
                 )
                 rows = cur.fetchall()
                 cur.close()

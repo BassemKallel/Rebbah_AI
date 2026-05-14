@@ -11,23 +11,17 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-def create_pending_order(lead, shop_id: str, product_id: str, variation_id: str,
-                         color: str, size: str, address: str, phone_number: str,
-                         quantity: int = 1):
+def create_pending_order(lead, shop_id: str, extracted_data: dict = None, items: list = None):
     """
-    Attach a pre-order to a lead and advance it to QUALIFIED status.
+    Attach a pre-order/lead status to a lead and advance it to QUALIFIED status.
+    Universal for all domains. If 'items' is provided, creates OrderItems (E-commerce).
     Returns the updated lead instance.
     """
     from apps.crm.models import Lead
+    from apps.crm.models.lead import OrderItem
 
-    lead.shop_id      = shop_id
-    lead.product_id   = product_id
-    lead.variation_id = variation_id
-    lead.color        = color
-    lead.size         = size
-    lead.quantity     = quantity
-    lead.address      = address
-    lead.phone_number = phone_number
+    lead.shop_id        = shop_id
+    lead.extracted_data = extracted_data or {}
 
     lead.has_pending_order          = True
     lead.agent_confirmation_pending = True
@@ -38,6 +32,17 @@ def create_pending_order(lead, shop_id: str, product_id: str, variation_id: str,
 
     lead.pending_order_created_at = timezone.now()
     lead.save()
+    
+    # Create Order Items if any
+    if items:
+        for item in items:
+            OrderItem.objects.create(
+                lead=lead,
+                product_id=item.get("product_id"),
+                product_name=item.get("product_name", item.get("name", item.get("product", "Unknown"))),
+                quantity=item.get("quantity", item.get("qty", 1)),
+                price=item.get("price")
+            )
 
-    logger.info(f"[ORDER] Pre-order created — lead={lead.id} ref={lead.pending_order_reference}")
+    logger.info(f"[ORDER] Pre-order/Lead created — lead={lead.id} ref={lead.pending_order_reference}")
     return lead

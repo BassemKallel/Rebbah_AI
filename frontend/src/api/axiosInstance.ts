@@ -9,7 +9,9 @@
 import axios from 'axios';
 import { getAccessToken } from '../providers/AuthProvider';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const defaultUrl = isLocal ? 'http://localhost:8010' : window.location.origin;
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || defaultUrl;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

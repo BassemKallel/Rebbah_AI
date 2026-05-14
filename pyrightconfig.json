@@ -1,23 +1,16 @@
 {
-  "include": [
-    "backend-orchestrator",
-    "vision-service"
-  ],
-  "exclude": [
-    "**/node_modules",
-    "**/__pycache__",
-    "**/migrations",
-    "frontend"
-  ],
+  "include": ["."],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/migrations", "**/venv", "**/.venv"],
   "typeCheckingMode": "off",
-  "pythonVersion": "3.11",
-  "pythonPlatform": "Linux",
+  "pythonVersion": "3.10",
   "reportMissingModuleSource": "none",
   "reportMissingImports": "none",
   "reportMissingTypeStubs": "none",
-  "reportUndefinedVariable": "none",
   "reportGeneralTypeIssues": "none",
-  "reportAttributeAccessIssue": "none",
-  "reportOperatorIssue": "none",
-  "reportReturnType": "none"
+  "reportOptionalSubscript": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalCall": "none",
+  "reportOptionalIterable": "none",
+  "reportOptionalContextManager": "none",
+  "reportOptionalOperand": "none"
 }

@@ -5,32 +5,29 @@ Single entry point for all message processing, eliminating duplication
 between MetaWebhookView and MessengerWebhookPOC.
 
 Steps:
-  2. Cold Memory: Lead + Conversation + Grace Period
-  3. Hot Memory: Redis
-  4. Vision API
-  5. NLU API + Guards + Fallback
-  6. Save User Message
-  7. Context Accumulation
-  8. Contextual Mapping
-  9. Product Lookup
-  10. Disambiguation Resolution
-  11. State Machine
-  12-13. Persist State + Save Bot Message + AWAITING_CORRECTION
+  1. Resolve Company + Billing Quota
+  2. Cold Memory: Lead + Conversation
+  3. Hot Memory: Redis conversation history
+  4. Visual RAG: Image-to-Image search (if image attached)
+  5. LLM Response (Gemini) with RAG catalog injected in system prompt
+  6. Context Accumulation + Entity Extraction
+  7. Order State Machine (COLLECTING → CONFIRMING → COMPLETED)
+  8. Persist State + Save Messages to DB
 """
 import logging
+import random
+import re
+import time
 from datetime import timedelta
+
 from django.db import transaction
 from django.utils import timezone
 
-from apps.crm.models import Lead, Conversation, Message, BotConfiguration, NLUFallbackLog, Company
+from apps.crm.models import Lead, Conversation, Message, BotConfiguration, Company, PipelineLog, PendingMessage
 from .context_manager import ContextManager
-from .response_templates import FALLBACK_PRODUCTS
-from .services import ai_service, tiktak_service, dialog_manager
-from .services.dialog_manager import detect_language
+from .services import ai_service
 from .services.azure_storage import azure_storage_service
-from .services.template_service import prewarm_order_templates
 from .services.llm_response_service import generate_llm_response
-from . import disambiguation
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +35,15 @@ context_manager = ContextManager()
 
 # Grace period: how long a completed conversation stays open for corrections
 GRACE_PERIOD_MINUTES = 2
+
+# ── LLM Mode constants ──────────────────────────────────────────────────
+
+# Words that count as order confirmation in any supported language/dialect
+_LLM_CONFIRM_WORDS: frozenset = frozenset({
+    "oui", "yes", "ey", "behi", "ayh", "ok", "okay", "confirme", "confirmé", "confirmée",
+    "confirmer", "confirm", "valide", "valider", "d'accord", "mrigl", "rigel", "mrigla",
+    "c bon", "c'est bon", "cest bon", "sava", "sa va", "na3am", "yezzi", "go", "parfait",
+})
 
 
 class MessagePipeline:
@@ -65,501 +71,53 @@ class MessagePipeline:
             dict with keys: text, intent, state, entities, context,
                             matched_image_url?, uploaded_url?
         """
-        result = {}
-
         # ── Upload image to Azure if file provided ─────────────────────────
         uploaded_url = None
         if image_file:
             uploaded_url = azure_storage_service.upload_image(image_file, prefix=shop_id)
             if uploaded_url:
                 image_url = uploaded_url
-                result["uploaded_url"] = uploaded_url
 
-        # ── 1. Resolve Company (for LLM mode + auth) ──────────────────────
+        # ── 1. Resolve Company ─────────────────────────────────────────────
         company = Company.objects.filter(shop_id=shop_id, is_active=True).first()
+        if not company:
+            logger.error(f"[PIPELINE] No active company found for shop={shop_id}")
+            return {"text": "Désolé, cette boutique n'est pas active.", "intent": "NOISE", "state": "COMPLETED", "entities": {}, "context": {}, "missing_entities": []}
 
-        # ── LLM Direct Mode — bypass NLU pipeline ─────────────────────────
-        effective_mode = mode_override or (getattr(company, 'response_mode', 'nlu') if company else 'nlu')
-        if effective_mode == 'llm' and company:
-            logger.info(f"[PIPELINE] LLM mode activated for shop={shop_id} (override={bool(mode_override)})")
-            return self._run_llm_mode(user_id, shop_id, text, company, image_url=image_url)
+        # ── 0. Vérification du quota financier (BillingWallet) ─────────────
+        if hasattr(company, 'wallet') and company.wallet:
+            if company.wallet.is_limit_exceeded():
+                logger.warning(f"[BILLING] Quota épuisé pour {shop_id}. Passage en manuel.")
+                if company.bot_config and company.bot_config.bot_enabled:
+                    company.bot_config.bot_enabled = False
+                    company.bot_config.bot_disabled_at = timezone.now()
+                    company.bot_config.save()
+                return {"text": "Notre assistant virtuel est temporairement désactivé pour cette boutique. Un agent humain vous répondra bientôt.", "intent": "OTHER", "state": "NEW_CONVERSATION", "entities": {}, "context": {}, "missing_entities": []}
 
-        # ── 2. Cold Memory: Lead + Conversation ───────────────────────────
-        # Atomic block prevents race conditions when two messages arrive simultaneously
-        # for the same user (e.g. Meta retransmission or rapid double-tap).
-        # select_for_update() acquires a PostgreSQL FOR UPDATE lock so concurrent
-        # threads wait instead of each creating a duplicate Lead + Conversation.
-        with transaction.atomic():
-            conversation = (
-                Conversation.objects
-                .select_for_update()
-                .filter(
-                    sender_id=user_id,
-                    state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "WAITING_DISAMBIGUATION", "AWAITING_CORRECTION"]
-                )
-                .select_related('lead')
-                .first()
-            )
-            if not conversation:
-                # No active conversation → start fresh; lead will be created lazily on ORDER_PRODUCT
-                conversation = Conversation.objects.create(
-                    sender_id=user_id,
-                    shop_id=shop_id,
-                    platform=platform,
-                    state="NEW_CONVERSATION"
-                )
-                lead = None
-                is_new_conversation = True
-            else:
-                # Always derive lead from the conversation to stay consistent
-                lead = conversation.lead
-                is_new_conversation = False
+        # ── Log collector: captures every logger call during this run ─────
+        _log_buffer = []
 
-        # Pre-warm ORDER_PRODUCT / INFORM_INFO templates for new conversations.
-        # Runs outside the transaction to avoid coupling Redis I/O to the DB lock.
-        # A failure here is non-blocking — get_template() will fall back normally.
-        if is_new_conversation:
-            try:
-                prewarm_order_templates(shop_id)
-            except Exception as exc:
-                logger.warning(f"[PIPELINE] Template pre-warm failed (non-blocking): {exc}")
+        class _ListHandler(logging.Handler):
+            def emit(self, record):
+                _log_buffer.append(f"[{record.levelname}] {self.format(record)}")
 
-        # ── HANDOFF GUARD 1 : Bot désactivé globalement pour la boutique ──────────
-        bot_config, _ = BotConfiguration.objects.get_or_create(
-            shop_id=shop_id,
-            defaults={'bot_enabled': True}
-        )
-        if not bot_config.bot_enabled:
-            logger.info(f"[PIPELINE] Bot DISABLED for shop={shop_id} — saving message, skipping AI")
-            Message.objects.create(
-                conversation=conversation,
-                sender='USER',
-                text=text or '[image]',
-                conversation_state_before=conversation.state,
-                conversation_state_after=conversation.state,
-            )
-            return {"text": None, "handoff": True, "reason": "bot_disabled", "intent": "HANDOFF"}
-
-        # ── HANDOFF GUARD 2 : Conversation sous contrôle humain ───────────────────
-        if conversation.is_human_controlled:
-            logger.info(f"[PIPELINE] Conv {conversation.id} is HUMAN-CONTROLLED — saving message, skipping AI")
-            Message.objects.create(
-                conversation=conversation,
-                sender='USER',
-                text=text or '[image]',
-                conversation_state_before=conversation.state,
-                conversation_state_after=conversation.state,
-            )
-            return {"text": None, "handoff": True, "reason": "human_controlled", "intent": "HANDOFF"}
-
-        # Handle grace period expiration
-        correction_mode = False
-        if conversation.state == "AWAITING_CORRECTION":
-            if conversation.completed_at:
-                try:
-                    elapsed_minutes = (timezone.now() - conversation.completed_at).total_seconds() / 60
-                except TypeError:
-                    # Fallback: make completed_at timezone-aware if stored naive
-                    from django.utils import timezone as tz
-                    completed_at_aware = tz.make_aware(conversation.completed_at.replace(tzinfo=None))
-                    elapsed_minutes = (tz.now() - completed_at_aware).total_seconds() / 60
-                logger.info(f"[PIPELINE] Grace period: {elapsed_minutes:.1f}min elapsed / {GRACE_PERIOD_MINUTES}min limit")
-                if elapsed_minutes > GRACE_PERIOD_MINUTES:
-                    conversation.state = "COMPLETED"
-                    conversation.save()
-                    context_manager.clear_context(user_id)
-                    lead = None
-                    conversation = Conversation.objects.create(
-                        sender_id=user_id,
-                        shop_id=shop_id, platform=platform, state="NEW_CONVERSATION"
-                    )
-                else:
-                    # Still in grace period — correction mode
-                    correction_mode = True
-                    conversation.state = "WAITING_USER_REPLY"
-                    conversation.save()
-                    logger.info("[PIPELINE] Correction mode: will force ORDER_PRODUCT after NLU")
-            else:
-                # completed_at not set — treat as expired, start fresh
-                logger.warning("[PIPELINE] AWAITING_CORRECTION but completed_at is None — starting new conversation")
-                conversation.state = "COMPLETED"
-                conversation.save()
-                context_manager.clear_context(user_id)
-                lead = None
-                conversation = Conversation.objects.create(
-                    sender_id=user_id,
-                    shop_id=shop_id, platform=platform, state="NEW_CONVERSATION"
-                )
-
-
-        # ── 3. (Hot Memory moved to step 5b — after NLU) ─────────────────
-
-        # ── 4. Vision API ─────────────────────────────────────────────────
-        is_error = False
-        extracted_entities = {}
-        matched_image_url = None
-        vision_variation_id = None
-
-        if image_file or image_url:
-            vision_result = ai_service.call_vision(shop_id, image_url=image_url, image_file=image_file if image_file else None)
-            if vision_result:
-                extracted_entities["product"] = f"Article_From_Image_{vision_result['product_id']}"
-                matched_image_url = vision_result.get("image_url")
-                vision_variation_id = vision_result.get("variation_id")
-
-                # Pre-fill color from variation (size is left for the user to provide)
-                if vision_variation_id:
-                    products = tiktak_service.get_products(shop_id)
-                    detected_color = tiktak_service.get_color_from_variation(vision_variation_id, products)
-                    if detected_color:
-                        extracted_entities["color"] = detected_color
-                        logger.info(f"[PIPELINE] Vision pre-filled color='{detected_color}'")
-            else:
-                is_error = True
-
-        # ── 5. NLU API ────────────────────────────────────────────────────
-        nlu_raw_entities = []
-        extracted_intent  = "NOISE"
-        intent_confidence = None
-        is_fallback = False
-        nlu_result = {}
-
-        if text:
-            nlu_result = ai_service.call_nlu(text, user_id=user_id)
-            extracted_intent    = nlu_result["intent"]
-            nlu_raw_entities    = nlu_result["raw_entities"]
-            intent_confidence   = nlu_result.get("confidence_score")
-            is_error = is_error or nlu_result["error"]
-            is_fallback = nlu_result.get("fallback_used", False)
-
-            if is_fallback:
-                logger.warning(f"[PIPELINE] Gemini fallback used (reason={nlu_result.get('_trigger_reason')})")
-
-            # ── 5b. Hot Memory (enriched — after NLU) ─────────────────────
-            context_manager.add_message(
-                user_id, role="user", text=text,
-                intent=extracted_intent,
-                confidence=intent_confidence,
-                entities=extracted_entities,
-            )
-            # Entity filtering & guards
-            filtered = dialog_manager.apply_entity_guards(nlu_raw_entities, extracted_intent, conversation)
-            extracted_entities.update(filtered)
-
-            # Simple product keyword fallback
-            if ("product" not in extracted_entities
-                    and not image_url
-                    and "product" not in conversation.context_data):
-                for cp in FALLBACK_PRODUCTS:
-                    if cp in text.lower():
-                        extracted_entities["product"] = cp
-                        break
-
-        # Default intent when only an image was provided.
-        # If a non-order intent was pending (e.g. ASK_PRICE waiting for product),
-        # restore it instead of blindly forcing ORDER_PRODUCT.
-        if (image_url or image_file) and (extracted_intent == "NOISE" or not text):
-            _pending = conversation.context_data.get("_pending_intent")
-            if (_pending
-                    and conversation.state == "WAITING_USER_REPLY"
-                    and _pending in ("ASK_PRICE", "ASK_AVAILABILITY", "ASK_DETAILS", "ASK_DISCOUNT")):
-                extracted_intent = _pending
-                logger.info(f"[PIPELINE] Image received — restoring pending intent: {_pending}")
-            else:
-                extracted_intent = "ORDER_PRODUCT"
-
-        # Detect language for disambiguation messages
-        lang = detect_language(text)
-
-        state_before = conversation.state
-
-        # ── 6. Save User Message ──────────────────────────────────────────
-        is_fallback = is_fallback if text else False
-        user_message = Message.objects.create(
-            conversation=conversation,
-            sender="USER",
-            text=text if text else f"[Image: {image_url}]",
-            extracted_intent=extracted_intent,
-            intent_confidence_score=intent_confidence if text else None,
-            extracted_entities=extracted_entities,
-            is_error=is_error,
-            is_fallback=is_fallback,
-            conversation_state_before=state_before,
-        )
-
-        # ── 6b. Save NLU Fallback Log (active learning) ───────────────────
-        if text and is_fallback:
-            tunbert_orig = nlu_result.get("_tunbert_original", {})
-            trigger = nlu_result.get("_trigger_reason", "LOW_CONFIDENCE")
-            try:
-                NLUFallbackLog.objects.create(
-                    message=user_message,
-                    original_text=text,
-                    tunbert_intent=tunbert_orig.get("intent"),
-                    tunbert_confidence=tunbert_orig.get("confidence_score"),
-                    tunbert_entities=tunbert_orig.get("raw_entities", []),
-                    gemini_intent=nlu_result["intent"],
-                    gemini_confidence=nlu_result.get("confidence_score"),
-                    gemini_entities=nlu_result.get("raw_entities", []),
-                    trigger_reason=trigger,
-                    intent_changed=(tunbert_orig.get("intent") != nlu_result["intent"]),
-                )
-            except Exception as e:
-                logger.error(f"[PIPELINE] Failed to save NLUFallbackLog: {e}")
-
-        # ── 7. Context Accumulation ───────────────────────────────────────
-        current_context = conversation.context_data
-        current_context = dialog_manager.accumulate_context(current_context, extracted_entities)
-        conversation.context_data = current_context
-
-        # Persist/restore vision_variation_id across messages
-        if vision_variation_id:
-            current_context["_vision_variation_id"] = vision_variation_id
-        else:
-            vision_variation_id = current_context.get("_vision_variation_id")
-
-        # ── 8. Contextual Mapping ─────────────────────────────────────────
-        previous_state = conversation.state
-        _contextual_intents = {"INFORM_INFO", "NOISE", "ORDER_PRODUCT", "CONFIRM_DENY", "UNKNOWN"}
-
-        # Redirect CONFIRM_DENY / UNKNOWN → INFORM_INFO during active flow
-        if (extracted_intent in ("CONFIRM_DENY", "UNKNOWN")
-                and previous_state == "WAITING_USER_REPLY"
-                and conversation.missing_entities):
-            logger.info(f"[PIPELINE] {extracted_intent} during active flow → INFORM_INFO")
-            extracted_intent = "INFORM_INFO"
-
-        if extracted_intent in _contextual_intents:
-            extracted_entities, contextual_match = dialog_manager.run_contextual_mapping(
-                conversation, text, extracted_entities, nlu_raw_entities, current_context
-            )
-            if contextual_match and extracted_intent in ("NOISE", "CONFIRM_DENY", "UNKNOWN"):
-                extracted_intent = "INFORM_INFO"
-
-        # ── 9. Product Lookup ─────────────────────────────────────────────
-        matched_product = None
-        prod_name = current_context.get("product")
-
-        if prod_name:
-            try:
-                products = tiktak_service.get_products(shop_id)
-                matched_product, color_from_vision, candidates = tiktak_service.find_product(
-                    products, prod_name, vision_variation_id
-                )
-
-                # Pre-fill color from vision if not yet in context
-                if color_from_vision and "color" not in current_context:
-                    current_context["color"] = color_from_vision
-                    extracted_entities["color"] = color_from_vision
-
-                # Handle ambiguous keyword match
-                if candidates:
-                    current_context["candidates"] = candidates
-                    current_context["pending_intent"] = extracted_intent
-            except Exception as e:
-                logger.error(f"[TIKTAK] product lookup failed: {e}")
-
-        # Update message with any enriched entities
-        user_message.extracted_entities = extracted_entities
-        user_message.extracted_intent = extracted_intent
-        user_message.save(update_fields=["extracted_entities", "extracted_intent"])
-
-        # ── 10. Disambiguation Resolution ─────────────────────────────────
-        disambig_result = self._handle_disambiguation(
-            conversation, previous_state, current_context,
-            text, extracted_intent, matched_product, user_id, lang
-        )
-        if disambig_result is not None:
-            # Early return — disambiguation message sent
-            if disambig_result.get("matched_product"):
-                matched_product = disambig_result["matched_product"]
-                current_context["product"] = matched_product["name"]
-                extracted_intent = current_context.pop("pending_intent", extracted_intent)
-                current_context.pop("candidates", None)
-            else:
-                # Unresolved — return disambiguation response
-                result.update(disambig_result)
-                return result
-
-        # ── 10b. Correction Mode Override ─────────────────────────────────
-        if correction_mode and extracted_intent in ("INFORM_INFO", "NOISE", "UNKNOWN"):
-            extracted_intent = "ORDER_PRODUCT"
-            logger.info("[PIPELINE] Correction mode → forcing ORDER_PRODUCT intent")
-
-        # ── 10c. Progressive Lead Update ──────────────────────────────────
-        # Lead is created lazily on first ORDER_PRODUCT intent (purchase intent detected).
-        # For non-purchase intents, lead stays None and this block is skipped.
-        if extracted_intent in ("ORDER_PRODUCT", "INFORM_INFO") and lead is None:
-            lead = Lead.objects.create(platform_id=user_id)
-            conversation.lead = lead
-            conversation.lead_uuid = lead.uuid
-            conversation.save(update_fields=['lead', 'lead_uuid'])
-            logger.info(f"[PIPELINE] Lead created lazily on ORDER_PRODUCT — lead.id={lead.id}")
-
-        if lead is not None:
-            _lead_dirty = []
-
-            if matched_product:
-                _pid = str(matched_product.get("id", ""))
-                if _pid and lead.product_id != _pid:
-                    lead.product_id = _pid
-                    _lead_dirty.append("product_id")
-
-            if vision_variation_id and lead.variation_id != str(vision_variation_id):
-                lead.variation_id = str(vision_variation_id)
-                _lead_dirty.append("variation_id")
-
-            if not lead.shop_id and shop_id:
-                lead.shop_id = shop_id
-                _lead_dirty.append("shop_id")
-
-            _ctx_to_lead = {
-                "color":        "color",
-                "size":         "size",
-                "address":      "address",
-                "phone_number": "phone_number",
-                "quantity":     "quantity",
-            }
-            for ctx_key, lead_field in _ctx_to_lead.items():
-                ctx_val = current_context.get(ctx_key)
-                if ctx_val is not None and getattr(lead, lead_field) != ctx_val:
-                    setattr(lead, lead_field, ctx_val)
-                    _lead_dirty.append(lead_field)
-
-            if _lead_dirty:
-                _lead_dirty.append("updated_at")
-                lead.save(update_fields=_lead_dirty)
-                logger.info(f"[PIPELINE] Lead progressive update: {_lead_dirty}")
-
-        # ── 11. State Machine ─────────────────────────────────────────────
-        bot_config, _ = BotConfiguration.objects.get_or_create(shop_id=shop_id)
-        current_context["shop_id"] = shop_id
-        sm_result = dialog_manager.run_state_machine(
-            intent=extracted_intent,
-            previous_state=previous_state,
-            current_context=current_context,
-            matched_product=matched_product,
-            lead=lead,
-            conversation=conversation,
-            vision_variation_id=vision_variation_id,
-            bot_config=bot_config,
-            text=text,
-            shop_id=shop_id,  # ← required for shop-specific template overrides
-        )
-        current_context.pop("shop_id", None)
-
-        bot_response_text = sm_result["bot_response"]
-        new_state = sm_result["new_state"]
-        missing_list = sm_result["missing_list"]
-
-        # ── 12. Persist State ─────────────────────────────────────────────
-        conversation.state = new_state
-        conversation.missing_entities = missing_list
-        # Clean up _pending_intent once it has been fulfilled (product now in context)
-        if current_context.get("_pending_intent") and not missing_list:
-            current_context.pop("_pending_intent", None)
-            logger.info("[PIPELINE] _pending_intent cleared — intent fulfilled")
-        conversation.context_data = current_context
-        conversation.save()
-
-        # ── 13. Save Bot Message ──────────────────────────────────────────
-        Message.objects.create(conversation=conversation, sender="BOT", text=bot_response_text, is_error=False)
-        context_manager.add_message(user_id, role="bot", text=bot_response_text)
-
-        # ── Grace Period: AWAITING_CORRECTION ─────────────────────────────
-        if new_state == "COMPLETED":
-            new_state = "AWAITING_CORRECTION"
-            conversation.state = new_state
-            conversation.completed_at = timezone.now()
-            conversation.save()
-
-        # Update user message with the FINAL state (after AWAITING_CORRECTION override)
-        user_message.conversation_state_after = new_state
-        user_message.save(update_fields=["conversation_state_after"])
-
-        # ── Build result ──────────────────────────────────────────────────
-        result.update({
-            "text": bot_response_text,
-            "intent": extracted_intent,
-            "state": new_state,
-            "entities": extracted_entities,
-            "context": current_context,
-            "missing_entities": missing_list,
-        })
-        if matched_image_url:
-            result["matched_image_url"] = matched_image_url
-
-        return result
-
-    def _handle_disambiguation(self, conversation, previous_state, current_context,
-                                text, extracted_intent, matched_product, user_id, lang="FR"):
-        """
-        Handle disambiguation: resolve existing ambiguity or detect new one.
-        Returns None if no disambiguation needed,
-        or a dict with either matched_product or disambiguation response.
-        """
-        # Resolve existing disambiguation
-        if previous_state == "WAITING_DISAMBIGUATION":
-            candidates = current_context.get("candidates", [])
-            resolved = disambiguation.resolve(text, candidates)
-
-            if resolved:
-                return {"matched_product": resolved}
-            else:
-                # Still unresolved — re-send disambiguation message
-                bot_text = disambiguation.build_response(candidates, lang=lang)
-                conversation.state = "WAITING_DISAMBIGUATION"
-                conversation.context_data = current_context
-                conversation.missing_entities = []
-                conversation.save()
-                Message.objects.create(conversation=conversation, sender="BOT", text=bot_text)
-                context_manager.add_message(user_id, role="bot", text=bot_text)
-                return {
-                    "text": bot_text,
-                    "intent": extracted_intent,
-                    "state": "WAITING_DISAMBIGUATION",
-                    "entities": {},
-                    "context": current_context,
-                    "missing_entities": [],
-                }
-
-        # New ambiguity detected this turn
-        if current_context.get("candidates") and not matched_product:
-            candidates = current_context["candidates"]
-            bot_text = disambiguation.build_response(candidates, lang=lang)
-            conversation.state = "WAITING_DISAMBIGUATION"
-            conversation.context_data = current_context
-            conversation.missing_entities = []
-            conversation.save()
-            Message.objects.create(conversation=conversation, sender="BOT", text=bot_text)
-            context_manager.add_message(user_id, role="bot", text=bot_text)
-            return {
-                "text": bot_text,
-                "intent": extracted_intent,
-                "state": "WAITING_DISAMBIGUATION",
-                "entities": {},
-                "context": current_context,
-                "missing_entities": [],
-            }
-
-        return None
-
-    # ── LLM Direct Mode Pipeline ─────────────────────────────────────────
-
-    def _run_llm_mode(self, user_id, shop_id, text, company, image_url=None):
-        """
-        Simplified pipeline for LLM Direct mode.
-        Gemini generates the response using the company's context.
-        Supports image input via the vision service (CLIP embeddings).
-        Can also create orders when all entities are collected.
-        """
-        # ── 1. Cold Memory: Lead + Conversation ──────────────────────────
+        _handler = _ListHandler()
+        _handler.setFormatter(logging.Formatter('%(name)s: %(message)s'))
+        _handler.setLevel(logging.DEBUG)
+        _root_logger = logging.getLogger()  # Root logger captures ALL modules
+        _root_logger.addHandler(_handler)
+        # ── 1. Cold Memory: Lead + Conversation ────────────────────────────────
+        # Filter by (sender_id, shop_id) for strict multi-tenant isolation.
+        # Two different shops cannot share the same conversation even if the
+        # sender_id were identical (edge case in tests; impossible with Meta IDs).
         conversation = Conversation.objects.filter(
             sender_id=user_id,
+            shop_id=shop_id,
             state__in=["NEW_CONVERSATION", "WAITING_USER_REPLY", "LLM_ACTIVE", "LLM_CONFIRMING"]
         ).first()
 
         if not conversation:
+            # Toujours créer un nouveau Lead pour chaque nouvelle conversation
             lead = Lead.objects.create(platform_id=user_id)
             conversation = Conversation.objects.create(
                 lead=lead, lead_uuid=lead.uuid, sender_id=user_id,
@@ -570,65 +128,236 @@ class MessagePipeline:
 
         state_before = conversation.state
         current_context = conversation.context_data or {}
+        _start_time = time.time()
 
-        # ── 2. Hot Memory: conversation history from Redis ───────────────
-        conversation_history = context_manager.get_recent_context(user_id, n=8)
+        # ── 2. Hot Memory: conversation history from Redis ───────────────────
+        # shop_id passed for tenant-scoped Redis key: chat_context:{shop_id}:{user_id}
+        conversation_history = context_manager.get_recent_context(user_id, n=10, shop_id=shop_id)
 
-        # ── 2b. Vision: identify product from image ──────────────────────
+        # ── 2b. Vision: identify product from image (Visual RAG) ───────
         matched_image_url = None
+        carousel_elements_to_send = None
+        
         if image_url:
             try:
-                vision_result = ai_service.call_vision(shop_id, image_url=image_url)
-                if vision_result:
-                    variation_id = vision_result.get("variation_id")
-                    matched_image_url = vision_result.get("image_url")
-                    products = tiktak_service.get_products(shop_id)
+                vision_results = ai_service.call_vision(shop_id, image_url=image_url, limit=3)
+                if vision_results:
+                    matched_item = vision_results[0]
+                    is_exact_match = matched_item.get("is_exact_match", False)
 
-                    # Resolve product from variation_id
-                    vision_product, color_from_vision, _ = tiktak_service.find_product(
-                        products, f"Article_From_Image_{variation_id}"
-                    )
-
-                    if vision_product:
-                        current_context["product"] = vision_product["name"]
-                        if color_from_vision:
-                            current_context["color"] = color_from_vision
-                        # Inject product info into user message so LLM understands context
-                        product_info = f"{vision_product['name']}"
-                        if color_from_vision:
-                            product_info += f" ({color_from_vision})"
-                        if vision_product.get("base_price"):
-                            product_info += f" — {vision_product['base_price']} TND"
-                        text = f"[Image reçue — produit identifié : {product_info}] {text}".strip()
-                        logger.info(f"[LLM PIPELINE] Vision matched: {product_info} (variation_id={variation_id})")
+                    if is_exact_match:
+                        # ── Exact Match ──
+                        matched_image_url = matched_item.get("image_url")
+                        meta = matched_item.get("metadata", {})
+                        if matched_image_url:
+                            product_name = str(meta.get("name", "Produit sélectionné"))
+                            carousel_elements_to_send = [{
+                                "title": product_name[:80],
+                                "subtitle": f"{meta.get('price', '')} TND".strip()[:80],
+                                "image_url": matched_image_url,
+                                "buttons": [
+                                    {
+                                        "type": "postback",
+                                        "title": "Commander 🛒",
+                                        "payload": f"Je veux commander le produit : {product_name}"
+                                    }
+                                ]
+                            }]
+                            
+                        desc = str(meta.get("name", "cet article"))
+                        if meta.get("price"):
+                            desc += f" à {meta['price']} TND"
+                            
+                        text = f"[INFO SYSTÈME : Le client a envoyé une photo. Le système visuel a trouvé une correspondance exacte en stock : {desc}. Une carte visuelle du produit vient d'être affichée au client. Continue la discussion en l'aidant à l'acheter !] {text}".strip()
+                        logger.info(f"[LLM PIPELINE] Vision RAG exact match: {desc}")
+                    
                     else:
-                        text = f"[Image reçue — produit non identifié dans le catalogue] {text}".strip()
-                        logger.warning(f"[LLM PIPELINE] Vision returned variation_id={variation_id} but no product matched")
+                        # ── Soft Fallback ──
+                        carousel_elements_to_send = []
+                        names = []
+                        for item in vision_results:
+                            img_url = item.get("image_url")
+                            meta = item.get("metadata", {})
+                            if img_url:
+                                product_name = str(meta.get("name", "Produit similaire"))
+                                names.append(product_name)
+                                carousel_elements_to_send.append({
+                                    "title": product_name[:80],
+                                    "subtitle": f"{meta.get('price', '')} TND".strip()[:80],
+                                    "image_url": img_url,
+                                    "buttons": [
+                                        {
+                                            "type": "postback",
+                                            "title": "Commander 🛒",
+                                            "payload": f"Je veux commander le produit : {product_name}"
+                                        }
+                                    ]
+                                })
+                                
+                        text = f"[INFO SYSTÈME : Le client a envoyé une photo. Le système n'a pas trouvé le produit exact, mais a affiché un carrousel avec ces articles similaires : {', '.join(names)}. Informe le client que tu n'as pas le modèle exact mais propose-lui ces alternatives !] {text}".strip()
+                        logger.info(f"[LLM PIPELINE] Vision RAG soft fallback with {len(carousel_elements_to_send)} items.")
                 else:
-                    text = f"[Image reçue — vision service indisponible] {text}".strip()
+                    text = f"[Image reçue — aucun produit similaire trouvé dans la base de données] {text}".strip()
             except Exception as e:
-                logger.warning(f"[LLM PIPELINE] Vision lookup failed (non-blocking): {e}")
+                logger.warning(f"[LLM PIPELINE] Vision RAG lookup failed (non-blocking): {e}")
                 text = f"[Image reçue] {text}".strip()
+
 
         # ── 3. Call LLM with company context ─────────────────────────────
         llm_result = generate_llm_response(
             text=text,
             company=company,
+            shop_id=shop_id,
             conversation_history=conversation_history,
             current_context=current_context,
+            state_before=state_before,
         )
 
         bot_text = llm_result["response_text"]
         detected_intent = llm_result.get("detected_intent", "LLM_DIRECT")
         extracted_entities = llm_result.get("extracted_entities", {})
+        
+        # ── Handle Text-Based Carousel ─────────────────────────────────────
+        llm_carousel_items = llm_result.get("carousel_items", [])
+        if llm_carousel_items and not carousel_elements_to_send:
+            try:
+                from apps.crm.models.analytics import ItemVector
+                rag_items = ItemVector.objects.filter(shop_id=shop_id, item_id__in=llm_carousel_items)
+                if rag_items:
+                    carousel_elements_to_send = []
+                    for item in rag_items:
+                        if item.image_url:
+                            meta = item.metadata or {}
+                            product_name = str(meta.get("name", "Produit"))
+                            carousel_elements_to_send.append({
+                                "title": product_name[:80],
+                                "subtitle": f"{meta.get('price', '')} TND".strip()[:80],
+                                "image_url": item.image_url,
+                                "buttons": [
+                                    {
+                                        "type": "postback",
+                                        "title": "Commander 🛒",
+                                        "payload": f"Je veux commander le produit : {product_name}"
+                                    }
+                                ]
+                            })
+                    logger.info(f"[LLM PIPELINE] Appending text-based carousel with {len(carousel_elements_to_send)} items")
+            except Exception as e:
+                logger.warning(f"[LLM PIPELINE] Failed to build text-based carousel: {e}")
+
+        # ── Circuit Breaker: handle Gemini API errors gracefully ──────────
+        if llm_result.get("error"):
+
+            _FALLBACK_PHRASES = [
+                "Laissez-moi juste vérifier ça avec notre équipe, je reviens vers vous dans quelques instants 😊",
+                "Notre système est un peu lent en ce moment, un petit instant s'il vous plaît...",
+                "Je vérifie les informations disponibles, je vous réponds très rapidement !",
+            ]
+            _HANDOFF_PHRASE = (
+                "Notre système rencontre des difficultés techniques. "
+                "Je vous mets en relation avec un conseiller humain qui prendra le relais immédiatement. "
+                "Merci pour votre patience ! 🙏"
+            )
+
+            error_count = context_manager.increment_error_count(user_id, shop_id)
+            logger.warning(
+                f"[CIRCUIT BREAKER] Gemini error #{error_count} for sender={user_id} "
+                f"shop={shop_id} error_type={llm_result.get('error_type')}"
+            )
+
+            # ── Regex Fallback: Essayer d'extraire le numéro même si le LLM a planté ──
+            phone_match = re.search(r'\b[24579]\d{7}\b', text)
+            if phone_match:
+                current_context["phone_number"] = phone_match.group(0)
+                conversation.context_data = current_context
+                conversation.save(update_fields=['context_data'])
+                logger.info(f"[CIRCUIT BREAKER] Fallback Regex extracted phone: {phone_match.group(0)}")
+
+
+            if error_count >= 3:
+                # ── Handoff: escalade vers agent humain ───────────────────
+                conversation.is_human_controlled = True
+                conversation.save(update_fields=['is_human_controlled'])
+                context_manager.reset_error_count(user_id, shop_id)
+                bot_text = _HANDOFF_PHRASE
+                logger.warning(
+                    f"[CIRCUIT BREAKER] Human handoff triggered for sender={user_id} "
+                    f"shop={shop_id} after {error_count} consecutive errors."
+                )
+            else:
+                # ── Graceful Fallback: message naturel + mise en queue ─────
+                bot_text = random.choice(_FALLBACK_PHRASES)
+                try:
+                    PendingMessage.objects.create(
+                        shop_id=shop_id,
+                        sender_id=user_id,
+                        conversation=conversation,
+                        user_text=text,
+                        image_url=image_url or '',
+                    )
+                    logger.info(
+                        f"[CIRCUIT BREAKER] Message queued for retry — "
+                        f"sender={user_id} shop={shop_id}"
+                    )
+                except Exception as q_err:
+                    logger.error(f"[CIRCUIT BREAKER] Failed to queue message: {q_err}")
+
+            # Save and return the graceful response immediately
+            Message.objects.create(
+                conversation=conversation, sender="USER", text=text,
+                extracted_intent="LLM_ERROR", conversation_state_before=state_before,
+            )
+            Message.objects.create(
+                conversation=conversation, sender="BOT", text=bot_text
+            )
+            context_manager.add_message(user_id, role="user", text=text, shop_id=shop_id)
+            context_manager.add_message(user_id, role="bot", text=bot_text, shop_id=shop_id)
+
+            # Write PipelineLog for error monitoring
+            _root_logger.removeHandler(_handler)
+            _duration = int((time.time() - _start_time) * 1000)
+            try:
+                PipelineLog.objects.create(
+                    shop_id=shop_id, sender_id=user_id, mode='llm',
+                    user_text=text, bot_text=bot_text,
+                    detected_intent='LLM_ERROR', state_before=state_before,
+                    state_after=conversation.state,
+                    has_error=True,
+                    error_type=llm_result.get('error_type', 'api_error'),
+                    error_detail=str(llm_result.get('error_detail', '')),
+                    duration_ms=_duration,
+                    log_messages='\n'.join(_log_buffer),
+                )
+            except Exception:
+                pass
+            return {
+                "text": bot_text, "intent": "LLM_ERROR",
+                "state": conversation.state, "entities": {},
+                "context": current_context, "missing_entities": [],
+                "matched_image_url": None,
+            }
+
+        # ── Gemini succeeded: reset error counter ─────────────────────────
+        context_manager.reset_error_count(user_id, shop_id)
 
         # ── 4. Accumulate entities into context ──────────────────────────
-        # Blocked fields: product_id and variation_id must ONLY be resolved
-        # via tiktak_service.find_product(), never trusted from the LLM output.
-        _LLM_BLOCKED_FIELDS = {"product_id", "variation_id"}
+        # variation_id is an internal key — never trust from LLM output.
+        _LLM_BLOCKED_FIELDS = {"variation_id"}
         for key, value in extracted_entities.items():
             if value and key not in _LLM_BLOCKED_FIELDS:
                 current_context[key] = value
+
+        # ── 4.5 Update or Create Lead Dynamically ───────────────────────
+        if not lead:
+            lead = Lead.objects.create(platform_id=user_id, name=current_context.get("name", ""), shop_id=shop_id)
+            conversation.lead = lead
+            conversation.save(update_fields=['lead'])
+        
+        # Always update lead data in real-time
+        lead.extracted_data = current_context.copy()
+        if current_context.get("name") and not lead.name:
+            lead.name = current_context.get("name")
+        lead.save(update_fields=['name', 'extracted_data'])
 
         # ── 5. Save User Message (traceability) ─────────────────────────
         user_message = Message.objects.create(
@@ -637,65 +366,120 @@ class MessagePipeline:
             text=text,
             extracted_intent=detected_intent,
             extracted_entities=extracted_entities,
-            is_fallback=False,
             conversation_state_before=state_before,
         )
 
         # ── 6. Confirmation gate + Order creation ────────────────────────
         # Phase A — All entities collected → show recap, enter LLM_CONFIRMING
-        # Phase B — Client confirms       → create order → COMPLETED
+        # Phase B — Client confirms       → RAG stock check → create order → COMPLETED
         # Phase C — Client corrects       → update context, stay LLM_CONFIRMING
         new_state = "LLM_ACTIVE"
 
-        _CONFIRM_WORDS = {
-            "oui", "yes", "ey", "behi", "ayh", "ok", "okay", "confirme",
-            "confirmer", "confirm", "valide", "valider", "d'accord",
-            "na3am", "yezzi", "go", "c'est bon", "cest bon", "parfait",
-        }
+        user_text_normalized = text.lower().strip().rstrip("!.,؟?")
+        words = user_text_normalized.split()
 
-        def _resolve_product(prod_name):
-            """Resolve product name to catalog dict using normalized matching."""
-            import unicodedata
-            def _norm(s):
-                s = s.lower().strip()
-                return ''.join(
-                    c for c in unicodedata.normalize('NFD', s)
-                    if unicodedata.category(c) != 'Mn'
-                )
-            try:
-                products = tiktak_service.get_products(shop_id)
-                norm_name = _norm(prod_name)
-                for p in products:
-                    if _norm(p["name"]) == norm_name:
-                        return p
-                matched, _, _ = tiktak_service.find_product(products, prod_name)
-                return matched
-            except Exception as e:
-                logger.error(f"[LLM PIPELINE] Product lookup error: {e}")
-                return None
+        # Mots de confirmation explicites (client doit VRAIMENT confirmer)
+        has_confirm_word = (
+            user_text_normalized in _LLM_CONFIRM_WORDS or
+            any(w in _LLM_CONFIRM_WORDS for w in words)
+        )
 
-        if state_before == "LLM_CONFIRMING":
-            user_text_normalized = text.lower().strip().rstrip("!.,؟?")
-            is_confirmation = user_text_normalized in _CONFIRM_WORDS
+        # Mots de correction/refus: "pas", "non", "la", "ghalta", "mش", "faux"
+        _DENY_WORDS = {"non", "no", "la", "le", "pas", "ghalta", "faux", "false", "mش", "mech"}
+        has_deny_word = any(w in _DENY_WORDS for w in words)
+
+        # La confirmation nécessite un mot positif OU l'accord de Gemini (order_ready=true), ET l'absence de négation
+        is_confirmation = (has_confirm_word or llm_result.get("order_ready")) and not has_deny_word
+
+        # On rentre dans le bloc de finalisation si on était déjà en CONFIRMING,
+        # OU BIEN si c'est une confirmation claire.
+        if state_before == "LLM_CONFIRMING" or (is_confirmation and llm_result.get("order_ready")):
 
             if is_confirmation:
-                # ── Phase B: Create the order ─────────────────────────────
-                matched_product = _resolve_product(current_context.get("product", ""))
-                if matched_product:
-                    logger.info(f"[LLM PIPELINE] Product resolved: '{matched_product['name']}' id={matched_product['id']}")
+                # ── Phase B: RAG Stock check → then create order ──────────────
                 try:
-                    lead.create_pending_order(
-                        shop_id=shop_id,
-                        product_id=matched_product["id"] if matched_product else None,
-                        variation_id=None,
-                        color=current_context.get("color", ""),
-                        size=current_context.get("size", ""),
-                        address=current_context.get("address", ""),
-                        phone_number=current_context.get("phone_number", ""),
-                        quantity=int(current_context.get("quantity", 1)),
-                    )
-                    new_state = "COMPLETED"
-                    logger.info(f"[LLM PIPELINE] Order confirmed and created — lead={lead.id}")
+                    from apps.crm.models.analytics import ItemVector
+
+                    # Check in_stock flag from the RAG catalog (set by the merchant)
+                    product_name = current_context.get("product", "").lower().strip()
+                    stock_ok = True  # Default: accept order if product not found in RAG
+                    out_of_stock_product = None
+
+                    if product_name:
+                        rag_items = ItemVector.objects.filter(shop_id=shop_id)
+                        for rag_item in rag_items:
+                            meta = rag_item.metadata or {}
+                            rag_name = meta.get("name", "").lower().strip()
+                            if rag_name and rag_name in product_name or product_name in rag_name:
+                                if meta.get("in_stock") is False:
+                                    stock_ok = False
+                                    out_of_stock_product = meta.get("name", product_name)
+                                break
+
+                    if not stock_ok:
+                        # RAG catalog says product is out of stock
+                        _order_lang = "ar" if re.search(r'[\u0600-\u06FF]', text) else "fr"
+                        if _order_lang == "ar":
+                            bot_text = f"عذراً، منتج '{out_of_stock_product}' غير متوفر حالياً. اختار منتج آخر من كتالوجنا!"
+                        else:
+                            bot_text = f"Désolé, le produit '{out_of_stock_product}' est actuellement en rupture de stock. Souhaitez-vous choisir un autre produit ?"
+                        new_state = "LLM_ACTIVE"
+                        current_context.pop("product", None)
+                        logger.info(f"[LLM PIPELINE] RAG Stock check: '{out_of_stock_product}' is out of stock")
+
+                    else:
+                        # Build extracted_data: dumping all entities from the LLM
+                        extracted_data = current_context.copy()
+                        
+                        # RÉSILIENCE : On garde le produit en clair au cas où
+                        if current_context.get("product"):
+                            extracted_data["unmatched_product"] = current_context["product"]
+                        
+
+
+                        from apps.crm.services.order_service import create_pending_order
+                        
+                        # ── Fallback Panier ──
+                        # Si le LLM utilise l'ancien format (clé 'product' au lieu du tableau 'items')
+                        items = current_context.get("items", [])
+                        if not items and current_context.get("product"):
+                            items = [{
+                                "product_name": current_context.get("product"),
+                                "quantity": int(current_context.get("quantity", 1))
+                            }]
+                            
+                        create_pending_order(
+                            lead=lead,
+                            shop_id=shop_id,
+                            extracted_data=extracted_data,
+                            items=items
+                        )
+                        new_state = "COMPLETED"
+                        conversation.completed_at = timezone.now()
+                        logger.info(f"[LLM PIPELINE] Order confirmed and created — lead={lead.id}")
+
+                        # ── Override bot_text avec message de confirmation final ──
+                        # Gemini tend à régénérer un récap en réponse au "ok" au lieu
+                        # d'envoyer un vrai message de confirmation — on corrige ici.
+                        import re
+                        _order_lang = "ar" if re.search(r'[\u0600-\u06FF]', text) else "fr"
+                        _product_name = current_context.get("product", "")
+                        _address = current_context.get("address", "")
+                        if _order_lang == "ar":
+                            bot_text = (
+                                f"يعيشك! طلبيتك تأكدت بنجاح 🎉\n"
+                                f"{'جو: ' + _product_name + chr(10) if _product_name else ''}"
+                                f"{'عنوان: ' + _address + chr(10) if _address else ''}"
+                                f"التوصيل في 2-3 أيام عمل، والدفع عند الاستلام. شكراً على ثقتك! 🙏"
+                            )
+                        else:
+                            bot_text = (
+                                f"Parfait, votre commande est confirmée ! 🎉\n"
+                                f"{'Produit : ' + _product_name + chr(10) if _product_name else ''}"
+                                f"{'Adresse : ' + _address + chr(10) if _address else ''}"
+                                f"Livraison sous 2-3 jours ouvrables, paiement à la livraison. Merci ! 🙏"
+                            )
+
                 except Exception as e:
                     logger.error(f"[LLM PIPELINE] Order creation error: {e}")
                     new_state = "LLM_CONFIRMING"  # Retry on next message
@@ -709,23 +493,81 @@ class MessagePipeline:
             new_state = "LLM_CONFIRMING"
             logger.info("[LLM PIPELINE] All entities collected — entering LLM_CONFIRMING phase")
 
-
         # ── 7. Persist conversation state ────────────────────────────────
         conversation.state = new_state
         conversation.context_data = current_context
         conversation.save()
 
         # ── 8. Save Bot Message + Redis ──────────────────────────────────
-        Message.objects.create(
+        bot_msg = Message.objects.create(
             conversation=conversation, sender="BOT", text=bot_text
         )
-        context_manager.add_message(user_id, role="user", text=text, intent=detected_intent)
-        context_manager.add_message(user_id, role="bot", text=bot_text)
+        context_manager.add_message(user_id, role="user", text=text, intent=detected_intent, shop_id=shop_id)
+        context_manager.add_message(user_id, role="bot", text=bot_text, shop_id=shop_id)
+
+        # ── 8b. Facturation (BillingLog & Wallet) ────────────────────────
+        prompt_tokens = llm_result.get('prompt_tokens', 0)
+        completion_tokens = llm_result.get('completion_tokens', 0)
+        model_name = llm_result.get('model_name', 'gemini-2.5-flash')
+        
+        # Prix par défaut: Gemini Flash $0.075 / 1M input, $0.30 / 1M output
+        import os
+        from decimal import Decimal
+        price_input = Decimal(os.getenv("GEMINI_INPUT_PRICE_PER_1M", "0.075"))
+        price_output = Decimal(os.getenv("GEMINI_OUTPUT_PRICE_PER_1M", "0.300"))
+        
+        cost_input = (Decimal(prompt_tokens) / Decimal(1_000_000)) * price_input
+        cost_output = (Decimal(completion_tokens) / Decimal(1_000_000)) * price_output
+        total_cost = cost_input + cost_output
+        
+        from apps.crm.models.billing import BillingWallet, LLMUsageLog
+        LLMUsageLog.objects.create(
+            company=company,
+            message=bot_msg,
+            model_name=model_name,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            cost_input=cost_input,
+            cost_output=cost_output,
+            total_cost=total_cost
+        )
+        
+        wallet, _ = BillingWallet.objects.get_or_create(company=company)
+        wallet.current_month_usage += total_cost
+        wallet.save(update_fields=['current_month_usage', 'last_updated'])
 
         user_message.conversation_state_after = new_state
         user_message.save(update_fields=["conversation_state_after"])
 
-        return {
+        # ── 9. PipelineLog ────────────────────────────────────────────────
+        _duration = int((time.time() - _start_time) * 1000)
+        # Detach the per-request log collector before writing to DB
+        _root_logger.removeHandler(_handler)
+        _collected_logs = '\n'.join(_log_buffer)
+        try:
+            PipelineLog.objects.create(
+                shop_id       = shop_id,
+                sender_id     = user_id,
+                mode          = 'llm',
+                user_text     = text,
+                bot_text      = bot_text,
+                detected_intent = detected_intent,
+                has_image     = bool(image_url),
+                state_before  = state_before,
+                state_after   = new_state,
+                order_created = (new_state == 'COMPLETED'),
+                has_error     = llm_result.get('error', False),
+                error_type    = llm_result.get('error_type', 'none') if llm_result.get('error') else 'none',
+                error_detail  = str(llm_result.get('error_detail', '')),
+                duration_ms   = _duration,
+                log_messages  = _collected_logs,
+                prompt_tokens = llm_result.get('prompt_tokens', 0),
+                completion_tokens = llm_result.get('completion_tokens', 0),
+            )
+        except Exception as log_err:
+            logger.warning(f"[PIPELINE] Failed to write PipelineLog: {log_err}")
+
+        result_dict = {
             "text": bot_text,
             "intent": detected_intent,
             "state": new_state,
@@ -734,3 +576,8 @@ class MessagePipeline:
             "missing_entities": [],
             "matched_image_url": matched_image_url,
         }
+        
+        if carousel_elements_to_send:
+            result_dict["carousel_elements"] = carousel_elements_to_send
+            
+        return result_dict

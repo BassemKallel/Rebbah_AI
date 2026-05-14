@@ -99,6 +99,53 @@ def send_image(recipient_psid: str, image_url: str, page_access_token: str) -> b
         return False
 
 
+def send_carousel(recipient_psid: str, elements: list, page_access_token: str) -> bool:
+    """
+    Sends a generic template (carousel) to a Messenger user.
+
+    Args:
+        recipient_psid:    The sender's Page-Scoped ID
+        elements:          List of up to 10 generic template elements
+        page_access_token: Page Access Token
+
+    Returns:
+        True on success, False on failure
+    """
+    if not page_access_token or not elements:
+        return False
+
+    payload = {
+        "recipient": {"id": recipient_psid},
+        "message": {
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "generic",
+                    "elements": elements[:10]
+                }
+            }
+        },
+        "messaging_type": "RESPONSE",
+    }
+    
+    try:
+        response = requests.post(
+            GRAPH_SEND_URL,
+            json=payload,
+            params={"access_token": page_access_token},
+            timeout=10,
+        )
+        response.raise_for_status()
+        logger.info(f"[MESSENGER] Carousel sent to PSID={recipient_psid} with {len(elements)} items")
+        return True
+    except requests.HTTPError as e:
+        logger.error(f"[MESSENGER] send_carousel HTTP error {e.response.status_code}: {e.response.text}")
+        return False
+    except Exception as e:
+        logger.error(f"[MESSENGER] send_carousel failed: {e}")
+        return False
+
+
 def get_sender_name(psid: str, page_access_token: str) -> str | None:
     """
     Retrieves the sender's first and last name from the Meta Graph API.

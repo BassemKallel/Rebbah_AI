@@ -24,7 +24,7 @@ def cleanup_company_data(sender, instance, **kwargs):
     Cleans up all data belonging to the company's shop_id.
     NLUFallbackLog entries are preserved (message FK set to NULL by CASCADE rule).
     """
-    from apps.crm.models import Lead, Conversation, ResponseTemplate, BotConfiguration, ProductVector
+    from apps.crm.models import Lead, Conversation, ResponseTemplate, BotConfiguration, ItemVector
 
     shop_id = instance.shop_id
     if not shop_id:
@@ -51,12 +51,13 @@ def cleanup_company_data(sender, instance, **kwargs):
     if extra_leads:
         logger.info(f"[SIGNAL] Deleted {extra_leads} additional lead(s) with shop_id={shop_id}")
 
-    # ── 2. ProductVector embeddings (managed=False — vision-service table) ──
+    # ── 2. ItemVector embeddings (managed=False — vision-service table) ──
     try:
-        deleted_vectors, _ = ProductVector.objects.filter(shop_id=shop_id).delete()
-        logger.info(f"[SIGNAL] Deleted {deleted_vectors} product vector(s) for shop={shop_id}")
+        deleted_vectors, _ = ItemVector.objects.filter(shop_id=shop_id).delete()
+        if deleted_vectors > 0:
+            logger.info(f"[SIGNAL] Deleted {deleted_vectors} ItemVectors for shop={shop_id}")
     except Exception as exc:
-        logger.error(f"[SIGNAL] Failed to delete ProductVectors for shop={shop_id}: {exc}")
+        logger.error(f"[SIGNAL] Failed to delete ItemVectors for shop={shop_id}: {exc}")
 
     # ── 3. Shop-specific ResponseTemplates (keep is_default=True system entries) ──
     deleted_templates, _ = ResponseTemplate.objects.filter(shop_id=shop_id).delete()

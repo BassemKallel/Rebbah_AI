@@ -69,7 +69,7 @@ DATABASES = {
         'NAME': os.getenv('POSTGRES_DB', 'tiktak'),
         'USER': os.getenv('POSTGRES_USER', ''),
         'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
-        'HOST': os.getenv('POSTGRES_HOST', 'postgres-db'),
+        'HOST': os.getenv('POSTGRES_HOST', 'db'),
         'PORT': os.getenv('POSTGRES_PORT', '5432'),
     }
 }
@@ -77,7 +77,7 @@ DATABASES = {
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': f'redis://{os.getenv("REDIS_HOST", "tiktak-redis")}:{os.getenv("REDIS_PORT", "6379")}/1',
+        'LOCATION': f'redis://{os.getenv("REDIS_HOST", "redis")}:{os.getenv("REDIS_PORT", "6379")}/1',
     }
 }
 
@@ -88,10 +88,7 @@ USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
-    "https://chat.tiktakpro.com",
-    "https://ai.tiktakpro.com",
-    "http://localhost:3000",
-    "http://localhost:5173",
+    "http://localhost:3010"
 ]
 
 
@@ -105,20 +102,10 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
-# ============================================================
-# EXTERNAL SERVICES CONFIGURATION
-# ============================================================
-
-# NLU Service (TunBERT + GLiNER)
-NLU_SERVICE_URL    = os.getenv('NLU_SERVICE_URL',    'http://nlu-service:8001')
-NLU_PREDICT_PATH   = os.getenv('NLU_PREDICT_PATH',   '/predict')
-
-# Gemini Fallback (NLU backup when TunBERT is down or low-confidence)
+# ======= External Services =======
+# Gemini LLM Direct Mode
 GEMINI_API_KEY                       = os.getenv('GEMINI_API_KEY', '')
-GEMINI_MODEL                         = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-GEMINI_FALLBACK_ENABLED              = os.getenv('GEMINI_FALLBACK_ENABLED', 'True') == 'True'
-GEMINI_FALLBACK_CONFIDENCE_THRESHOLD = float(os.getenv('GEMINI_FALLBACK_CONFIDENCE_THRESHOLD', '0.65'))
-GEMINI_ALWAYS_VERIFY_INTENTS         = [i.strip() for i in os.getenv('GEMINI_ALWAYS_VERIFY_INTENTS', 'CANCEL_ORDER').split(',')]
+GEMINI_MODEL                         = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
 # Vision Service (CLIP + pgvector)
 VISION_SERVICE_URL   = os.getenv('VISION_SERVICE_URL',   'http://vision-service:8002')
@@ -128,7 +115,7 @@ VISION_SEARCH_PATH   = os.getenv('VISION_SEARCH_PATH',   '/search-similar')
 TIKTAK_API_BASE_URL      = os.getenv('TIKTAK_API_BASE_URL',     'https://api.tiktakpro.com')
 TIKTAK_API_PRODUCTS_PATH = os.getenv('TIKTAK_API_PRODUCTS_PATH', '/api/v1/products-read/')
 TIKTAK_API_TOKEN         = os.getenv('TIKTAK_API_TOKEN',         '')
-PRODUCTS_CACHE_TTL       = int(os.getenv('PRODUCTS_CACHE_TTL',   '600'))  # 10 min
+PRODUCTS_CACHE_TTL       = int(os.getenv('PRODUCTS_CACHE_TTL',   '900'))  # 15 min (longer window → better Gemini implicit cache hits)
 
 # Request timeouts (seconds)
 EXTERNAL_REQUEST_TIMEOUT = int(os.getenv('EXTERNAL_REQUEST_TIMEOUT', '5'))
