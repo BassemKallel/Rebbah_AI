@@ -2,7 +2,7 @@
 health.py — Health check endpoint for external AI services.
 
 GET /api/v1/gateway/health/
-Returns the status of NLU and Vision services with response times.
+Returns the status of Vision service with response times.
 Secured by TikTak token authentication (same as CRM API).
 """
 import time
@@ -15,7 +15,7 @@ from rest_framework.permissions import IsAdminUser
 
 logger = logging.getLogger(__name__)
 
-NLU_URL    = settings.NLU_SERVICE_URL.rstrip('/')
+
 VISION_URL = settings.VISION_SERVICE_URL.rstrip('/')
 TIMEOUT    = 5  # seconds — fast ping, not a full predict call
 
@@ -55,16 +55,15 @@ def _ping(url: str, label: str) -> dict:
 
 class ServicesHealthView(APIView):
     """
-    Health check for NLU and Vision services.
+    Health check for Vision service.
     Only accessible to Django admin users (staff).
     """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        nlu    = _ping(NLU_URL,    "nlu-service")
         vision = _ping(VISION_URL, "vision-service")
 
-        services = [nlu, vision]
+        services = [vision]
         all_ok   = all(s["status"] == "ok" for s in services)
         any_down = any(s["status"] == "down" for s in services)
 
@@ -75,7 +74,6 @@ class ServicesHealthView(APIView):
         return Response(
             {
                 "overall": overall,
-                "gemini_fallback_enabled": settings.GEMINI_FALLBACK_ENABLED,
                 "services": services,
             },
             status=http_status,

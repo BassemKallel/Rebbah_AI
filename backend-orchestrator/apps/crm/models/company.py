@@ -17,12 +17,7 @@ class Company(models.Model):
 
     bot_config = models.OneToOneField(BotConfiguration, on_delete=models.SET_NULL, null=True, blank=True, related_name='company')
 
-    # ── LLM Response Mode (feat/auth-llm-switcher) ────────────────────────────
-    RESPONSE_MODE_CHOICES = [
-        ('nlu', 'NLU — Pipeline classique TunBERT + règles'),
-        ('llm', 'LLM — Gemini direct avec contexte personnalisé'),
-    ]
-    response_mode  = models.CharField(max_length=20, choices=RESPONSE_MODE_CHOICES, default='nlu', help_text="Mode de réponse : 'nlu' = pipeline classique, 'llm' = Gemini direct")
+    # ── LLM Configuration ──────────────────────────────────────────────────
     gemini_api_key = EncryptedTextField(blank=True, null=True, help_text="Clé API Gemini propre à cette company (chiffré Fernet)")
     llm_context    = models.TextField(blank=True, null=True, help_text="Contexte métier injecté dans le prompt Gemini (max 10 000 car.)")
 

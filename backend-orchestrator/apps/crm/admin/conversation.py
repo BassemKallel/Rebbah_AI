@@ -8,16 +8,8 @@ class MessageInline(admin.TabularInline):
     model = Message
     extra = 0
     can_delete = False
-    readonly_fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'agent_badge', 'created_at')
-    fields = ('sender', 'text', 'extracted_intent', 'confidence_badge', 'state_transition', 'pretty_entities', 'is_error', 'is_fallback', 'agent_badge', 'created_at')
-
-    def confidence_badge(self, obj):
-        if obj.intent_confidence_score is None:
-            return "-"
-        score = obj.intent_confidence_score
-        color = "#27ae60" if score >= 0.8 else ("#e67e22" if score >= 0.5 else "#e74c3c")
-        return format_html('<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>', color, f"{score:.0%}")
-    confidence_badge.short_description = "Confiance"
+    readonly_fields = ('sender', 'text', 'extracted_intent', 'state_transition', 'pretty_entities', 'is_error', 'agent_badge', 'created_at')
+    fields = ('sender', 'text', 'extracted_intent', 'state_transition', 'pretty_entities', 'is_error', 'agent_badge', 'created_at')
 
     def state_transition(self, obj):
         before = obj.conversation_state_before or "?"
@@ -78,10 +70,10 @@ class ConversationAdmin(admin.ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display  = ('sender', 'agent_badge', 'get_lead', 'text_preview', 'extracted_intent', 'confidence_badge', 'is_error', 'is_fallback', 'created_at')
-    list_filter   = ('sender', 'is_error', 'is_fallback', 'is_human_agent', 'extracted_intent', 'created_at')
+    list_display  = ('sender', 'agent_badge', 'get_lead', 'text_preview', 'extracted_intent', 'is_error', 'created_at')
+    list_filter   = ('sender', 'is_error', 'is_human_agent', 'extracted_intent', 'created_at')
     search_fields = ('text', 'conversation__lead__platform_id', 'extracted_intent')
-    readonly_fields = ('pretty_entities', 'confidence_badge')
+    readonly_fields = ('pretty_entities',)
     date_hierarchy = 'created_at'
     ordering      = ('-created_at',)
 
@@ -94,13 +86,7 @@ class MessageAdmin(admin.ModelAdmin):
     get_lead.short_description = 'Lead'
     get_lead.admin_order_field = 'conversation__lead'
 
-    def confidence_badge(self, obj):
-        if obj.intent_confidence_score is None:
-            return "-"
-        score = obj.intent_confidence_score
-        color = "#27ae60" if score >= 0.8 else ("#e67e22" if score >= 0.5 else "#e74c3c")
-        return format_html('<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold">{}</span>', color, f"{score:.0%}")
-    confidence_badge.short_description = "Confiance Intention"
+
 
     def pretty_entities(self, obj):
         if not obj.extracted_entities:

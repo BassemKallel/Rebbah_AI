@@ -46,10 +46,8 @@ class Message(models.Model):
     text         = models.TextField()
 
     extracted_intent        = models.CharField(max_length=50, blank=True, null=True)
-    intent_confidence_score = models.FloatField(blank=True, null=True)
     extracted_entities      = models.JSONField(default=dict, blank=True)
     is_error                = models.BooleanField(default=False)
-    is_fallback             = models.BooleanField(default=False)
     is_human_agent          = models.BooleanField(default=False)
 
     conversation_state_before = models.CharField(max_length=50, blank=True, null=True)

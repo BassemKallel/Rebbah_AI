@@ -70,7 +70,6 @@ class LoginView(APIView):
             },
             'shop_id': company.shop_id,
             'company_name': company.name,
-            'response_mode': company.response_mode,
             'dashboard_token': company.dashboard_token,
         })
 
@@ -95,9 +94,6 @@ class MeView(APIView):
                 'company': {
                     'shop_id': company.shop_id,
                     'name': company.name,
-                    'response_mode': company.response_mode,
-                    'has_gemini_key': bool(company.gemini_api_key),
-                    'has_llm_context': bool(company.llm_context and company.llm_context.strip()),
                     'is_active': company.is_active,
                 },
                 'role': 'owner',
@@ -113,9 +109,6 @@ class MeView(APIView):
             'company': {
                 'shop_id': company.shop_id,
                 'name': company.name,
-                'response_mode': company.response_mode,
-                'has_gemini_key': bool(company.gemini_api_key),
-                'has_llm_context': bool(company.llm_context and company.llm_context.strip()),
                 'is_active': company.is_active,
             },
             'role': user.profile.role,

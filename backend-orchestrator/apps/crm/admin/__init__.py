@@ -7,11 +7,12 @@ from .config import BotConfigurationAdmin
 from .company import CompanyAdmin, UserProfileAdmin
 from .lead import LeadAdmin
 from .conversation import ConversationAdmin, MessageAdmin
-from .template import ResponseTemplateAdmin
-from .analytics import NLUFallbackLogAdmin, ProductVectorAdmin, PipelineLogAdmin
+from .analytics import ItemVectorAdmin, PipelineLogAdmin
+from .billing import BillingWalletAdmin, LLMUsageLogAdmin
 
 __all__ = [
     'BotConfigurationAdmin', 'CompanyAdmin', 'UserProfileAdmin',
     'LeadAdmin', 'ConversationAdmin', 'MessageAdmin',
-    'ResponseTemplateAdmin', 'NLUFallbackLogAdmin', 'ProductVectorAdmin', 'PipelineLogAdmin',
+    'ItemVectorAdmin', 'PipelineLogAdmin',
+    'BillingWalletAdmin', 'LLMUsageLogAdmin',
 ]

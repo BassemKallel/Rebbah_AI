@@ -21,21 +21,10 @@ class Lead(models.Model):
     name        = models.CharField(max_length=255, blank=True, null=True)
     shop_id     = models.CharField(max_length=255, blank=True, null=True)
 
-    product_id   = models.CharField(max_length=255, blank=True, null=True)
-    variation_id = models.CharField(max_length=255, blank=True, null=True)
-    color        = models.CharField(max_length=100, blank=True, null=True)
-    size         = models.CharField(max_length=50, blank=True, null=True)
-    quantity     = models.IntegerField(default=1)
-    address      = models.TextField(blank=True, null=True)
-    phone_number = models.CharField(max_length=20, blank=True, null=True)
-
-    # Domain-specific entities that don't fit the standard fields above.
-    # Populated by the LLM pipeline for non-e-commerce domains.
-    # Examples:
-    #   Restaurant  → {"dish": "Pizza", "nb_persons": 4, "reservation_date": "vendredi 19h"}
-    #   Medical     → {"reason": "Consultation", "patient_name": "Ali", "preferred_date": "lundi"}
-    #   Electronics → {"storage": "128GB"}   (extra beyond product/color)
-    extra_data   = models.JSONField(default=dict, blank=True, null=True)
+    # ── Données Métier Universelles (Découplage) ─────────────────────────
+    # Toutes les entités extraites par le LLM (produits, adresse, tel, etc.)
+    # sont stockées dans ce JSON, rendant le Lead 100% agnostique du domaine.
+    extracted_data = models.JSONField(default=dict, blank=True, null=True, help_text="Entités collectées par l'IA")
 
     lead_status = models.CharField(max_length=20, choices=LEAD_STATUS_CHOICES, default=LEAD_STATUS_ENGAGED, db_index=True)
 
@@ -53,24 +42,20 @@ class Lead(models.Model):
     def __str__(self):
         return f"{self.name or 'Unknown'} ({self.platform_id})"
 
-    def create_pending_order(
-        self, shop_id, product_id, variation_id,
-        color, size, address, phone_number,
-        quantity=1, extra_data=None,
-    ):
-        self.shop_id      = shop_id
-        self.product_id   = product_id
-        self.variation_id = variation_id
-        self.color        = color
-        self.size         = size
-        self.quantity     = quantity
-        self.address      = address
-        self.phone_number = phone_number
-        self.extra_data   = extra_data or {}
-        self.has_pending_order          = True
-        self.agent_confirmation_pending = True
-        self.lead_status = Lead.LEAD_STATUS_QUALIFIED
-        if not self.pending_order_reference:
-            self.pending_order_reference = f"PRE-{int(time.time() * 1000)}"
-        self.pending_order_created_at = timezone.now()
-        self.save()
+
+class OrderItem(models.Model):
+    """
+    Optional model linked to a Lead, specifically designed for E-commerce catalogs.
+    Represents one item in a shopping cart.
+    """
+    lead         = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='items')
+    product_id   = models.CharField(max_length=255, blank=True, null=True)
+    product_name = models.CharField(max_length=255)
+    quantity     = models.IntegerField(default=1)
+    price        = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    attributes   = models.JSONField(default=dict, blank=True, null=True, help_text="Taille, couleur, variantes...")
+
+    created_at   = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return f"{self.quantity}x {self.product_name}"

@@ -3,16 +3,18 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     ConversationViewSet, LeadViewSet,
-    BotConfigurationViewSet, ResponseTemplateViewSet,
+    BotConfigurationViewSet,
     takeover_conversation, release_conversation,
     agent_reply, handoff_status, toggle_bot,
     CompanySettingsView,
+    ItemVectorViewSet,
 )
 
 router = DefaultRouter()
 router.register(r'conversations', ConversationViewSet, basename='conversation')
 router.register(r'leads', LeadViewSet, basename='lead')
-router.register(r'templates', ResponseTemplateViewSet, basename='template')
+router.register(r'catalog', ItemVectorViewSet, basename='catalog')
+
 
 urlpatterns = [
     path('auth/', include('apps.crm.auth_urls')),

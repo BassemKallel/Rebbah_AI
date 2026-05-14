@@ -52,3 +52,24 @@ export const updateLead = (id: number, payload: Record<string, unknown>) =>
 /** Delete a lead. */
 export const deleteLead = (id: number) =>
   api.delete(`${CRM}/leads/${id}/`);
+
+// ─── Catalog (Visual RAG) ────────────────────────────────────────────────────
+
+export const fetchCatalog = (shopId?: string) =>
+  api.get(`${CRM}/catalog/`, { params: shopId ? { shop_id: shopId } : {} });
+
+export const deleteCatalogItem = (id: number) =>
+  api.delete(`${CRM}/catalog/${id}/`);
+
+export const uploadCatalogItem = (formData: FormData) =>
+  api.post('/api/v1/gateway/catalog/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+
+export const updateCatalogMetadata = (payload: { shop_id: string; item_id: string; metadata: Record<string, unknown> }) =>
+  api.patch('/api/v1/gateway/catalog/update-metadata', payload);
+
+export const importCatalogCsv = (formData: FormData) =>
+  api.post('/api/v1/gateway/catalog/import-csv', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });

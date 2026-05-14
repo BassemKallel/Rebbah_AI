@@ -1,235 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, MessageCircle, Users, Settings, X } from 'lucide-react';
+import { Settings, Image as ImageIcon, Sparkles } from 'lucide-react';
 
-const NAV_ITEMS = [
-  { to: '/', end: true, icon: Home, label: 'Accueil' },
-  { to: '/messenger', end: false, icon: MessageCircle, label: 'Messenger' },
-  { to: '/leads', end: false, icon: Users, label: 'Leads' },
-];
-
-interface SidebarProps {
-  /** Controlled by MainLayout — only matters on mobile (<md) */
-  open: boolean;
-  onClose: () => void;
-}
-
-const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
-  // Desktop collapse state (md+): persisted in localStorage
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem('sidebar_collapsed') === 'true'
-  );
-
-  const toggle = () => {
-    setCollapsed((c) => {
-      const next = !c;
-      localStorage.setItem('sidebar_collapsed', String(next));
-      return next;
-    });
-  };
-
-  // Close mobile drawer on route change
-  useEffect(() => {
-    const handler = () => onClose();
-    window.addEventListener('popstate', handler);
-    return () => window.removeEventListener('popstate', handler);
-  }, [onClose]);
-
-  const navLinkClass = (isActive: boolean) =>
-    `flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-150 group relative
-     ${isActive
-      ? 'bg-[#eef6f9] text-[#0f6885]'
-      : 'text-gray-500 hover:bg-[#eef6f9] hover:text-[#0f6885]'
-    }`;
-
-  const activeDot = (
-    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-[#0f6885] rounded-r-full" />
-  );
-
-  const navContent = (isMobile: boolean) => (
-    <>
-      {/* ── Brand header ── */}
-      <div className="flex items-center gap-3 px-3 py-4 border-b border-gray-100 flex-shrink-0">
-        <button
-          onClick={isMobile ? onClose : toggle}
-          className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center hover:opacity-80 transition-opacity cursor-pointer"
-          aria-label={isMobile ? 'Fermer le menu' : 'Toggle sidebar'}
-        >
-          {isMobile ? (
-            <X className="w-5 h-5 text-gray-600" />
-          ) : (
+const Sidebar: React.FC = () => {
+  return (
+    <div className="w-64 bg-white border-r border-gray-200 h-full flex flex-col py-6 flex-shrink-0 z-20">
+      <div className="mb-8 px-6">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center bg-gray-50 border border-gray-100">
             <img
               src="/logo.png"
               alt="Logo"
               className="w-full h-full object-cover"
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
-          )}
-        </button>
-
-        {(isMobile || !collapsed) && (
+          </div>
           <div className="flex-1 min-w-0">
-            <p className="text-gray-900 font-bold text-sm leading-tight tracking-tight truncate">
-              Tiktak <span className="text-[#0f6885]">AI</span>
+            <p className="text-gray-900 font-extrabold text-base leading-tight tracking-tight truncate">
+              TIKTAK <span className="text-[#0f6885]">PRO</span>
             </p>
-            <span className="text-[10px] text-gray-400 font-medium uppercase tracking-widest">
-              Pro Dashboard
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+              Agent Builder
             </span>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* ── Navigation ── */}
-      <nav className="flex-1 py-3 px-2 overflow-hidden space-y-0.5">
-        {(!collapsed || isMobile) && (
-          <p className="text-[10px] font-bold text-gray-300 uppercase tracking-widest px-3 mb-2">
-            Navigation
-          </p>
-        )}
+      <div className="flex flex-col gap-1.5 flex-1 px-4">
+        <h2 className="text-[11px] font-extrabold text-gray-400 uppercase tracking-widest px-3 mb-2">Menu</h2>
 
-        {NAV_ITEMS.map(({ to, end, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            onClick={isMobile ? onClose : undefined}
-            title={collapsed && !isMobile ? label : undefined}
-            className={({ isActive }) => navLinkClass(isActive)}
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && activeDot}
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                {(!collapsed || isMobile) && (
-                  <span className="text-[13px] font-semibold whitespace-nowrap">{label}</span>
-                )}
-              </>
-            )}
-          </NavLink>
-        ))}
-      </nav>
-
-      {/* ── Bottom: Settings ── */}
-      <div className="px-2 py-3 border-t border-gray-100 flex-shrink-0">
         <NavLink
-          to="/settings"
-          onClick={isMobile ? onClose : undefined}
-          title={collapsed && !isMobile ? 'Paramètres' : undefined}
-          className={({ isActive }) => navLinkClass(isActive)}
+          to="/bot-config"
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-3 rounded-xl font-bold text-sm transition-all duration-200 ${isActive
+              ? 'bg-[#0f6885]/10 text-[#0f6885]'
+              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`
+          }
         >
           {({ isActive }) => (
             <>
-              {isActive && activeDot}
-              <Settings className="w-5 h-5 flex-shrink-0" />
-              {(!collapsed || isMobile) && (
-                <span className="text-[13px] font-semibold">Paramètres</span>
-              )}
+              <Settings className={`w-4 h-4 ${isActive ? 'opacity-100' : 'opacity-70 text-gray-400'}`} />
+              Configuration du Bot
+            </>
+          )}
+        </NavLink>
+
+        <NavLink
+          to="/catalogue"
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-3 rounded-xl font-bold text-sm transition-all duration-200 ${isActive
+              ? 'bg-[#0f6885]/10 text-[#0f6885]'
+              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`
+          }
+        >
+          {({ isActive }) => (
+            <>
+              <ImageIcon className={`w-4 h-4 ${isActive ? 'opacity-100' : 'opacity-70 text-gray-400'}`} />
+              Catalogue
             </>
           )}
         </NavLink>
       </div>
-    </>
-  );
-
-  return (
-    <>
-      {/* MOBILE DRAWER */}
-      <div
-        className={`
-          md:hidden fixed inset-y-0 left-0 z-50
-          flex flex-col bg-white border-r border-gray-100 shadow-panel
-          w-[264px] h-full
-          transition-transform duration-200 ease-in-out
-          ${open ? 'translate-x-0' : '-translate-x-full'}
-        `}
-        aria-label="Menu de navigation"
-      >
-        {navContent(true)}
-      </div>
-
-      {/* DESKTOP INLINE SIDEBAR */}
-      <div
-        style={{
-          width: collapsed ? '68px' : '264px',
-          transition: 'width 0.2s ease',
-          background: '#ffffff',
-          borderRight: '1px solid #e5e7eb',
-          boxShadow: '2px 0 8px rgba(0,0,0,0.04)',
-        }}
-        className="hidden md:flex relative flex-shrink-0 h-full flex-col z-30 select-none overflow-hidden"
-      >
-        {/* Logo button */}
-        <div className="flex items-center gap-3 px-3 py-4 border-b border-gray-100 flex-shrink-0">
-          <button
-            onClick={toggle}
-            className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center hover:opacity-80 transition-opacity cursor-pointer"
-            aria-label="Toggle sidebar"
-          >
-            <img
-              src="/logo.png"
-              alt="Logo"
-              className="w-full h-full object-cover"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            />
-          </button>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-gray-900 font-bold text-sm leading-tight tracking-tight truncate">
-                Tiktak <span className="text-[#0f6885]">AI</span>
-              </p>
-              <span className="text-[10px] text-gray-400 font-medium uppercase tracking-widest">
-                Pro Dashboard
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 py-3 px-2 overflow-hidden space-y-0.5">
-          {!collapsed && (
-            <p className="text-[10px] font-bold text-gray-300 uppercase tracking-widest px-3 mb-2">
-              Navigation
-            </p>
-          )}
-          {NAV_ITEMS.map(({ to, end, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              title={collapsed ? label : undefined}
-              className={({ isActive }) => navLinkClass(isActive)}
-            >
-              {({ isActive }) => (
-                <>
-                  {isActive && activeDot}
-                  <Icon className="w-5 h-5 flex-shrink-0" />
-                  {!collapsed && (
-                    <span className="text-[13px] font-semibold whitespace-nowrap">{label}</span>
-                  )}
-                </>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-
-        {/* Settings */}
-        <div className="px-2 py-3 border-t border-gray-100 flex-shrink-0">
-          <NavLink
-            to="/settings"
-            title={collapsed ? 'Paramètres' : undefined}
-            className={({ isActive }) => navLinkClass(isActive)}
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && activeDot}
-                <Settings className="w-5 h-5 flex-shrink-0" />
-                {!collapsed && <span className="text-[13px] font-semibold">Paramètres</span>}
-              </>
-            )}
-          </NavLink>
-        </div>
-      </div>
-    </>
+    </div>
   );
 };
 
