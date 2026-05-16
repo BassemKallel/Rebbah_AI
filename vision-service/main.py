@@ -75,9 +75,19 @@ def get_db_connection():
 
 def _init_database():
     """Create table + HNSW index at startup (runs once)."""
-    with get_db_connection() as conn:
+    # ── 1. Create extension using a raw connection (before register_vector) ──
+    conn = db_pool.getconn()
+    try:
         cur = conn.cursor()
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        conn.commit()
+        cur.close()
+    finally:
+        db_pool.putconn(conn)
+
+    # ── 2. Now use standard connection to create table ──
+    with get_db_connection() as conn:
+        cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS crm_itemvector (
                 id SERIAL PRIMARY KEY,
