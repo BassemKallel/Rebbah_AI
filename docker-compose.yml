@@ -1,5 +1,3 @@
-version: "3.8"
-
 networks:
   internal-net:
   db-net:
@@ -52,7 +50,7 @@ services:
     depends_on:
       - backend-orchestrator
     ports:
-      - "3010:3000"
+      - "3011:3000"
     networks:
       - internal-net
     deploy:
@@ -77,11 +75,6 @@ services:
       resources:
         limits:
           memory: 4g
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
 
   db:
@@ -114,18 +107,21 @@ services:
     image: redis:7-alpine
     container_name: tiktak-ai-v2-redis
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "6380:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --save 60 1 --loglevel warning
+    command: >
+      sh -c "redis-server --save 60 1 --loglevel warning --requirepass $$REDIS_PASSWORD"
     networks:
       - db-net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
     deploy:
       resources:
         limits:

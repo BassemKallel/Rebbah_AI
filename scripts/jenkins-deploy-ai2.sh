@@ -94,6 +94,7 @@ src = Path("docker-compose.yml").read_text().splitlines()
 out = []
 current = None
 skip_ports = False
+skip_reservations = False
 no_host_ports = {
     "backend-orchestrator",
     "frontend",
@@ -103,10 +104,16 @@ no_host_ports = {
 }
 
 for line in src:
+    if line.startswith("version:"):
+        continue
     is_service = line.startswith("  ") and not line.startswith("    ") and line.rstrip().endswith(":")
     if is_service:
         current = line.strip()[:-1]
         skip_ports = False
+        skip_reservations = False
+    if current == "vision-service" and line.startswith("        reservations:"):
+        skip_reservations = True
+        continue
     if current in no_host_ports and line.startswith("    ports:"):
         skip_ports = True
         continue
@@ -114,6 +121,12 @@ for line in src:
         indent = len(line) - len(line.lstrip(" "))
         if indent <= 4:
             skip_ports = False
+        else:
+            continue
+    if skip_reservations:
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= 6:
+            skip_reservations = False
         else:
             continue
     out.append(line)
