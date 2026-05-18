@@ -70,15 +70,21 @@ fi
 [ -f "docker-compose.yml" ] || { echo "docker-compose.yml missing"; exit 1; }
 [ -f "docker-compose.override.devops.yml" ] || { echo "docker-compose.override.devops.yml missing"; exit 1; }
 
-if docker info >/dev/null 2>&1; then
-  COMPOSE=(docker compose)
-elif sudo -n docker info >/dev/null 2>&1; then
-  COMPOSE=(sudo -n docker compose)
-else
-  echo "Cannot run docker (add jenkins to group 'docker' or allow: sudo docker ...)"
-  exit 1
-fi
-echo "using: ${COMPOSE[*]}"
+compose() {
+  if docker info >/dev/null 2>&1; then
+    docker compose "$@"
+  elif sg docker -c "docker info" >/dev/null 2>&1; then
+    # Jenkins process may predate "usermod -aG docker jenkins" — sg refreshes group membership
+    sg docker -c "docker compose $(printf '%q ' "$@")"
+  elif sudo -n docker info >/dev/null 2>&1; then
+    sudo -n docker compose "$@"
+  else
+    echo "Cannot run docker. Fix: sudo usermod -aG docker jenkins && sudo systemctl restart jenkins"
+    return 1
+  fi
+}
+compose version >/dev/null || exit 1
+echo "docker compose OK ($(compose version 2>/dev/null | head -1 || true))"
 
 echo "[3/9] generate effective compose"
 python3 - <<'PY'
@@ -116,21 +122,21 @@ Path("docker-compose.effective.yml").write_text("\n".join(out) + "\n")
 PY
 
 echo "[4/9] compose config check"
-"${COMPOSE[@]}" \
+compose \
   -f docker-compose.effective.yml \
   -f docker-compose.override.devops.yml \
   -p "$COMPOSE_PROJECT" \
   config >/dev/null
 
 echo "[5/9] build & up"
-"${COMPOSE[@]}" \
+compose \
   -f docker-compose.effective.yml \
   -f docker-compose.override.devops.yml \
   -p "$COMPOSE_PROJECT" \
   up -d --build
 
 echo "[6/9] status"
-"${COMPOSE[@]}" \
+compose \
   -f docker-compose.effective.yml \
   -f docker-compose.override.devops.yml \
   -p "$COMPOSE_PROJECT" \
