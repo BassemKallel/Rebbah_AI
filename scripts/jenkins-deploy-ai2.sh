@@ -52,13 +52,33 @@ else
 fi
 
 echo "[2/9] verify files"
-if [ ! -f ".env" ] && [ -n "$ENV_SOURCE" ] && [ -f "$ENV_SOURCE" ]; then
-  ln -sf "$ENV_SOURCE" .env
-  echo "linked .env ← $ENV_SOURCE"
+# Jenkins (user jenkins) cannot read tiktakpro's 600 .env via symlink — copy into workspace.
+rm -f .env
+if [ -n "$ENV_SOURCE" ] && [ -f "$ENV_SOURCE" ]; then
+  if [ -r "$ENV_SOURCE" ]; then
+    cp "$ENV_SOURCE" .env
+  elif sudo -n install -m 600 -o "$(id -u)" -g "$(id -g)" "$ENV_SOURCE" .env; then
+    echo "copied .env via sudo (jenkins cannot read $ENV_SOURCE directly)"
+  else
+    echo "Cannot copy .env from $ENV_SOURCE (need: sudo install for user jenkins)"
+    exit 1
+  fi
+  chmod 600 .env 2>/dev/null || true
+  echo "copied .env into $APP_DIR"
 fi
-[ -f ".env" ] || { echo ".env missing (set ENV_SOURCE or create .env in $APP_DIR)"; exit 1; }
+[ -f ".env" ] && [ -r ".env" ] || { echo ".env missing or unreadable in $APP_DIR"; exit 1; }
 [ -f "docker-compose.yml" ] || { echo "docker-compose.yml missing"; exit 1; }
 [ -f "docker-compose.override.devops.yml" ] || { echo "docker-compose.override.devops.yml missing"; exit 1; }
+
+if docker info >/dev/null 2>&1; then
+  COMPOSE=(docker compose)
+elif sudo -n docker info >/dev/null 2>&1; then
+  COMPOSE=(sudo -n docker compose)
+else
+  echo "Cannot run docker (add jenkins to group 'docker' or allow: sudo docker ...)"
+  exit 1
+fi
+echo "using: ${COMPOSE[*]}"
 
 echo "[3/9] generate effective compose"
 python3 - <<'PY'
@@ -96,21 +116,21 @@ Path("docker-compose.effective.yml").write_text("\n".join(out) + "\n")
 PY
 
 echo "[4/9] compose config check"
-docker compose \
+"${COMPOSE[@]}" \
   -f docker-compose.effective.yml \
   -f docker-compose.override.devops.yml \
   -p "$COMPOSE_PROJECT" \
   config >/dev/null
 
 echo "[5/9] build & up"
-docker compose \
+"${COMPOSE[@]}" \
   -f docker-compose.effective.yml \
   -f docker-compose.override.devops.yml \
   -p "$COMPOSE_PROJECT" \
   up -d --build
 
 echo "[6/9] status"
-docker compose \
+"${COMPOSE[@]}" \
   -f docker-compose.effective.yml \
   -f docker-compose.override.devops.yml \
   -p "$COMPOSE_PROJECT" \
