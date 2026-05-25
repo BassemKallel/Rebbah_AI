@@ -79,10 +79,13 @@ DATABASES = {
     }
 }
 
+_REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+_REDIS_AUTH = f":{_REDIS_PASSWORD}@" if _REDIS_PASSWORD else ""
+
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': f'redis://{os.getenv("REDIS_HOST", "redis")}:{os.getenv("REDIS_PORT", "6379")}/1',
+        'LOCATION': f'redis://{_REDIS_AUTH}{os.getenv("REDIS_HOST", "redis")}:{os.getenv("REDIS_PORT", "6379")}/1',
     }
 }
 
@@ -174,8 +177,8 @@ SIMPLE_JWT = {
 _REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 _REDIS_PORT = os.getenv("REDIS_PORT", "6379")
 
-CELERY_BROKER_URL         = f"redis://{_REDIS_HOST}:{_REDIS_PORT}/2"
-CELERY_RESULT_BACKEND     = f"redis://{_REDIS_HOST}:{_REDIS_PORT}/2"
+CELERY_BROKER_URL         = f"redis://{_REDIS_AUTH}{_REDIS_HOST}:{_REDIS_PORT}/2"
+CELERY_RESULT_BACKEND     = f"redis://{_REDIS_AUTH}{_REDIS_HOST}:{_REDIS_PORT}/2"
 CELERY_ACCEPT_CONTENT     = ['json']
 CELERY_TASK_SERIALIZER    = 'json'
 CELERY_RESULT_SERIALIZER  = 'json'
