@@ -4,12 +4,30 @@ import json
 from ..models import Conversation, Message
 
 
+def _get_agent_badge(obj):
+    if obj.is_human_agent or obj.agent == "HUMAN":
+        return format_html('<span style="background:#f1c40f;color:#000;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:10px">HUMAIN</span>')
+    if not obj.agent:
+        return "-"
+    
+    agent_upper = obj.agent.upper().strip()
+    color_map = {
+        "FAQ": "#3498db",        # Blue
+        "SALES": "#2ecc71",      # Green
+        "CHECKOUT": "#9b59b6",   # Purple
+        "POST_SALES": "#e67e22",  # Orange
+        "ERROR": "#e74c3c",      # Red
+    }
+    color = color_map.get(agent_upper, "#7f8c8d")  # Grey fallback
+    return format_html('<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:10px">{}</span>', color, agent_upper)
+
+
 class MessageInline(admin.TabularInline):
     model = Message
     extra = 0
     can_delete = False
-    readonly_fields = ('sender', 'text', 'extracted_intent', 'state_transition', 'pretty_entities', 'is_error', 'agent_badge', 'created_at')
-    fields = ('sender', 'text', 'extracted_intent', 'state_transition', 'pretty_entities', 'is_error', 'agent_badge', 'created_at')
+    readonly_fields = ('sender', 'text', 'agent', 'extracted_intent', 'state_transition', 'pretty_entities', 'is_error', 'agent_badge', 'created_at')
+    fields = ('sender', 'text', 'agent', 'extracted_intent', 'state_transition', 'pretty_entities', 'is_error', 'agent_badge', 'created_at')
 
     def state_transition(self, obj):
         before = obj.conversation_state_before or "?"
@@ -26,10 +44,9 @@ class MessageInline(admin.TabularInline):
     pretty_entities.short_description = "Entités"
 
     def agent_badge(self, obj):
-        if obj.is_human_agent:
-            return format_html('<span style="background:#f39c12;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:10px">Agent</span>')
-        return ""
-    agent_badge.short_description = "Agent"
+        return _get_agent_badge(obj)
+    agent_badge.short_description = "Agent (Badge)"
+
 
 
 @admin.register(Conversation)
@@ -71,9 +88,9 @@ class ConversationAdmin(admin.ModelAdmin):
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
     list_display  = ('sender', 'agent_badge', 'get_lead', 'text_preview', 'extracted_intent', 'is_error', 'created_at')
-    list_filter   = ('sender', 'is_error', 'is_human_agent', 'extracted_intent', 'created_at')
+    list_filter   = ('sender', 'agent', 'is_error', 'is_human_agent', 'extracted_intent', 'created_at')
     search_fields = ('text', 'conversation__lead__platform_id', 'extracted_intent')
-    readonly_fields = ('pretty_entities',)
+    readonly_fields = ('pretty_entities', 'agent')
     date_hierarchy = 'created_at'
     ordering      = ('-created_at',)
 
@@ -95,7 +112,6 @@ class MessageAdmin(admin.ModelAdmin):
     pretty_entities.short_description = "Extraction Data"
 
     def agent_badge(self, obj):
-        if obj.is_human_agent:
-            return format_html('<span style="background:#f39c12;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:10px">Agent Humain</span>')
-        return ""
-    agent_badge.short_description = "Type"
+        return _get_agent_badge(obj)
+    agent_badge.short_description = "Agent"
+

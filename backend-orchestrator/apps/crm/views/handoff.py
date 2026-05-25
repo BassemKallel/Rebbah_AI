@@ -69,6 +69,7 @@ def agent_reply(request, conversation_id):
         sender='BOT',
         text=text,
         is_human_agent=True,
+        agent='HUMAN',
         conversation_state_before=conversation.state,
         conversation_state_after=conversation.state,
     )

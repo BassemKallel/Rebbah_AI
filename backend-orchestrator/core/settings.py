@@ -155,3 +155,22 @@ SIMPLE_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 }
+
+# ============================================================
+# CELERY CONFIGURATION (Async Task Queue — Redis Broker)
+# ============================================================
+# Points to the same Redis container already used for hot memory
+# and the sliding-window debouncer. Uses db=2 to avoid collisions.
+_REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+_REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+
+CELERY_BROKER_URL         = f"redis://{_REDIS_HOST}:{_REDIS_PORT}/2"
+CELERY_RESULT_BACKEND     = f"redis://{_REDIS_HOST}:{_REDIS_PORT}/2"
+CELERY_ACCEPT_CONTENT     = ['json']
+CELERY_TASK_SERIALIZER    = 'json'
+CELERY_RESULT_SERIALIZER  = 'json'
+CELERY_TIMEZONE           = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+# Result expiration: 1 hour (matching hot-memory TTL)
+CELERY_RESULT_EXPIRES     = 3600
+
