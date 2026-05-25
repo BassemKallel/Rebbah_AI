@@ -93,7 +93,8 @@ USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3010"
+    "http://localhost:3010",
+    "https://ai2.tiktakpro.com"
 ]
 
 
@@ -102,10 +103,14 @@ CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         'CSRF_TRUSTED_ORIGINS',
-        'https://chat.tiktakpro.com,https://ai.tiktakpro.com'
+        'https://chat.tiktakpro.com,https://ai.tiktakpro.com,https://ai2.tiktakpro.com'
     ).split(',')
     if origin.strip()
 ]
+# Ensure production domains are always allowed in CSRF trusted origins
+for origin in ['https://ai2.tiktakpro.com', 'https://ai.tiktakpro.com']:
+    if origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(origin)
 
 # ======= External Services =======
 # Gemini LLM Direct Mode
