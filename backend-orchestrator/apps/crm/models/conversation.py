@@ -49,6 +49,7 @@ class Message(models.Model):
     extracted_entities      = models.JSONField(default=dict, blank=True)
     is_error                = models.BooleanField(default=False)
     is_human_agent          = models.BooleanField(default=False)
+    agent                   = models.CharField(max_length=50, blank=True, null=True)
 
     conversation_state_before = models.CharField(max_length=50, blank=True, null=True)
     conversation_state_after  = models.CharField(max_length=50, blank=True, null=True)

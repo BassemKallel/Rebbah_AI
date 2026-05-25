@@ -243,13 +243,7 @@ class ImageRequest(BaseModel):
     shop_id: Optional[str] = None
     metadata: Optional[dict] = None
     store_image_url: Optional[str] = None
-
-class VectorizeTextRequest(BaseModel):
-    text_to_embed: str
-    item_id: str
-    shop_id: str
-    metadata: Optional[dict] = None
-    image_url: Optional[str] = None
+    text_to_embed: Optional[str] = None  # Left for compatibility, ignored
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -261,20 +255,9 @@ def health_check():
 
 @app.post("/vectorize")
 async def predict_embedding(request: ImageRequest):
-    """Extract CLIP embedding from image URL (and text if provided), fuse them, and save to DB."""
+    """Extract CLIP embedding from image URL and save to DB."""
     try:
-        embedding_img, _ = await _download_and_embed(request.image_url)
-        
-        if request.text_to_embed:
-            embedding_txt = _embed_text(request.text_to_embed)
-            # FUSION MULTIMODALE : Moyenne des vecteurs (Texte + Image) pour une recherche parfaite
-            import torch
-            fused = torch.tensor(embedding_img) + torch.tensor(embedding_txt)
-            fused = fused / fused.norm(p=2, dim=-1, keepdim=True)
-            embedding = fused.tolist()
-        else:
-            embedding = embedding_img
-            
+        embedding, _ = await _download_and_embed(request.image_url)
         status_msg = "success"
 
         # Save to database if item details provided
@@ -317,42 +300,6 @@ async def predict_embedding(request: ImageRequest):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except httpx.HTTPError as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch image: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-
-@app.post("/vectorize-text")
-async def vectorize_text(request: VectorizeTextRequest):
-    """Extract CLIP embedding from a text description and save to DB."""
-    try:
-        embedding = _embed_text(request.text_to_embed)
-        import json
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO crm_itemvector (item_id, shop_id, image_url, metadata, embedding, created_at)
-                VALUES (%s, %s, %s, %s::jsonb, %s::vector, NOW())
-                ON CONFLICT (item_id, image_url, shop_id)
-                DO UPDATE SET
-                    metadata     = EXCLUDED.metadata,
-                    embedding    = EXCLUDED.embedding,
-                    created_at   = NOW();
-                """,
-                (request.item_id, request.shop_id, "text_only", json.dumps(request.metadata or {}), embedding),
-            )
-            conn.commit()
-            cur.close()
-            
-        return {
-            "status": "success",
-            "dimensions": len(embedding),
-            "payload": {
-                "item_id": request.item_id,
-                "shop_id": request.shop_id,
-                "image_url": "text_only",
-                "metadata": request.metadata
-            }
-        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 

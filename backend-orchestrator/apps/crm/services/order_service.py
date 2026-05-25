@@ -6,20 +6,26 @@ Replaces the Lead.create_pending_order() method on the model.
 """
 import time
 import logging
+from typing import Any, Dict, List, Optional
+
 from django.utils import timezone
+
+from apps.crm.models.lead import Lead, OrderItem
 
 logger = logging.getLogger(__name__)
 
 
-def create_pending_order(lead, shop_id: str, extracted_data: dict = None, items: list = None):
+def create_pending_order(
+    lead: Lead,
+    shop_id: str,
+    extracted_data: Optional[Dict[str, Any]] = None,
+    items: Optional[List[Dict[str, Any]]] = None
+) -> Lead:
     """
     Attach a pre-order/lead status to a lead and advance it to QUALIFIED status.
     Universal for all domains. If 'items' is provided, creates OrderItems (E-commerce).
     Returns the updated lead instance.
     """
-    from apps.crm.models import Lead
-    from apps.crm.models.lead import OrderItem
-
     lead.shop_id        = shop_id
     lead.extracted_data = extracted_data or {}
 
@@ -41,7 +47,8 @@ def create_pending_order(lead, shop_id: str, extracted_data: dict = None, items:
                 product_id=item.get("product_id"),
                 product_name=item.get("product_name", item.get("name", item.get("product", "Unknown"))),
                 quantity=item.get("quantity", item.get("qty", 1)),
-                price=item.get("price")
+                price=item.get("price"),
+                attributes=item.get("attributes") or {}
             )
 
     logger.info(f"[ORDER] Pre-order/Lead created — lead={lead.id} ref={lead.pending_order_reference}")

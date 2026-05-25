@@ -61,7 +61,7 @@ def retry_pending_messages():
       - After MAX_RETRIES failures: escalates to human handoff.
     """
     from apps.crm.models import Company
-    from apps.gateway.services.llm_response_service import generate_llm_response
+    from apps.gateway.services.agents import run_orchestrator
     from apps.gateway.context_manager import ContextManager
 
     now = timezone.now()
@@ -83,14 +83,17 @@ def retry_pending_messages():
             history = context_manager.get_recent_context(
                 msg.sender_id, n=8, shop_id=msg.shop_id
             )
-            current_ctx = (msg.conversation.context_data or {}) if msg.conversation else {}
+            if not msg.conversation:
+                logger.error(f"[RETRY CRON] PendingMessage {msg.id} has no associated conversation. Deleting.")
+                msg.delete()
+                continue
 
-            llm_result = generate_llm_response(
-                text=msg.user_text,
+            llm_result = run_orchestrator(
+                user_message=msg.user_text,
+                image_url=msg.image_url or None,
+                conversation=msg.conversation,
                 company=company,
-                shop_id=msg.shop_id,
-                conversation_history=history,
-                current_context=current_ctx,
+                history=history,
             )
 
             if llm_result.get('error'):

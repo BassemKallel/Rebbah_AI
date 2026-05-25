@@ -3,10 +3,11 @@ views.py — Layer 4: HTTP Entry Point (thin orchestrator)
 
 This file only:
 1. Parses the incoming HTTP request
-2. Delegates to MessagePipeline for all processing
-3. Returns the HTTP response
+2. Registers the message in the Redis debounce buffer
+3. Fires a Celery async task and returns HTTP 200 to Meta in < 20ms
 
-All business logic lives in pipeline.py, disambiguation.py, and dialog_manager.py.
+All business logic (debounce sleep, AI pipeline, Meta send_message)
+lives in apps/gateway/tasks.py, executed by the Celery worker process.
 """
 import hmac
 import hashlib
@@ -19,13 +20,15 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 
 from apps.crm.models import Company
-from .pipeline import MessagePipeline
-from .services import messenger_service
+from .pipeline import context_manager
 from .services.azure_storage import azure_storage_service
+from .tasks import process_webhook_message_async
 
 logger = logging.getLogger(__name__)
 
-pipeline = MessagePipeline()
+# Note: MessagePipeline is no longer instantiated here.
+# It is instantiated as a module-level singleton inside tasks.py
+# and executed exclusively in the Celery worker process.
 
 # Webhook verify token (set META_VERIFY_TOKEN in settings.py or .env)
 META_VERIFY_TOKEN = getattr(settings, "META_VERIFY_TOKEN", "tiktak_verify_token")
@@ -141,30 +144,30 @@ class MetaWebhookView(APIView):
                         image_url = attach.get("payload", {}).get("url")
                         break
 
-                # ── Delegate to pipeline ───────────────────────────────
-                result = pipeline.run(user_id, shop_id, text, image_url=image_url, platform=platform)
-                result["platform"] = platform
-                result["sender_psid"] = sender_psid
+                # ── Register message to Redis debounce buffer ─────────
+                current_timestamp = context_manager.add_to_debounce_buffer(
+                    user_id, shop_id, text, image_url
+                )
 
-                # ── Retrieve & persist sender name ─────────────────────
+                # ── Fire Celery async task (non-blocking, < 5ms) ──────
+                # The task handles: debounce sleep (5s), sliding window
+                # check, pipeline run, and Meta send_message dispatch.
                 token = company.meta_page_access_token
-                if token and sender_psid:
-                    sender_name = messenger_service.get_sender_name(sender_psid, token)
-                    if sender_name:
-                        from apps.crm.models import Lead
-                        Lead.objects.filter(platform_id=user_id).update(name=sender_name)
-                        logger.info(f"[META WEBHOOK] Lead name updated: '{sender_name}' for {user_id}")
-
-                # ── Send bot reply back to Messenger ───────────────────
-                carousel_elements = result.get("carousel_elements")
-                if carousel_elements and token:
-                    messenger_service.send_carousel(sender_psid, carousel_elements, token)
-                    
-                bot_text = result.get("text", "")
-                if bot_text and token:
-                    messenger_service.send_message(sender_psid, bot_text, token)
-
-                responses.append(result)
+                process_webhook_message_async.delay(
+                    user_id=user_id,
+                    shop_id=shop_id,
+                    text=text,
+                    image_url=image_url,
+                    current_timestamp=current_timestamp,
+                    platform=platform,
+                    page_token=token,
+                    sender_psid=sender_psid,
+                )
+                logger.info(
+                    f"[META WEBHOOK] Message queued for Celery: user_id={user_id} "
+                    f"shop_id={shop_id} platform={platform}"
+                )
+                responses.append({"status": "queued_for_processing"})
 
         return Response({"status": "ok", "responses": responses})
 
@@ -222,37 +225,38 @@ class MessengerWebhookPOC(APIView):
         if mode_override not in ("nlu", "llm"):
             mode_override = None
 
-        # ── 2. Delegate to pipeline ───────────────────────────────────────
-        result = pipeline.run(
-            user_id, shop_id, text,
+        if image_file:
+            uploaded_url = azure_storage_service.upload_image(image_file, prefix=shop_id)
+            if uploaded_url:
+                image_url = uploaded_url
+
+        # ── Register message to Redis debounce buffer ─────────
+        current_timestamp = context_manager.add_to_debounce_buffer(user_id, shop_id, text, image_url)
+
+        # ── Fire Celery async task (non-blocking) ─────────────
+        # For the POC endpoint we pass page_token=None since there is
+        # no Meta Page token. The task will skip send_message and return
+        # success_no_token, which is acceptable for internal testing.
+        process_webhook_message_async.delay(
+            user_id=user_id,
+            shop_id=shop_id,
+            text=text,
             image_url=image_url,
-            image_file=image_file,
-            mode_override=mode_override,
+            current_timestamp=current_timestamp,
             platform="poc",
+            page_token=None,
+            sender_psid=user_id,
+        )
+        logger.info(
+            f"[POC WEBHOOK] Message queued for Celery: user_id={user_id} shop_id={shop_id}"
         )
 
-
-        # ── 3. Build HTTP Response ────────────────────────────────────────
-        payload = {
-            "status": "success",
+        # ── 2. Return immediate acknowledgment ────────────────────────────
+        return Response({
+            "status": "queued_for_processing",
             "shop_id": shop_id,
-            "bot_response": {
-                "text": result["text"],
-                "internal_debug": {
-                    "intent_detected":    result.get("intent"),
-                    "entities_extracted":  result.get("entities", {}),
-                    "accumulated_context": result.get("context", {}),
-                    "new_state":          result.get("state"),
-                    "missing_entities":   result.get("missing_entities", []),
-                },
-            },
-        }
-        if result.get("matched_image_url"):
-            payload["bot_response"]["identified_image_url"] = result["matched_image_url"]
-        if result.get("uploaded_url"):
-            payload["bot_response"]["uploaded_image_url"] = result["uploaded_url"]
-
-        return Response(payload)
+            "note": "Message is being processed asynchronously by the Celery worker.",
+        })
 
 
 class MetaWebhookSilentView(APIView):
@@ -327,25 +331,29 @@ class MetaWebhookSilentView(APIView):
                         image_url = attach.get("payload", {}).get("url")
                         break
 
-                # ── Pipeline complet (NLU ou LLM selon company.response_mode) ──
-                result = pipeline.run(user_id, shop_id, text, image_url=image_url)
-                result["platform"]    = platform
-                result["sender_psid"] = sender_psid
+                # ── Register message to Redis debounce buffer ─────────
+                current_timestamp = context_manager.add_to_debounce_buffer(
+                    user_id, shop_id, text, image_url
+                )
 
-                # ── Récupérer nom client (lecture seule, pas d'envoi) ──────────
-                token = company.meta_page_access_token
-                if token and sender_psid:
-                    sender_name = messenger_service.get_sender_name(sender_psid, token)
-                    if sender_name:
-                        from apps.crm.models import Lead
-                        Lead.objects.filter(platform_id=user_id).update(name=sender_name)
-                        logger.info(f"[SILENT WEBHOOK] Lead name: '{sender_name}' for {user_id}")
-
-                # ❌ send_message() volontairement absent — mode silence total
-                bot_preview = result.get("text", "")[:60]
-                logger.info(f"[SILENT WEBHOOK] Response stored (not sent): '{bot_preview}...'")
-
-                responses.append(result)
+                # ── Fire Celery async task in silent mode ─────────────
+                # page_token=None ensures the Celery task will store the
+                # AI response in DB but will NOT call send_message (silent).
+                process_webhook_message_async.delay(
+                    user_id=user_id,
+                    shop_id=shop_id,
+                    text=text,
+                    image_url=image_url,
+                    current_timestamp=current_timestamp,
+                    platform=platform,
+                    page_token=None,   # ❌ Silent mode — no Meta send
+                    sender_psid=sender_psid,
+                )
+                logger.info(
+                    f"[SILENT WEBHOOK] Message queued for Celery (silent): "
+                    f"user_id={user_id} shop_id={shop_id}"
+                )
+                responses.append({"status": "queued_for_processing"})
 
         return Response({"status": "ok", "mode": "silent", "responses": responses})
 

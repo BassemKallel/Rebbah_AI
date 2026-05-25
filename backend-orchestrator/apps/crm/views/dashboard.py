@@ -7,6 +7,7 @@ All endpoints require ?shop_id=<id> and IsAuthenticated.
 """
 import logging
 from datetime import date, timedelta, timezone as dt_tz
+from typing import Any, Dict, List
 from django.db.models import Count
 from django.db.models.functions import TruncHour
 from django.utils import timezone
@@ -17,6 +18,39 @@ from rest_framework.response import Response
 from ..models import Conversation, Lead, Message, NLUFallbackLog
 
 logger = logging.getLogger(__name__)
+
+
+def _lead_extracted_data(lead: Lead) -> Dict[str, Any]:
+    return lead.extracted_data or {}
+
+
+def _lead_order_items_payload(lead: Lead) -> List[Dict[str, Any]]:
+    db_items = list(lead.items.all())
+    if db_items:
+        return [
+            {
+                "product_id": item.product_id,
+                "product_name": item.product_name,
+                "quantity": item.quantity,
+                "price": float(item.price) if item.price is not None else None,
+                "attributes": item.attributes or {},
+            }
+            for item in db_items
+        ]
+
+    raw_items = _lead_extracted_data(lead).get("items") or []
+    return raw_items if isinstance(raw_items, list) else []
+
+
+def _lead_product_label(lead: Lead) -> str:
+    items = _lead_order_items_payload(lead)
+    if items:
+        return ", ".join(
+            f"{item.get('quantity', 1)}x {item.get('product_name', 'Produit')}"
+            for item in items
+        )
+    data = _lead_extracted_data(lead)
+    return str(data.get("product") or data.get("service_type") or "")
 
 
 def _require_shop(request):
@@ -238,18 +272,15 @@ def dashboard_pending_orders(request):
         latest_conv = lead.conversations.order_by("-created_at").first()
         platform = latest_conv.platform if latest_conv else "messenger"
 
-        product_label = lead.product_id or ""
-        if lead.color:
-            product_label += f" {lead.color}"
-        if lead.size:
-            product_label += f" {lead.size}"
+        extracted_data = _lead_extracted_data(lead)
 
         data.append({
             "id": lead.id,
             "name": lead.name or lead.platform_id,
-            "product": product_label.strip(),
-            "phone": lead.phone_number or "",
-            "address": lead.address or "",
+            "product": _lead_product_label(lead).strip(),
+            "phone": extracted_data.get("phone_number", ""),
+            "address": extracted_data.get("address", ""),
+            "items": _lead_order_items_payload(lead),
             "platform": platform.capitalize(),
             "avatar": None,
             "pending_order_reference": lead.pending_order_reference,

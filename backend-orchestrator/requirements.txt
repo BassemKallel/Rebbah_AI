@@ -3,9 +3,11 @@ djangorestframework
 django-cors-headers
 psycopg2-binary
 redis
+celery>=5.3.6
 requests
 azure-storage-blob
 google-genai>=1.0.0
+google-adk
 whitenoise
 djangorestframework-simplejwt
 cryptography

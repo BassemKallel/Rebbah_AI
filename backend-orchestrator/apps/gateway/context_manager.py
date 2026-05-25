@@ -21,6 +21,7 @@ without isolation. The LLM pipeline explicitly isolates by shop_id.
 """
 import json
 import os
+from typing import Optional
 import redis
 
 # Module-level singleton pool — shared across all ContextManager instances
@@ -198,3 +199,77 @@ class ContextManager:
         """Return the current error count without incrementing."""
         val = self.redis_client.get(self._error_key(user_id, shop_id))
         return int(val) if val else 0
+
+    # ── Message Debouncing Buffer ───────────────────────────────────────────
+
+    def _debounce_buffer_key(self, user_id: str, shop_id: str) -> str:
+        """Redis key for storing user's consecutive messages buffer list."""
+        return f"debounce_buffer:{shop_id}:{user_id}"
+
+    def _debounce_last_time_key(self, user_id: str, shop_id: str) -> str:
+        """Redis key for storing timestamp of the latest received message."""
+        return f"debounce_last_time:{shop_id}:{user_id}"
+
+    def add_to_debounce_buffer(self, user_id: str, shop_id: str, text: str, image_url: Optional[str] = None) -> float:
+        """
+        Push incoming message details to the user's debounce buffer.
+        Updates the latest message receipt timestamp and returns it.
+        """
+        import time
+        buf_key = self._debounce_buffer_key(user_id, shop_id)
+        time_key = self._debounce_last_time_key(user_id, shop_id)
+
+        # Prepare payload
+        payload = json.dumps({
+            "text": text or "",
+            "image_url": image_url or ""
+        }, ensure_ascii=False)
+
+        # Append message payload
+        self.redis_client.rpush(buf_key, payload)
+        self.redis_client.expire(buf_key, 60)
+
+        # Update latest message timestamp
+        timestamp = time.time()
+        self.redis_client.setex(time_key, 60, str(timestamp))
+
+        return timestamp
+
+    def get_debounce_last_time(self, user_id: str, shop_id: str) -> float:
+        """Retrieve latest message receipt timestamp from Redis."""
+        val = self.redis_client.get(self._debounce_last_time_key(user_id, shop_id))
+        return float(val) if val else 0.0
+
+    def get_and_clear_debounce_buffer(self, user_id: str, shop_id: str) -> tuple[str, Optional[str]]:
+        """
+        Fetch all messages in the buffer, concatenate their text, find the
+        first image_url, clear the buffer keys and return (consolidated_text, image_url).
+        """
+        buf_key = self._debounce_buffer_key(user_id, shop_id)
+        time_key = self._debounce_last_time_key(user_id, shop_id)
+
+        # Retrieve all items in the list
+        items_raw = self.redis_client.lrange(buf_key, 0, -1)
+        
+        # Clear Keys
+        self.redis_client.delete(buf_key)
+        self.redis_client.delete(time_key)
+
+        texts = []
+        first_image_url = None
+
+        for item_str in items_raw:
+            try:
+                data = json.loads(item_str)
+                t = data.get("text", "").strip()
+                if t:
+                    texts.append(t)
+                img = data.get("image_url")
+                if img and not first_image_url:
+                    first_image_url = img
+            except Exception:
+                pass
+
+        consolidated_text = " ".join(texts).strip()
+        return consolidated_text, first_image_url
+
