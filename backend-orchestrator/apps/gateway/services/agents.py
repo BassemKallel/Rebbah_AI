@@ -584,6 +584,7 @@ def _init_orchestrator_result() -> Dict[str, Any]:
         "error": False,
         "error_type": "none",
         "error_detail": "",
+        "checkout_abandoned": False,
     }
 
 
@@ -991,15 +992,18 @@ def run_orchestrator(
     current_agent = context_data.get("_active_agent", "FAQ")
     
     # Check if the user is in an active checkout and explicitly cancels or abandons
+    checkout_abandoned = False
     if current_agent == "CHECKOUT" and conversation.state in {"LLM_ACTIVE", "LLM_CONFIRMING"}:
         if _detect_checkout_abandon_with_llm(user_message, api_key):
-            logger.info("[CHECKOUT CANCEL] Checkout abandonment detected. Clearing context data and resetting state.")
+            logger.info("[CHECKOUT CANCEL] Checkout abandonment detected. Clearing context data and completing conversation.")
+            checkout_abandoned = True
             # Clear all non-system checkout entities from context_data
             keys_to_clear = [k for k in context_data.keys() if not k.startswith('_')]
             for k in keys_to_clear:
                 context_data.pop(k, None)
             conversation.context_data = context_data
-            conversation.state = "LLM_ACTIVE"
+            conversation.state = "COMPLETED"
+            conversation.completed_at = timezone.now()
             conversation.save()
             current_agent = "FAQ" # Release lock and force route normally
 
@@ -1056,5 +1060,6 @@ def run_orchestrator(
 
     # Clean the response text
     result["response_text"] = clean_llm_response(result["response_text"])
+    result["checkout_abandoned"] = checkout_abandoned
 
     return result

@@ -100,35 +100,39 @@ CORS_ALLOWED_ORIGINS = [
     "https://ai2.tiktakpro.com"
 ]
 
+# Allow all ngrok subdomains for local development
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.ngrok-free\.app$",
+    r"^https://.*\.ngrok-free\.dev$",
+    r"^https://.*\.ngrok\.io$",
+]
+
 
 # Trusted origins for CSRF — must include all domains that POST to Django
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         'CSRF_TRUSTED_ORIGINS',
-        'https://chat.tiktakpro.com,https://ai.tiktakpro.com,https://ai2.tiktakpro.com'
+        'https://ai2.tiktakpro.com'
     ).split(',')
     if origin.strip()
 ]
 # Ensure production domains are always allowed in CSRF trusted origins
-for origin in ['https://ai2.tiktakpro.com', 'https://ai.tiktakpro.com']:
+for origin in ['https://ai2.tiktakpro.com']:
     if origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(origin)
 
+# Allow ngrok for local development — Meta webhook can POST from ngrok URLs
+_ngrok_host = os.getenv('NGROK_URL', '')  # e.g. https://xxxx.ngrok-free.app
+if _ngrok_host and _ngrok_host not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(_ngrok_host)
+
 # ======= External Services =======
 # Gemini LLM Direct Mode
-GEMINI_API_KEY                       = os.getenv('GEMINI_API_KEY', '')
-GEMINI_MODEL                         = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
 # Vision Service (CLIP + pgvector)
 VISION_SERVICE_URL   = os.getenv('VISION_SERVICE_URL',   'http://vision-service:8002')
 VISION_SEARCH_PATH   = os.getenv('VISION_SEARCH_PATH',   '/search-similar')
-
-# TikTak Real API (External product catalog)
-TIKTAK_API_BASE_URL      = os.getenv('TIKTAK_API_BASE_URL',     'https://api.tiktakpro.com')
-TIKTAK_API_PRODUCTS_PATH = os.getenv('TIKTAK_API_PRODUCTS_PATH', '/api/v1/products-read/')
-TIKTAK_API_TOKEN         = os.getenv('TIKTAK_API_TOKEN',         '')
-PRODUCTS_CACHE_TTL       = int(os.getenv('PRODUCTS_CACHE_TTL',   '900'))  # 15 min (longer window → better Gemini implicit cache hits)
 
 # Request timeouts (seconds)
 EXTERNAL_REQUEST_TIMEOUT = int(os.getenv('EXTERNAL_REQUEST_TIMEOUT', '5'))
