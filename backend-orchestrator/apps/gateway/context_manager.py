@@ -29,8 +29,10 @@ import redis
 # is instantiated multiple times per request lifecycle.
 _REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 _REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+_REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "") or None
 _pool = redis.ConnectionPool(
     host=_REDIS_HOST, port=_REDIS_PORT, db=0,
+    password=_REDIS_PASSWORD,
     decode_responses=True, max_connections=20
 )
 
