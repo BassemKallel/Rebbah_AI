@@ -119,19 +119,28 @@ def run_test():
     response_a = results["Thread_A"]
     response_b = results["Thread_B"]
     
-    # Thread A should have been skipped and queued
-    print(f"Thread A Status: {response_a.get('status')}")
-    assert response_a.get("status") == "queued_and_skipped", "Thread A was not skipped correctly!"
+    # Both HTTP requests should be queued successfully in <20ms
+    print(f"Thread A HTTP Status: {response_a.get('status')}")
+    assert response_a.get("status") == "queued_for_processing", "Thread A HTTP call was not queued!"
     
-    # Thread B should have succeeded
-    print(f"Thread B Status: {response_b.get('status')}")
-    assert response_b.get("status") == "success", "Thread B was not successful!"
+    print(f"Thread B HTTP Status: {response_b.get('status')}")
+    assert response_b.get("status") == "queued_for_processing", "Thread B HTTP call was not queued!"
+
+    # Wait for Celery worker to finish processing using a robust polling loop (up to 20 seconds)
+    print("\nWaiting for Celery worker to process the messages (polling DB up to 20 seconds)...")
+    conv = None
+    user_msgs = []
+    for attempt in range(20):
+        time.sleep(1.0)
+        conv = Conversation.objects.filter(sender_id=user_id, shop_id=shop_id).first()
+        if conv:
+            user_msgs = list(Message.objects.filter(conversation=conv, sender="USER"))
+            if len(user_msgs) > 0:
+                print(f"Success! Found message in DB after {attempt + 1} seconds.")
+                break
     
     # Check database messages
-    conv = Conversation.objects.filter(sender_id=user_id, shop_id=shop_id).first()
     assert conv is not None, "Conversation was not created!"
-    
-    user_msgs = list(Message.objects.filter(conversation=conv, sender="USER"))
     print(f"User messages in DB: {[m.text for m in user_msgs]}")
     
     # There should be exactly one USER message containing the coalesced text

@@ -172,7 +172,15 @@ class MessagePipeline:
             if active_agent:
                 current_context["_active_agent"] = active_agent
 
-            self._accumulate_entities(current_context, llm_result.get("extracted_entities", {}))
+            if llm_result.get("checkout_abandoned"):
+                logger.info("[PIPELINE] Checkout abandonment detected. Clearing local context of non-system entities.")
+                keys_to_clear = [k for k in current_context.keys() if not k.startswith('_')]
+                for k in keys_to_clear:
+                    current_context.pop(k, None)
+                conversation.state = "COMPLETED"
+                conversation.completed_at = timezone.now()
+            else:
+                self._accumulate_entities(current_context, llm_result.get("extracted_entities", {}))
 
             # ── 4.5 Update or Create Lead Dynamically ───────────────────
             lead = self._update_lead(lead, conversation, current_context, shop_id)
@@ -800,6 +808,11 @@ class MessagePipeline:
         )
 
     def _process_order_confirmation(self, lead, conversation, current_context, text, shop_id, is_confirmation, bot_text, llm_result, state_before, extracted_entities, company=None):
+        if llm_result.get("checkout_abandoned"):
+            logger.info("[LLM PIPELINE] Checkout cancellation/abandonment detected. Forcing state to COMPLETED.")
+            conversation.completed_at = timezone.now()
+            return "COMPLETED", bot_text
+
         new_state = "LLM_ACTIVE"
 
         if is_confirmation:
