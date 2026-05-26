@@ -183,80 +183,89 @@ class MessengerWebhookPOC(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        # ── 0. Authenticate via X-Shop-Token ─────────────────────────────
-        token = request.headers.get("X-Shop-Token")
-        if not token:
-            return Response(
-                {"error": "Missing X-Shop-Token header."},
-                status=status.HTTP_401_UNAUTHORIZED
+        import traceback
+        try:
+            # ── 0. Authenticate via X-Shop-Token ─────────────────────────────
+            token = request.headers.get("X-Shop-Token")
+            if not token:
+                return Response(
+                    {"error": "Missing X-Shop-Token header."},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
+            company = Company.objects.filter(dashboard_token=token, is_active=True).first()
+            if not company:
+                return Response(
+                    {"error": "Invalid or inactive shop token."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            shop_id = company.shop_id
+
+            # ── 1. Parse Input ────────────────────────────────────────────────
+            user_id = request.data.get("user_id")
+            if not user_id:
+                return Response(
+                    {"error": "user_id is required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            message_data = request.data.get("message", {})
+            if isinstance(message_data, str):
+                import json as _json
+                try:
+                    message_data = _json.loads(message_data)
+                except Exception:
+                    message_data = {}
+
+            text = message_data.get("text", "") or request.data.get("text", "")
+            image_url = message_data.get("image_url") or request.data.get("image_url")
+            image_file = request.FILES.get("image")
+
+            # Mode override optionnel : "nlu" ou "llm" (écrase company.response_mode pour cette requête)
+            mode_override = request.data.get("mode")
+            if mode_override not in ("nlu", "llm"):
+                mode_override = None
+
+            if image_file:
+                uploaded_url = azure_storage_service.upload_image(image_file, prefix=shop_id)
+                if uploaded_url:
+                    image_url = uploaded_url
+
+            # ── Register message to Redis debounce buffer ─────────
+            current_timestamp = context_manager.add_to_debounce_buffer(user_id, shop_id, text, image_url)
+
+            # ── Fire Celery async task (non-blocking) ─────────────
+            # For the POC endpoint we pass page_token=None since there is
+            # no Meta Page token. The task will skip send_message and return
+            # success_no_token, which is acceptable for internal testing.
+            process_webhook_message_async.delay(
+                user_id=user_id,
+                shop_id=shop_id,
+                text=text,
+                image_url=image_url,
+                current_timestamp=current_timestamp,
+                platform="poc",
+                page_token=None,
+                sender_psid=user_id,
+            )
+            logger.info(
+                f"[POC WEBHOOK] Message queued for Celery: user_id={user_id} shop_id={shop_id}"
             )
 
-        company = Company.objects.filter(dashboard_token=token, is_active=True).first()
-        if not company:
-            return Response(
-                {"error": "Invalid or inactive shop token."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        shop_id = company.shop_id
-
-        # ── 1. Parse Input ────────────────────────────────────────────────
-        user_id = request.data.get("user_id")
-        if not user_id:
-            return Response(
-                {"error": "user_id is required."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        message_data = request.data.get("message", {})
-        if isinstance(message_data, str):
-            import json as _json
-            try:
-                message_data = _json.loads(message_data)
-            except Exception:
-                message_data = {}
-
-        text = message_data.get("text", "") or request.data.get("text", "")
-        image_url = message_data.get("image_url") or request.data.get("image_url")
-        image_file = request.FILES.get("image")
-
-        # Mode override optionnel : "nlu" ou "llm" (écrase company.response_mode pour cette requête)
-        mode_override = request.data.get("mode")
-        if mode_override not in ("nlu", "llm"):
-            mode_override = None
-
-        if image_file:
-            uploaded_url = azure_storage_service.upload_image(image_file, prefix=shop_id)
-            if uploaded_url:
-                image_url = uploaded_url
-
-        # ── Register message to Redis debounce buffer ─────────
-        current_timestamp = context_manager.add_to_debounce_buffer(user_id, shop_id, text, image_url)
-
-        # ── Fire Celery async task (non-blocking) ─────────────
-        # For the POC endpoint we pass page_token=None since there is
-        # no Meta Page token. The task will skip send_message and return
-        # success_no_token, which is acceptable for internal testing.
-        process_webhook_message_async.delay(
-            user_id=user_id,
-            shop_id=shop_id,
-            text=text,
-            image_url=image_url,
-            current_timestamp=current_timestamp,
-            platform="poc",
-            page_token=None,
-            sender_psid=user_id,
-        )
-        logger.info(
-            f"[POC WEBHOOK] Message queued for Celery: user_id={user_id} shop_id={shop_id}"
-        )
-
-        # ── 2. Return immediate acknowledgment ────────────────────────────
-        return Response({
-            "status": "queued_for_processing",
-            "shop_id": shop_id,
-            "note": "Message is being processed asynchronously by the Celery worker.",
-        })
+            # ── 2. Return immediate acknowledgment ────────────────────────────
+            return Response({
+                "status": "queued_for_processing",
+                "shop_id": shop_id,
+                "note": "Message is being processed asynchronously by the Celery worker.",
+            })
+        except Exception as e:
+            logger.error(f"[POC WEBHOOK ERROR] 500 Exception: {e}", exc_info=True)
+            return Response({
+                "status": "error",
+                "error_message": str(e),
+                "traceback": traceback.format_exc()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class MetaWebhookSilentView(APIView):
