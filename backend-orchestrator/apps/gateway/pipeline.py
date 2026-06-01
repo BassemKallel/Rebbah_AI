@@ -517,6 +517,22 @@ class MessagePipeline:
                 else:
                     current_context[key] = value
 
+        # Auto-population of basket from _last_viewed_product in checkout phase
+        if current_context.get("_active_agent") == "CHECKOUT":
+            has_basket_items = bool(current_context.get("items"))
+            has_product = bool(current_context.get("product"))
+            last_viewed = current_context.get("_last_viewed_product")
+            
+            if not has_basket_items and not has_product and last_viewed:
+                # Resolve quantity from context/extracted_entities or default to 1
+                qty = self._safe_int(current_context.get("quantity") or normalized_entities.get("quantity") or 1)
+                current_context["items"] = [{
+                    "product_name": last_viewed,
+                    "quantity": qty,
+                    "attributes": self._extract_item_attributes(current_context)
+                }]
+                logger.info(f"[PIPELINE] Automatically pre-populated basket with active product '{last_viewed}' (qty={qty}) for checkout.")
+
     def _merge_order_items(self, existing: Any, incoming: Any) -> List[Dict[str, Any]]:
         merged: List[Dict[str, Any]] = []
         index_by_key: Dict[str, int] = {}
