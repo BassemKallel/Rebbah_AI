@@ -59,7 +59,7 @@ Le traitement conversationnel est géré par le framework officiel **Google ADK 
 Chaque agent hérite de la classe `Agent` de Google ADK et s'exécute dans un environnement isolé `InMemoryRunner` avec des règles strictes :
 * **Agent `FAQ`** : Traite les questions générales (horaires de la boutique, adresse, contact, politiques d'achat). Répond chaleureusement en dialecte tunisien (Derja) ou en français.
 * **Agent `SALES`** : Recommande des produits à l'aide de l'outil `search_products`. Le catalogue de la boutique extrait d'un `ItemVector` est formaté et injecté dynamiquement dans sa consigne système à chaque appel.
-* **Agent `CHECKOUT`** : Responsable de la collecte des informations CRM. Ses retours sont régis par le schéma Pydantic `DynamicCheckoutSchema` assurant l'extraction de `full_name`, `phone_number`, `shop_name`, et `daily_volume`.
+* **Agent `CHECKOUT`** : Responsable de la collecte des informations CRM. Ses retours sont régis par le schéma Pydantic `DynamicCheckoutSchema`. L'agent intègre désormais l'index du catalogue et applique une règle de sécurité stricte : avant d'engager la collecte d'informations (nom, adresse, téléphone), il vérifie que le produit demandé existe en stock dans le catalogue, sinon il refuse la commande et invite le client à choisir un produit disponible.
 * **Agent `POST_SALES`** : Gère le support après-vente et le statut de commande via l'outil `check_order_status`.
 
 ---
