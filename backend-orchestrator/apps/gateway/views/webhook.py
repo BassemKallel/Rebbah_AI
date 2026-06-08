@@ -1,6 +1,9 @@
 import hmac
 import hashlib
 import logging
+import time
+import traceback
+import json as _json
 from django.conf import settings
 from django.http import HttpResponse
 from rest_framework.views import APIView
@@ -9,9 +12,10 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 
 from apps.crm.models import Company
-from apps.gateway.services.pipeline import context_manager
+from apps.gateway.services.pipeline import context_manager, MessagePipeline
 from apps.gateway.services.azure_storage import azure_storage_service
 from apps.gateway.tasks import process_webhook_message_async
+
 
 logger = logging.getLogger(__name__)
 
@@ -306,16 +310,19 @@ class MetaWebhookSilentView(APIView):
         return Response({"status": "ok", "mode": "silent", "responses": responses})
 
 
+DEBOUNCE_WINDOW_SECONDS = 5.0
+
+
 class DirectMessageProcessView(APIView):
     """
-    Direct asynchronous message processing view.
+    Direct synchronous message processing view with Redis debouncing.
     Receives message payload from client servers, validates via X-Shop-Token,
-    and queues processing in Celery which replies directly to the client via Meta API.
+    performs synchronous debouncing, processes via the multi-agent AI pipeline,
+    and returns the bot's response directly to the caller.
     """
     permission_classes = [AllowAny]
 
     def post(self, request):
-        import traceback
         try:
             # 1. Authenticate using static shop token
             token = request.headers.get("X-Shop-Token")
@@ -348,33 +355,59 @@ class DirectMessageProcessView(APIView):
             # 3. Register message to Redis debounce buffer
             current_timestamp = context_manager.add_to_debounce_buffer(user_id, shop_id, text, image_url)
 
-            # 4. Fire Celery async task (replies directly to Meta)
-            process_webhook_message_async.delay(
-                user_id=user_id,
-                shop_id=shop_id,
-                text=text,
-                image_url=image_url,
-                current_timestamp=current_timestamp,
-                platform="messenger",
-                page_token=company.meta_page_access_token,
-                sender_psid=user_id,
+            # 4. Synchronous debounce sleep
+            time.sleep(DEBOUNCE_WINDOW_SECONDS)
+
+            # 5. Check if a newer message arrived during sleep
+            latest_timestamp = context_manager.get_debounce_last_time(user_id, shop_id)
+            if latest_timestamp and latest_timestamp > current_timestamp:
+                logger.info(
+                    f"[DIRECT API] Newer message detected for user_id={user_id} shop_id={shop_id}. "
+                    f"Skipping this request (skipped)."
+                )
+                return Response({
+                    "status": "skipped",
+                    "reason": "newer_message_received"
+                }, status=status.HTTP_200_OK)
+
+            # 6. Retrieve and clear consolidated message buffer
+            consolidated_text, consolidated_image_url = context_manager.get_and_clear_debounce_buffer(
+                user_id, shop_id
             )
             logger.info(
-                f"[DIRECT API] Message queued for Celery: user_id={user_id} shop_id={shop_id}"
+                f"[DIRECT API] Processing coalesced message: user_id={user_id} text='{consolidated_text}'"
             )
 
-            # 5. Return immediate acknowledgment to the calling server
+            # 7. Run the AI pipeline synchronously
+            pipeline = MessagePipeline()
+            result = pipeline.run(
+                user_id=user_id,
+                shop_id=shop_id,
+                text=consolidated_text,
+                image_url=consolidated_image_url,
+                platform="direct"
+            )
+
+            # 8. Return response directly to the enterprise server
             return Response({
-                "status": "queued_for_processing",
+                "status": "success",
                 "shop_id": shop_id,
-                "note": "Message is being processed asynchronously and reply will be sent directly to Meta.",
+                "bot_response": {
+                    "text": result.get("text", ""),
+                    "intent": result.get("intent", ""),
+                    "state": result.get("state", ""),
+                    "entities": result.get("entities", {}),
+                    "context": result.get("context", {}),
+                    "carousel_elements": result.get("carousel_elements") or []
+                }
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"[DIRECT API ERROR] Failed to queue message: {e}", exc_info=True)
+            logger.error(f"[DIRECT API ERROR] Failed to process message: {e}", exc_info=True)
             return Response({
                 "status": "error",
                 "error_message": str(e),
                 "traceback": traceback.format_exc()
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
