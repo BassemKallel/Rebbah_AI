@@ -598,17 +598,15 @@ def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> bool:
     try:
         client = Client(api_key=api_key)
         system_instruction = (
-            "Tu es un classificateur binaire. Un client est actuellement dans un "
-            "processus de checkout actif. Ton unique role est de determiner si "
-            "son dernier message indique qu'il veut ABANDONNER, ANNULER, STOPPER "
-            "ou SORTIR clairement de cette commande en cours, ou s'il demande "
-            "explicitement a reorienter la conversation hors de la commande "
-            "(catalogue, prix general, SAV, FAQ). Reponds False si le message "
-            "est une continuation normale du checkout: nom de produit, taille, "
-            "couleur, quantite, adresse, telephone, nom, confirmation, correction "
-            "ou refus du recapitulatif. IMPORTANT: un 'non', 'la' ou 'no' seul "
-            "est une correction/refus du recapitulatif, pas un abandon. Reponds "
-            "uniquement avec le schema JSON."
+            "Tu es un classificateur binaire pour libérer ou non le verrou de checkout. "
+            "Un client est actuellement dans un processus de checkout actif. "
+            "Tu dois répondre True (libérer le verrou) dans le schéma JSON si le dernier message du client : "
+            "1. Pose une question de n'importe quel genre (ex: demande le prix d'un produit comme 'b9adech', 'kadesh', 'prix', demande la disponibilité du stock, s'enquiert des conditions de livraison, ou pose une question générale de FAQ ou SAV). "
+            "2. Exprime clairement l'intention d'abandonner, annuler, stopper ou sortir de la commande en cours. "
+            "Tu dois répondre False (conserver le verrou de checkout) si le message est une continuation normale du checkout : "
+            "- Fournit directement une information demandée (nom propre, numéro de téléphone, adresse, quantité de produit). "
+            "- Confirme le récapitulatif ('oui', 'ey') ou en refuse poliment les détails sans poser de question. "
+            "IMPORTANT: Réponds strictement au format JSON décrit par le schéma."
         )
         response = client.models.generate_content(
             model="gemini-2.5-flash",
@@ -764,9 +762,13 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
             f"- Tu DOIS t'appuyer sur l'index du catalogue ci-dessus pour renseigner le client sur les produits existants, leurs prix et leurs disponibilités.\n"
             f"- Si le client demande des informations détaillées, la description ou des spécifications sur un produit spécifique, tu DOIS impérativement appeler l'outil `get_product_details` en lui transmettant son 'item_id'. Ne cherche pas à deviner la description sans appeler cet outil.\n"
             f"- Si besoin d'une recherche sémantique ou plus fine, tu peux également utiliser l'outil `search_products`.\n"
-            f"- Pour répondre à la demande du client, tu dois extraire et retourner la liste des identifiants (IDs) des produits recommandés ou correspondants dans le champ `carousel_items` de ton schéma (max 5) afin qu'ils s'affichent sous forme de carrousel visuel.\n"
-            f"- Si le client envoie une photo de produit ou demande un article similaire, propose des alternatives en stock et renvoie également leurs IDs dans `carousel_items`.\n"
-            f"- Ne propose JAMAIS de prix ou d'articles n'existant pas dans le catalogue."
+            f"- ⚠️ RÈGLE ABSOLUE — carousel_items OBLIGATOIRE (ZÉRO EXCEPTION) :\n"
+            f"  Chaque fois que tu mentionnes OU que tu réponds à propos d'un article, produit ou service SPÉCIFIQUE du catalogue — que ce soit pour donner son prix, sa disponibilité, sa description ou pour le recommander — tu DOIS retourner son item_id dans le champ 'carousel_items'. Ce retour est OBLIGATOIRE même si : (a) le client ne demande que le prix, (b) c'est un seul produit, (c) le message du client est très court. Omettre 'carousel_items' quand un produit du catalogue est cité est une ERREUR CRITIQUE qui empêche le système de mémoriser l'article pour le checkout suivant.\n"
+            f"  → Si l'item_id est clairement identifiable dans l'index ci-dessus, utilise-le directement. Si tu as le moindre doute sur l'identifiant exact, appelle OBLIGATOIREMENT l'outil `search_products` pour trouver le bon item_id AVANT de formuler ta réponse.\n"
+            f"- ⚠️ RÈGLE MULTI-LANGUE (CRITIQUE DE SÉCURITÉ) : Le client peut nommer un produit du catalogue en arabe ('دقز'), en arabizi ('daggez', 'lo3ba daggez'), en français ('le jeu dagz') ou avec des variations orthographiques. Tu DOIS dans tous les cas identifier le produit correspondant dans le catalogue et retourner son item_id dans 'carousel_items'. Ne laisse JAMAIS 'carousel_items' vide si un produit du catalogue a été identifié dans le message du client.\n"
+            f"- Si le client envoie une photo de produit ou demande un article similaire, propose des alternatives en stock et renvoie tous leurs IDs dans `carousel_items`.\n"
+            f"- Ne propose JAMAIS de prix ou d'articles n'existant pas dans le catalogue.\n"
+            f"- ⚠️ GARDE-FOU ANTI-HALLUCINATION : Si le catalogue est vide ou si aucun article du catalogue ne correspond à la demande du client, laisse 'carousel_items' vide. Ne jamais inventer ou supposer un item_id."
         ),
         "CHECKOUT": (
             f"{dynamic_linguistic_rules}\n\n"
@@ -792,7 +794,6 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
             f"- Une fois le récapitulatif présenté, si le client confirme explicitement son accord (sois très flexible et accepte toutes les variantes courantes : 'oui', 'ey', 'ok', 'okay', 'mrigl', 'c'est bon', 'd'accord', 'عديها'), passe 'order_confirmed' à True et génère un message de remerciement et de confirmation de commande/démo très chaleureux et rassurant, en accord parfait avec le domaine d'activité de la boutique (ex: confirmer qu'un expert va appeler pour la démo B2B, ou que le colis B2C est enregistré pour expédition sous 2-3 jours) et ses règles de langue.\n"
             f"- Si le client s'oppose, annule ou modifie une information, garde 'order_confirmed' à False et ajuste les informations ou réponds de manière appropriée.\n"
             f"- ⚠️ RÈGLE DE QUESTION / CLARIFICATION : Si le client pose une question ou demande des précisions (ex: sur le prix d'un produit, les conditions, la livraison) au lieu de répondre par une confirmation claire (Oui/Non), tu DOIS impérativement garder 'order_confirmed' à False (car le client n'a pas encore validé), répondre précisément à sa question dans 'response_text' (en t'appuyant sur l'historique ou le catalogue), et garder 'order_ready' à True pour lui présenter à nouveau le récapitulatif ensuite."
-
         ),
         "POST_SALES": (
             f"{dynamic_linguistic_rules}\n\n"

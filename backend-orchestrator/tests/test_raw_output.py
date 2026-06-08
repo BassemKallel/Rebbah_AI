@@ -8,7 +8,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 django.setup()
 
-from apps.gateway.pipeline import MessagePipeline
+from apps.gateway.services.pipeline import MessagePipeline
 from apps.crm.models import Conversation, Lead
 
 def test():

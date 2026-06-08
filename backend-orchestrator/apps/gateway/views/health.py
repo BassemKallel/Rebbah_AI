@@ -1,11 +1,3 @@
-"""
-health.py — Health check endpoint for system monitoring.
-
-GET /api/v1/gateway/health/
-Returns the status of Vision service, Postgres database, Redis cache,
-and Celery worker status with response times and recent Pipeline logs.
-Secured by Django Admin Session authentication (Superadmin only).
-"""
 import time
 import logging
 import os
@@ -165,4 +157,3 @@ class ServicesHealthView(APIView):
             },
             status=http_status
         )
-

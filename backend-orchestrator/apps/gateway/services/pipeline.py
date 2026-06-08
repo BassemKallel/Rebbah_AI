@@ -32,10 +32,10 @@ from apps.crm.models.analytics import ItemVector
 from apps.crm.models.billing import BillingWallet, LLMUsageLog
 from apps.crm.services.order_service import create_pending_order
 from .context_manager import ContextManager
-from .services import ai_service
-from .services.azure_storage import azure_storage_service
-from .services.agents import run_orchestrator
-from .services.entity_normalizer import normalize_context_data, normalize_entities, normalize_order_items
+from . import ai_service
+from .azure_storage import azure_storage_service
+from .agents import run_orchestrator
+from .entity_normalizer import normalize_context_data, normalize_entities, normalize_order_items
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ class MessagePipeline:
                             # Comparaison normalisée insensible aux accents et caractères spéciaux
                             norm_prod = self._normalize_match_text(prod_name)
                             norm_text = self._normalize_match_text(text)
-                            if len(norm_prod) > 3 and (norm_prod in norm_text or norm_text in norm_prod):
+                            if len(norm_prod) > 3 and len(norm_text) > 3 and (norm_prod in norm_text or norm_text in norm_prod):
                                 current_context["_last_viewed_product"] = prod_name
                                 logger.info(f"[PIPELINE] Détection automatique du produit '{prod_name}' dans le texte utilisateur.")
                                 break
@@ -214,10 +214,12 @@ class MessagePipeline:
             )
 
             # Extraction automatique du produit depuis les recommandations retournées par l'IA (carousel_items)
+            logger.debug(f"[PIPELINE DEBUG] carousel_items={llm_result.get('carousel_items')} | _last_viewed_product={current_context.get('_last_viewed_product')}")
             if llm_result.get("carousel_items") and not current_context.get("_last_viewed_product"):
                 try:
                     first_item_id = llm_result["carousel_items"][0]
                     matched_item = ItemVector.objects.filter(shop_id=shop_id, item_id=first_item_id).first()
+                    logger.debug(f"[PIPELINE DEBUG] first_item_id={first_item_id!r} | matched={matched_item}")
                     if matched_item:
                         meta = matched_item.metadata or {}
                         prod_name = meta.get("name")

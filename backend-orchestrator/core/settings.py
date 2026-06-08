@@ -31,8 +31,8 @@ INSTALLED_APPS = [
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'apps.crm.authentication.JWTCompanyAuthentication',
-        'apps.crm.authentication.StaticTokenAuthentication',
+        'apps.crm.services.authentication.JWTCompanyAuthentication',
+        'apps.crm.services.authentication.StaticTokenAuthentication',
     ],
 }
 

@@ -18,7 +18,7 @@ from typing import Optional
 
 from celery import shared_task
 
-from apps.gateway.pipeline import MessagePipeline, context_manager
+from apps.gateway.services.pipeline import MessagePipeline, context_manager
 from apps.gateway.services import messenger_service
 
 logger = logging.getLogger(__name__)
