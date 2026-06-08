@@ -54,3 +54,7 @@ backend-orchestrator/staticfiles/
 .venv/
 backend-orchestrator/.venv/
 ngrok.exe
+
+# PDF API Documentation & Generation script
+backend-orchestrator/direct_api_documentation.pdf
+backend-orchestrator/tests/generate_pdf.py
