@@ -315,10 +315,10 @@ stateDiagram-v2
     "status": "success",
     "shop_id": "xLK0QPj",
     "bot_response": {
-      "text": "مرحباً بك! متوفر لعبة مونوبولي بتكلفة 35 دينار...",
-      "intent": "SALES",
+      "text": "أهلاً بك! ✨ للأسف، ما عنديش تيشيرتات زرقاء حالياً في المتجر. 😔 احنا متخصصين في ألعاب اللوح والألعاب الحماسية اللي تخلي الجو يشتعل بين الأصحاب والعائلة! 🎲 تحب تشوف الألعاب اللي عندنا؟",
+      "intent": "ASK_PRICE",
       "state": "LLM_ACTIVE",
-      "entities": {"product": "monopoly"},
+      "entities": {},
       "context": {"_active_agent": "SALES"},
       "carousel_elements": []
     }
