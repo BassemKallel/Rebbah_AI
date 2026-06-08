@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django.setup()
 
-from apps.gateway.pipeline import MessagePipeline
+from apps.gateway.services.pipeline import MessagePipeline
 from apps.crm.models import Conversation, Lead
 from apps.gateway.services.entity_normalizer import normalize_entities, normalize_order_items, _parse_item_string
 
@@ -78,7 +78,7 @@ def run_anaphora_resolution_test():
     Lead.objects.filter(platform_id=user_id).delete()
     
     # Clear Redis hot context memory
-    from apps.gateway.pipeline import context_manager
+    from apps.gateway.services.pipeline import context_manager
     context_manager.clear_context(user_id, shop_id)
     
     pipeline = MessagePipeline()
@@ -116,7 +116,7 @@ def run_test():
     Lead.objects.filter(platform_id=user_id).delete()
     
     # Clear Redis hot context memory
-    from apps.gateway.pipeline import context_manager
+    from apps.gateway.services.pipeline import context_manager
     context_manager.clear_context(user_id, shop_id)
     
     pipeline = MessagePipeline()

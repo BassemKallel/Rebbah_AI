@@ -32,7 +32,7 @@ def run_test():
     Lead.objects.filter(platform_id=user_id).delete()
     
     # Clear hot memory from Redis for deterministic test results
-    from apps.gateway.pipeline import context_manager
+    from apps.gateway.services.pipeline import context_manager
     context_manager.clear_context(user_id, shop_id)
 
     factory = APIRequestFactory()

@@ -32,10 +32,10 @@ from apps.crm.models.analytics import ItemVector
 from apps.crm.models.billing import BillingWallet, LLMUsageLog
 from apps.crm.services.order_service import create_pending_order
 from .context_manager import ContextManager
-from .services import ai_service
-from .services.azure_storage import azure_storage_service
-from .services.agents import run_orchestrator
-from .services.entity_normalizer import normalize_context_data, normalize_entities, normalize_order_items
+from . import ai_service
+from .azure_storage import azure_storage_service
+from .agents import run_orchestrator
+from .entity_normalizer import normalize_context_data, normalize_entities, normalize_order_items
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,24 @@ class MessagePipeline:
                     current_context["_last_viewed_product"] = product_name
                     logger.info(f"[PIPELINE] Extracted _last_viewed_product='{product_name}' from carousel button click.")
 
+            # Détection automatique : si le client mentionne un produit du catalogue dans son texte brut
+            if text and not current_context.get("_last_viewed_product"):
+                try:
+                    catalog_items = list(ItemVector.objects.filter(shop_id=shop_id))
+                    for item in catalog_items:
+                        meta = item.metadata or {}
+                        prod_name = meta.get("name")
+                        if prod_name:
+                            # Comparaison normalisée insensible aux accents et caractères spéciaux
+                            norm_prod = self._normalize_match_text(prod_name)
+                            norm_text = self._normalize_match_text(text)
+                            if len(norm_prod) > 3 and len(norm_text) > 3 and (norm_prod in norm_text or norm_text in norm_prod):
+                                current_context["_last_viewed_product"] = prod_name
+                                logger.info(f"[PIPELINE] Détection automatique du produit '{prod_name}' dans le texte utilisateur.")
+                                break
+                except Exception as e:
+                    logger.warning(f"[PIPELINE] Échec de l'auto-détection du produit depuis le texte : {e}")
+
             # ── 2. Hot Memory: conversation history from Redis ───────────────
             conversation_history = context_manager.get_recent_context(user_id, n=10, shop_id=shop_id)
 
@@ -195,6 +213,22 @@ class MessagePipeline:
                 shop_id, llm_result.get("carousel_items", []), carousel_elements_to_send
             )
 
+            # Extraction automatique du produit depuis les recommandations retournées par l'IA (carousel_items)
+            logger.debug(f"[PIPELINE DEBUG] carousel_items={llm_result.get('carousel_items')} | _last_viewed_product={current_context.get('_last_viewed_product')}")
+            if llm_result.get("carousel_items") and not current_context.get("_last_viewed_product"):
+                try:
+                    first_item_id = llm_result["carousel_items"][0]
+                    matched_item = ItemVector.objects.filter(shop_id=shop_id, item_id=first_item_id).first()
+                    logger.debug(f"[PIPELINE DEBUG] first_item_id={first_item_id!r} | matched={matched_item}")
+                    if matched_item:
+                        meta = matched_item.metadata or {}
+                        prod_name = meta.get("name")
+                        if prod_name:
+                            current_context["_last_viewed_product"] = prod_name
+                            logger.info(f"[PIPELINE] Extracted _last_viewed_product='{prod_name}' from carousel_items.")
+                except Exception as e:
+                    logger.warning(f"[PIPELINE] Failed to extract product from carousel: {e}")
+
             # ── 6. Confirmation gate + Order creation ────────────────────
             is_confirmed_by_llm = bool(llm_result.get("order_confirmed", False))
             
@@ -211,7 +245,10 @@ class MessagePipeline:
                 confirm_regex.match(text.strip().lower())
             )
             
-            is_confirmation = is_confirmed_by_llm or is_confirmed_by_server
+            # Une confirmation n'est valide que si la conversation était déjà en cours de confirmation
+            is_confirmation = False
+            if state_before == "LLM_CONFIRMING":
+                is_confirmation = is_confirmed_by_llm or is_confirmed_by_server
 
             new_state, bot_text = self._process_order_confirmation(
                 lead=lead,
@@ -481,6 +518,22 @@ class MessagePipeline:
                         current_context["_last_viewed_product"] = value[0].get("product_name")
                 else:
                     current_context[key] = value
+
+        # Auto-population of basket from _last_viewed_product in checkout phase
+        if current_context.get("_active_agent") == "CHECKOUT":
+            has_basket_items = bool(current_context.get("items"))
+            has_product = bool(current_context.get("product"))
+            last_viewed = current_context.get("_last_viewed_product")
+            
+            if not has_basket_items and not has_product and last_viewed:
+                # Resolve quantity from context/extracted_entities or default to 1
+                qty = self._safe_int(current_context.get("quantity") or normalized_entities.get("quantity") or 1)
+                current_context["items"] = [{
+                    "product_name": last_viewed,
+                    "quantity": qty,
+                    "attributes": self._extract_item_attributes(current_context)
+                }]
+                logger.info(f"[PIPELINE] Automatically pre-populated basket with active product '{last_viewed}' (qty={qty}) for checkout.")
 
     def _merge_order_items(self, existing: Any, incoming: Any) -> List[Dict[str, Any]]:
         merged: List[Dict[str, Any]] = []

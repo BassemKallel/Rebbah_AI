@@ -62,7 +62,7 @@ def retry_pending_messages():
     """
     from apps.crm.models import Company
     from apps.gateway.services.agents import run_orchestrator
-    from apps.gateway.context_manager import ContextManager
+    from apps.gateway.services.context_manager import ContextManager
 
     now = timezone.now()
     pending = PendingMessage.objects.filter(next_retry_at__lte=now).select_related('conversation')
