@@ -122,6 +122,101 @@ class MessagePipeline:
                     "missing_entities": []
                 }
 
+            # ── 1.5 Guardrail: Bloquer les clics carrousel obsolètes si une commande est active ──
+            if text and "le produit :" in text:
+                is_checkout_active = (current_context.get("_active_agent") == "CHECKOUT" and bool(current_context.get("items")))
+                is_confirming = (state_before == "LLM_CONFIRMING")
+                
+                if is_confirming or is_checkout_active:
+                    logger.info(f"[PIPELINE] Carousel click ignored because checkout/confirming is active for conversation={conversation.id}")
+                    warning_text = (
+                        "3andek talbiya 9a3ed t7ader fiha tawa. Kmelha walla ab3ath 'annuler' bech t3awed men jdid stp. 🙏\n\n"
+                        "(Vous avez déjà une commande en cours de finalisation. Veuillez la terminer ou taper 'annuler' pour recommencer.)"
+                    )
+                    
+                    # 1. Enregistrer le message de l'utilisateur (sans appeler l'IA)
+                    user_message = Message.objects.create(
+                        conversation=conversation,
+                        sender="USER",
+                        text=text,
+                        conversation_state_before=state_before,
+                    )
+                    
+                    # 2. Persister l'état inchangé
+                    conversation.state = state_before
+                    conversation.context_data = current_context
+                    conversation.save()
+                    
+                    # 3. Enregistrer le message du bot et mettre à jour Redis
+                    bot_msg = self._save_bot_message_and_redis(
+                        user_id=user_id,
+                        shop_id=shop_id,
+                        conversation=conversation,
+                        bot_text=warning_text,
+                        text=text,
+                        detected_intent="ORDER_PRODUCT",
+                        active_agent="CHECKOUT"
+                    )
+                    
+                    # 4. Finaliser les logs de l'utilisateur
+                    user_message.conversation_state_after = state_before
+                    user_message.save(update_fields=["conversation_state_after"])
+                    
+                    # 5. Enregistrer le PipelineLog
+                    _duration = int((time.time() - _start_time) * 1000)
+                    _root_logger.removeHandler(_handler)
+                    _collected_logs = '\n'.join(_log_buffer)
+                    
+                    mock_llm_result = {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "error": False,
+                    }
+                    self._write_pipeline_log(
+                        shop_id=shop_id,
+                        sender_id=user_id,
+                        text=text,
+                        bot_text=warning_text,
+                        detected_intent="ORDER_PRODUCT",
+                        image_url=image_url,
+                        state_before=state_before,
+                        new_state=state_before,
+                        llm_result=mock_llm_result,
+                        duration_ms=_duration,
+                        collected_logs=_collected_logs
+                    )
+                    
+                    # 6. Si on est en phase de confirmation, on ré-attache le carrousel Oui/Non
+                    carousel_elements_to_send = None
+                    if state_before == "LLM_CONFIRMING":
+                        confirm_card = {
+                            "title": "Confirmer la commande ? 🛒",
+                            "subtitle": "Cliquez ci-dessous pour confirmer ou annuler",
+                            "buttons": [
+                                {
+                                    "type": "postback",
+                                    "title": "Oui, je confirme ! ✅",
+                                    "payload": "Oui, c'est parfait !"
+                                },
+                                {
+                                    "type": "postback",
+                                    "title": "Non, j'annule ❌",
+                                    "payload": "non annule samhni"
+                                }
+                            ]
+                        }
+                        carousel_elements_to_send = [confirm_card]
+                    
+                    return self._build_result_dict(
+                        bot_text=warning_text,
+                        detected_intent="ORDER_PRODUCT",
+                        new_state=state_before,
+                        extracted_entities={},
+                        current_context=current_context,
+                        matched_image_url=None,
+                        carousel_elements_to_send=carousel_elements_to_send
+                    )
+
             # Détection du produit depuis les clics carrousel ("Commander" ou "Plus d'infos")
             if text and "le produit :" in text:
                 parts = text.split("le produit :")
@@ -131,7 +226,7 @@ class MessagePipeline:
                     logger.info(f"[PIPELINE] Extracted _last_viewed_product='{product_name}' from carousel button click.")
 
             # Détection automatique : si le client mentionne un produit du catalogue dans son texte brut
-            if text and not current_context.get("_last_viewed_product"):
+            if text:
                 try:
                     catalog_items = list(ItemVector.objects.filter(shop_id=shop_id))
                     for item in catalog_items:
@@ -195,7 +290,7 @@ class MessagePipeline:
                 keys_to_clear = [k for k in current_context.keys() if not k.startswith('_')]
                 for k in keys_to_clear:
                     current_context.pop(k, None)
-                conversation.state = "COMPLETED"
+                conversation.state = "LLM_CANCELED"
                 conversation.completed_at = timezone.now()
             else:
                 self._accumulate_entities(current_context, llm_result.get("extracted_entities", {}))
@@ -245,10 +340,12 @@ class MessagePipeline:
                 confirm_regex.match(text.strip().lower())
             )
             
-            # Une confirmation n'est valide que si la conversation était déjà en cours de confirmation
+            # Une confirmation n'est valide que si la conversation était déjà en cours de confirmation ou prête
             is_confirmation = False
             if state_before == "LLM_CONFIRMING":
                 is_confirmation = is_confirmed_by_llm or is_confirmed_by_server
+            elif state_before == "LLM_ACTIVE" and llm_result.get("order_ready"):
+                is_confirmation = is_confirmed_by_llm
 
             new_state, bot_text = self._process_order_confirmation(
                 lead=lead,
@@ -862,9 +959,9 @@ class MessagePipeline:
 
     def _process_order_confirmation(self, lead, conversation, current_context, text, shop_id, is_confirmation, bot_text, llm_result, state_before, extracted_entities, company=None):
         if llm_result.get("checkout_abandoned"):
-            logger.info("[LLM PIPELINE] Checkout cancellation/abandonment detected. Forcing state to COMPLETED.")
+            logger.info("[LLM PIPELINE] Checkout cancellation/abandonment detected. Forcing state to LLM_CANCELED.")
             conversation.completed_at = timezone.now()
-            return "COMPLETED", bot_text
+            return "LLM_CANCELED", bot_text
 
         new_state = "LLM_ACTIVE"
 
@@ -921,14 +1018,8 @@ class MessagePipeline:
                 new_state = "LLM_CONFIRMING"
         else:
             if llm_result.get("order_ready"):
-                if state_before == "LLM_CONFIRMING":
-                    # If we are already in LLM_CONFIRMING and the user has not confirmed (or sent a correction),
-                    # transition back to LLM_ACTIVE to allow them to correct/change details.
-                    new_state = "LLM_ACTIVE"
-                    logger.info(f"[LLM PIPELINE] Non-confirmation/Correction received in confirming phase. Reverting state to LLM_ACTIVE.")
-                else:
-                    new_state = "LLM_CONFIRMING"
-                    logger.info("[LLM PIPELINE] All entities collected — entering LLM_CONFIRMING phase")
+                new_state = "LLM_CONFIRMING"
+                logger.info("[LLM PIPELINE] All entities collected or updated — entering/remaining in LLM_CONFIRMING phase")
             else:
                 new_state = "LLM_ACTIVE"
 

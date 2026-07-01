@@ -48,7 +48,7 @@ backend-orchestrator/staticfiles/
 *.md
 !CONTRIBUTING.md
 !README.md
-
+context.md
 
 # Local Python venvs
 .venv/

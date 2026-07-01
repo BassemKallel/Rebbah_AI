@@ -750,3 +750,69 @@ L'application a été l'objet de vagues de livraisons majeures en Mai 2026 pour 
 * **Fichiers touchés** : `apps/gateway/pipeline.py`
 * **Tests validés** : `test_run.py` ✅ | `test_raw_output.py` ✅ | `test_debounce.py` ✅
 
+
+### N. Écrasement Dynamique & Mise à Jour du Produit Visualisé (IMPLÉMENTÉ)
+
+* **Problème documenté** : Si l'utilisateur visualisait un premier produit par carrousel (ou recommandation) puis changeait d'avis et en mentionnait un autre par texte libre, `_last_viewed_product` restait bloqué sur le premier produit.
+* **Cause racine** : Le bloc d'auto-détection textuelle dans `pipeline.py` (L.134) contenait une condition restrictive `if text and not current_context.get("_last_viewed_product")`. Une fois `_last_viewed_product` initialisé (même comme valeur de repli), cette vérification n'était plus jamais exécutée.
+* **Solution implémentée** : Suppression de la clause restrictive. La détection s'effectue dès que `text` est fourni. Si un nom de produit du catalogue est détecté dans le message de l'utilisateur, `_last_viewed_product` est mis à jour dynamiquement avec le nouveau produit.
+* **Fichiers touchés** : `apps/gateway/services/pipeline.py`, `tests/test_run.py`
+* **Tests validés** : `test_run.py` ✅ (dont le nouveau cas `run_change_mind_test()`) | `test_debounce.py` ✅
+
+
+### O. Verrouillage Anti-Perturbation des Clics Carrousel Obsolètes (IMPLÉMENTÉ)
+
+* **Problème documenté** : Si l'utilisateur cliquait sur un bouton d'un ancien carrousel (ex: "Commander le produit : X") alors qu'il était déjà en cours de checkout ou de confirmation sur un autre produit, le produit ciblé ou le panier était écrasé de manière accidentelle ou malicieuse.
+* **Solution implémentée** : Ajout d'un guardrail au début du pipeline. Si `conversation.state == "LLM_CONFIRMING"` ou si le checkout est actif (`_active_agent == "CHECKOUT"` et panier `items` non vide) et qu'un message du type clic carrousel est reçu, le pipeline :
+  1. Ignore le clic de carrousel (ne modifie pas le produit ou le panier).
+  2. Envoie un message d'avertissement bilingue poli (Derja + Français).
+  3. Ré-attache le carrousel Oui/Non si la conversation était en phase `LLM_CONFIRMING` pour guider le client.
+  4. Enregistre les messages en DB et dans `PipelineLog` sous forme de bypass (pas d'appel LLM).
+* **Fichiers touchés** : `apps/gateway/services/pipeline.py`, `tests/test_run.py`
+* **Tests validés** : `test_run.py` ✅ (dont le nouveau cas `run_locked_carousel_test()`) | `test_debounce.py` ✅
+
+
+### P. Correction de la Fausse Complétion sur Simple Question pendant le Checkout (IMPLÉMENTÉ)
+
+* **Problème documenté** : Lorsqu'un utilisateur posait une simple question de prix (ex : `"kadesh yetlaa3 l soum ?"`) ou de FAQ pendant un checkout actif, la conversation basculait à l'état `COMPLETED` et le panier d'achat était entièrement vidé.
+* **Cause racine** : Le signal `should_release_lock = True` renvoyé par `_detect_checkout_abandon_with_llm` pour libérer temporairement le verrou (et permettre au routeur de diriger vers SALES/FAQ) était incorrectement interprété dans `run_orchestrator` comme un abandon/annulation de commande complet.
+* **Solution implémentée** : Séparation de la décision en deux variables distinctes dans `CheckoutLockDecision` :
+  1. `should_release_lock` : Signale si le verrou doit être relâché pour laisser passer la question.
+  2. `is_abandonment` : Signale si l'utilisateur souhaite explicitement annuler/abandonner sa commande en cours.
+  Le panier n'est vidé et l'état n'est mis à `COMPLETED` que si `is_abandonment` est évalué à `True`. En plus, l'appel a été optimisé pour n'être exécuté qu'une seule fois au début de l'orchestrateur.
+* **Fichiers touchés** : `apps/gateway/services/agents.py`, `tests/test_run.py`
+* **Tests validés** : `test_run.py` ✅ (dont le nouveau cas `run_checkout_question_test()`) | `test_debounce.py` ✅
+
+
+### Q. Amélioration du Routage CHECKOUT et Sécurité des Identifiants Produits (IMPLÉMENTÉ)
+
+* **Problème documenté** : 
+  1. Lorsqu'un utilisateur exprimait l'intention de commander (ex: `"atini lo3bet ken thebni"`) sans quantité explicite, le routeur le maintenait sur `SALES` au lieu d'engager le `CHECKOUT`.
+  2. Le bot incluait parfois des identifiants techniques de produits (ex: `prod_...` ou `ID: X`) dans ses messages textuels, ce qui polluait la conversation.
+* **Solution implémentée (100% LLM)** : 
+  1. Enrichissement du prompt système du routeur `determine_target_agent_with_llm` en fournissant des exemples d'achat précis en Derja et en arabe (ex: `"atini lo3bet X"`, `"a3tini ka3ba"`, `"اعطيني لعبة ..."`, `"نحب كعبة ..."`) et en ajoutant une règle de routage forçant la transition vers `CHECKOUT` pour toute demande d'obtention de produit spécifique.
+  2. Ajout d'une consigne de sécurité absolue dans `dynamic_linguistic_rules` interdisant formellement au LLM d'inclure des identifiants techniques de produits dans le texte de ses réponses.
+* **Fichiers touchés** : `apps/gateway/services/agents.py`, `tests/test_run.py`
+* **Tests validés** : `test_run.py` ✅ (dont le nouveau cas `run_routing_and_id_safety_tests()`) | `test_debounce.py` ✅
+
+
+### R. Correction du Bug de Double Confirmation lors du Checkout (IMPLÉMENTÉ)
+
+* **Problème documenté** : Lorsque l'utilisateur soumettait une correction de données (ex: téléphone erroné) pendant la phase de confirmation, le bot renvoyait l'adresse/synthèse mise à jour mais restait bloqué à l'état `LLM_ACTIVE`. Le message de confirmation suivant (ex: `"oui confirme"`) ne créait pas la commande et ré-affichait les boutons de confirmation de manière redondante.
+* **Solution implémentée (100% LLM)** : 
+  1. Si une correction est reçue mais que l'état de la commande reste complet (`order_ready = True`), l'état de la conversation reste désormais en `LLM_CONFIRMING` (au lieu de repasser à `LLM_ACTIVE`), permettant au client de valider le message suivant directement.
+  2. Si l'état de la conversation est repassé à `LLM_ACTIVE` mais que la commande est complète (`order_ready = True`) et que le LLM confirme l'intention (`is_confirmed_by_llm = True`), la validation directe de la commande est autorisée.
+* **Fichiers touchés** : `apps/gateway/services/pipeline.py`, `tests/test_run.py`
+* **Tests validés** : `test_run.py` ✅ (dont le nouveau cas `run_checkout_correction_and_confirm_test()`) | `test_debounce.py` ✅
+
+
+### S. Nouvel État `LLM_CANCELED` pour l'Annulation du Checkout par le Client (IMPLÉMENTÉ)
+
+* **Problème documenté** : Lorsqu'un utilisateur abandonnait ou annulait explicitement sa commande en cours de checkout, la conversation passait à l'état `COMPLETED` (le même état qu'une commande validée avec succès), ce qui nuisait à la clarté et à la traçabilité des indicateurs du CRM.
+* **Solution implémentée** : 
+  1. Introduction d'un nouvel état final `"LLM_CANCELED"`. Lors d'une annulation explicite, le panier est vidé et l'état de la conversation devient `"LLM_CANCELED"`.
+  2. Intégration de l'état `"LLM_CANCELED"` dans le tableau de bord du CRM (`dashboard.py`) sous la forme d'un événement de type `"CANCELED"` stylisé avec un badge rose (`bg-rose-50 text-rose-600`).
+* **Fichiers touchés** : `apps/gateway/services/pipeline.py`, `apps/gateway/services/agents.py`, `apps/crm/views/dashboard.py`, `tests/test_run.py`
+* **Tests validés** : `test_run.py` ✅ (dont le nouveau cas `run_checkout_cancellation_test()`) | `test_debounce.py` ✅
+
+

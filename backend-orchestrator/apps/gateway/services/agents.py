@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import requests
 from pydantic import BaseModel, Field
 
@@ -84,10 +84,16 @@ class AgentRoutingDecision(BaseModel):
 class CheckoutLockDecision(BaseModel):
     should_release_lock: bool = Field(
         description=(
-            "True si le client abandonne, annule ou reoriente explicitement la "
-            "conversation hors du processus d'achat en cours. False si le message "
-            "continue le checkout, corrige une information, confirme, refuse le "
-            "recapitulatif sans abandonner, ou donne une information de commande."
+            "True si le client pose une question (prix, stock, livraison, etc.) ou s'il "
+            "souhaite abandonner/annuler la commande en cours. False si le message "
+            "continue le checkout, corrige une information, confirme ou donne des coordonnées."
+        )
+    )
+    is_abandonment: bool = Field(
+        description=(
+            "True uniquement si le client exprime explicitement l'intention d'abandonner, "
+            "d'annuler, de stopper ou de vider son panier. False s'il pose simplement une question "
+            "sur le prix, la livraison, le stock, etc., ou s'il continue la commande."
         )
     )
     reasoning: str = Field(
@@ -155,7 +161,7 @@ Ton rôle est de catégoriser le dernier message du client et l'historique dans 
 
 3. CHECKOUT :
    - Rôle : Gère le processus d'achat, de commande et la saisie des informations de livraison (nom, adresse, téléphone, validation de commande).
-   - Exemples de phrases (Derja / Français) : "nheb nechri", "nheb ncommondi", "commander", "checkout", "panier", "mon numéro est 98...", "j'habite à Tunis", "oui c'est parfait" (validation de commande).
+   - Exemples de phrases (Derja / Français) : "nheb nechri", "nheb ncommondi", "atini lo3bet X", "a3tini ka3ba", "اعطيني لعبة", "نحب كعبة", "commander", "checkout", "panier", "mon numéro est 98...", "j'habite à Tunis", "oui c'est parfait" (validation de commande).
 
 4. POST_SALES :
    - Rôle : Service Après-Vente (SAV), suivi de colis, statut d'une commande déjà passée, retours, échanges, réclamations.
@@ -165,6 +171,7 @@ RÈGLES CRITIQUES DE ROUTAGE :
 - Le dialecte tunisien (Derja) est couramment utilisé. Analyse attentivement les mots en arabizi (ex: aandkom, nechri, lo3ab, win, ba3tha) et en arabe (عندكم، نحب، ألعاب، وين).
 - Si le client dit simplement "bonjour", "aslema", "salut" ou s'il s'agit d'une salutation d'ouverture, dirige-le vers FAQ ou garde l'agent actuel si une transaction est déjà engagée.
 - Si le dernier message du client contient des informations de contact ou de commande (comme un nom propre, un numéro de téléphone à 8 chiffres, une adresse, un nom de boutique, ou un volume de commandes), ou s'il s'agit d'une réponse à une collecte d'informations, dirige-le STRICTEMENT vers CHECKOUT.
+- Si le dernier message du client exprime directement l'intention d'obtenir, commander ou acheter un produit spécifique (ex: "atini lo3bet X", "a3tini ka3ba", "اعطيني لعبة..."), même sans mentionner explicitement de quantité, dirige-le STRICTEMENT vers CHECKOUT.
 - Si l'AGENT ACTUEL est CHECKOUT et que le message semble etre une reponse a une question en cours de collecte (nom de produit, taille, couleur, quantite, adresse, telephone, confirmation, correction ou toute autre information de livraison), maintiens STRICTEMENT l'agent CHECKOUT. Un mot isole ou une phrase courte qui ne contient PAS de signal explicite d'abandon ne doit JAMAIS declencher un changement d'agent depuis CHECKOUT.
 """
 
@@ -588,25 +595,25 @@ def _init_orchestrator_result() -> Dict[str, Any]:
     }
 
 
-def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> bool:
+def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> Tuple[bool, bool]:
     """
-    Detect whether an active checkout lock should be released.
+    Detect whether an active checkout lock should be released and/or if the checkout is abandoned.
 
-    Returns True only for explicit abandonment, cancellation, or clear
-    reorientation away from the current order. On failure, keeps the lock active.
+    Returns (should_release_lock, is_abandonment). On failure, keeps the lock active (False, False).
     """
     try:
         client = Client(api_key=api_key)
         system_instruction = (
             "Tu es un classificateur binaire pour libérer ou non le verrou de checkout. "
             "Un client est actuellement dans un processus de checkout actif. "
-            "Tu dois répondre True (libérer le verrou) dans le schéma JSON si le dernier message du client : "
-            "1. Pose une question de n'importe quel genre (ex: demande le prix d'un produit comme 'b9adech', 'kadesh', 'prix', demande la disponibilité du stock, s'enquiert des conditions de livraison, ou pose une question générale de FAQ ou SAV). "
-            "2. Exprime clairement l'intention d'abandonner, annuler, stopper ou sortir de la commande en cours. "
-            "Tu dois répondre False (conserver le verrou de checkout) si le message est une continuation normale du checkout : "
-            "- Fournit directement une information demandée (nom propre, numéro de téléphone, adresse, quantité de produit). "
-            "- Confirme le récapitulatif ('oui', 'ey') ou en refuse poliment les détails sans poser de question. "
-            "IMPORTANT: Réponds strictement au format JSON décrit par le schéma."
+            "Tu dois remplir le schéma JSON en évaluant deux variables :\n"
+            "1. 'should_release_lock': True si le dernier message du client pose une question (prix, stock, livraison, etc.) "
+            "OU s'il souhaite annuler/abandonner la commande en cours. False s'il continue simplement le checkout.\n"
+            "2. 'is_abandonment': True uniquement si le client exprime explicitement l'intention d'abandonner, d'annuler, "
+            "de stopper ou de vider son panier. Sois extrêmement attentif aux expressions d'annulation en dialecte tunisien (Derja), "
+            "arabizi ou français comme : 'annule', 'annuler', 'annuli', 'batal', 'batalet', 'non annule', 'samhni ncommondich', "
+            "'nahhi', 'sayeb 3lya', 'faddit', 'je veux annuler', 'non c'est bon', 'la la batalet'. "
+            "False s'il pose simplement une question (ex: 'combien ça coute ?', 'kadesh l soum', 'fama stock ?') sans annuler."
         )
         response = client.models.generate_content(
             model="gemini-2.5-flash",
@@ -620,23 +627,23 @@ def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> bool:
         )
         decision_data = json.loads(response.text or "{}")
         should_release = bool(decision_data.get("should_release_lock", False))
+        is_abandonment = bool(decision_data.get("is_abandonment", False))
         reasoning = decision_data.get("reasoning", "")
         logger.info(
-            f"[CHECKOUT LOCK LLM] should_release={should_release} | Reason: {reasoning}"
+            f"[CHECKOUT LOCK LLM] should_release={should_release} | is_abandonment={is_abandonment} | Reason: {reasoning}"
         )
-        return should_release
+        return should_release, is_abandonment
     except Exception as e:
         logger.warning(
             f"[CHECKOUT LOCK LLM] Detection failed ({e}). Keeping checkout lock active."
         )
-        return False
+        return False, False
 
 
 def _should_lock_to_checkout(
     current_agent: str,
     conversation_state: str,
-    user_message: str,
-    api_key: str,
+    should_release_lock: bool,
 ) -> bool:
     """
     Return True when the router must skip the main LLM and keep CHECKOUT active.
@@ -648,7 +655,7 @@ def _should_lock_to_checkout(
     if conversation_state not in locked_states:
         return False
 
-    if _detect_checkout_abandon_with_llm(user_message, api_key):
+    if should_release_lock:
         logger.info("[CHECKOUT LOCK] Lock released by LLM detection. Routing normally.")
         return False
 
@@ -666,10 +673,11 @@ def _resolve_target_agent(
     conversation_state: str,
     api_key: str,
     company: Any,
+    should_release_lock: bool,
 ) -> str:
     if image_url:
         return "SALES"
-    if _should_lock_to_checkout(current_agent, conversation_state, user_message, api_key):
+    if _should_lock_to_checkout(current_agent, conversation_state, should_release_lock):
         return "CHECKOUT"
     return determine_target_agent_with_llm(
         user_message=user_message,
@@ -726,7 +734,8 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
         f"   - Si le client utilise le dialecte tunisien (Derja ou arabizi) et qu'aucune consigne prioritaire ci-dessus ne l'interdit, tu peux lui répondre en Derja tunisienne chaleureuse.\n"
         f"   - Ne mélange JAMAIS les langues dans une même phrase (pas de mélange de langues).\n\n"
         f"3. Ton général à adopter : {communication_tone}.\n"
-        f"4. Ne rien inventer qui ne figure pas dans le contexte ou le catalogue fourni."
+        f"4. Ne rien inventer qui ne figure pas dans le contexte ou le catalogue fourni.\n"
+        f"5. ⚠️ RÈGLE DE SÉCURITÉ DES IDENTIFIANTS : Ne mentionne JAMAIS l'identifiant technique (ex: 'prod_1778769497868' ou 'ID: 3') d'un produit dans le texte de ta réponse envoyée au client. Les identifiants (item_id) sont réservés uniquement aux structures de données de sortie (comme 'carousel_items') ou aux appels d'outils."
     )
     
     agent_identity_prefix = f"Tu t'appelles '{ai_agent_name}' et tu es l'assistant de la boutique '{shop_name}' (Domaine : {business_domain}, Cible : {target_audience}).\n"
@@ -996,21 +1005,55 @@ def run_orchestrator(
     context_data = conversation.context_data or {}
     current_agent = context_data.get("_active_agent", "FAQ")
     
+    # Pre-detect checkout lock release/abandonment if in checkout
+    should_release_lock = False
+    is_abandonment = False
+    if current_agent == "CHECKOUT" and conversation.state in {"LLM_ACTIVE", "LLM_CONFIRMING"}:
+        should_release_lock, is_abandonment = _detect_checkout_abandon_with_llm(user_message, api_key)
+
     # Check if the user is in an active checkout and explicitly cancels or abandons
     checkout_abandoned = False
-    if current_agent == "CHECKOUT" and conversation.state in {"LLM_ACTIVE", "LLM_CONFIRMING"}:
-        if _detect_checkout_abandon_with_llm(user_message, api_key):
-            logger.info("[CHECKOUT CANCEL] Checkout abandonment detected. Clearing context data and completing conversation.")
-            checkout_abandoned = True
-            # Clear all non-system checkout entities from context_data
-            keys_to_clear = [k for k in context_data.keys() if not k.startswith('_')]
-            for k in keys_to_clear:
-                context_data.pop(k, None)
-            conversation.context_data = context_data
-            conversation.state = "COMPLETED"
-            conversation.completed_at = timezone.now()
-            conversation.save()
-            current_agent = "FAQ" # Release lock and force route normally
+    if is_abandonment:
+        logger.info("[CHECKOUT CANCEL] Checkout abandonment detected. Clearing context data and completing conversation.")
+        checkout_abandoned = True
+        # Clear all non-system checkout entities from context_data
+        keys_to_clear = [k for k in context_data.keys() if not k.startswith('_')]
+        for k in keys_to_clear:
+            context_data.pop(k, None)
+        conversation.context_data = context_data
+        conversation.state = "LLM_CANCELED"
+        conversation.completed_at = timezone.now()
+        conversation.save()
+
+        # Clear Redis context memory so the history is cleaned
+        from apps.gateway.services.pipeline import context_manager
+        context_manager.clear_context(conversation.sender_id, shop_id)
+
+        # Determine cancellation message based on language config
+        is_arabic = bool(re.search(r'[\u0600-\u06FF]', user_message))
+        is_standard_arabic = False
+        bot_config = getattr(company, "bot_config", None)
+        if bot_config:
+            lang_rules = getattr(bot_config, "language_rules", "").lower()
+            if "arabe" in lang_rules or "fusha" in lang_rules:
+                is_arabic = True
+            is_standard_arabic = any(keyword in lang_rules for keyword in [
+                "arabe pur", "arabe standard", "fusha", "classique", "littéraire", 
+                "pas de tunisien", "sans tunisien", "pas de dialecte", "sans dialecte"
+            ])
+
+        if is_arabic:
+            if is_standard_arabic:
+                bot_text = "تم إلغاء طلبكم بنجاح وإفراغ سلة المشتريات. إذا كنتم ترغبون في تقديم طلب جديد، نحن في خدمتكم."
+            else:
+                bot_text = "حسناً، تم إلغاء طلبكم بنجاح وتفريغ سلة المشتريات. إذا كنتم ترغبون في بدء طلب جديد أو لديكم أي استفسار آخر، فنحن في خدمتكم."
+        else:
+            bot_text = "Votre commande a été annulée avec succès et votre panier a été vidé. N'hésitez pas si vous avez d'autres questions !"
+
+        result["response_text"] = bot_text
+        result["checkout_abandoned"] = True
+        result["detected_intent"] = "CANCEL_ORDER"
+        return result
 
     collected = {k: v for k, v in context_data.items() if not k.startswith('_') and v}
 
@@ -1023,6 +1066,7 @@ def run_orchestrator(
         conversation.state,
         api_key,
         company,
+        should_release_lock
     )
 
     # Update active agent context
