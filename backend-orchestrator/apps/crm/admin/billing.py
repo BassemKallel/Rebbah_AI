@@ -3,10 +3,10 @@ from ..models import BillingWallet, LLMUsageLog
 
 @admin.register(BillingWallet)
 class BillingWalletAdmin(admin.ModelAdmin):
-    list_display = ('company', 'current_month_usage', 'monthly_limit', 'is_limit_exceeded', 'last_updated')
+    list_display = ('company', 'current_month_usage', 'monthly_limit', 'total_messages_count', 'average_cost_per_message', 'is_limit_exceeded', 'last_updated')
     list_filter = ('last_updated',)
     search_fields = ('company__name',)
-    readonly_fields = ('current_month_usage', 'last_updated')
+    readonly_fields = ('current_month_usage', 'total_messages_count', 'average_cost_per_message', 'last_updated')
 
 @admin.register(LLMUsageLog)
 class LLMUsageLogAdmin(admin.ModelAdmin):

@@ -14,6 +14,10 @@ class BillingWallet(models.Model):
     last_reset_date = models.DateTimeField(default=timezone.now)
     last_updated = models.DateTimeField(auto_now=True)
 
+    # Statistics
+    total_messages_count = models.IntegerField(default=0, help_text="Nombre total de messages traités")
+    average_cost_per_message = models.DecimalField(max_digits=10, decimal_places=6, default=0.000000, help_text="Coût moyen par message en $")
+
     def __str__(self):
         return f"Wallet - {self.company.name}: ${self.current_month_usage} / ${self.monthly_limit}"
 
