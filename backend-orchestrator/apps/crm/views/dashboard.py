@@ -293,6 +293,7 @@ def dashboard_pending_orders(request):
 
 _EVENT_TYPE_MAP = {
     "COMPLETED":     ("ORDER",    "bg-emerald-50 text-emerald-600", "bg-green-50 text-green-700"),
+    "LLM_CANCELED":  ("CANCELED", "bg-rose-50 text-rose-500",       "bg-rose-50 text-rose-600"),
     "WAITING_USER_REPLY": ("WAITING", "bg-yellow-50 text-yellow-600", "bg-yellow-50 text-yellow-700"),
     "FALLBACK":      ("FALLBACK", "bg-red-50 text-red-500",        "bg-red-50 text-red-600"),
     "default":       ("INFO",     "bg-blue-50 text-blue-500",       "bg-blue-50 text-blue-700"),
