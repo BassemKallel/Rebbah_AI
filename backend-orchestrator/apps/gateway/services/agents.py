@@ -595,7 +595,9 @@ def _init_orchestrator_result() -> Dict[str, Any]:
     }
 
 
-def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> Tuple[bool, bool]:
+def _detect_checkout_abandon_with_llm(
+    user_message: str, history: List[Dict[str, Any]], api_key: str
+) -> Tuple[bool, bool]:
     """
     Detect whether an active checkout lock should be released and/or if the checkout is abandoned.
 
@@ -603,10 +605,24 @@ def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> Tuple[
     """
     try:
         client = Client(api_key=api_key)
+        
+        # Format recent history for classification context
+        history_lines = []
+        for msg in history[-5:]:
+            role = "Client" if msg.get("role") == "user" else "Assistant"
+            history_lines.append(f"{role}: {msg.get('text', '')}")
+        history_context = "\n".join(history_lines)
+
+        contents = f"""HISTORIQUE RÉCENT DE LA CONVERSATION :
+{history_context}
+
+DERNIER MESSAGE DU CLIENT À ÉVALUER :
+Client: {user_message}"""
+
         system_instruction = (
             "Tu es un classificateur binaire pour libérer ou non le verrou de checkout. "
             "Un client est actuellement dans un processus de checkout actif. "
-            "Tu dois remplir le schéma JSON en évaluant deux variables :\n"
+            "Tu devez remplir le schéma JSON en évaluant deux variables :\n"
             "1. 'should_release_lock': True si le dernier message du client pose une question (prix, stock, livraison, etc.) "
             "OU s'il souhaite annuler/abandonner la commande en cours. False s'il continue simplement le checkout.\n"
             "2. 'is_abandonment': True uniquement si le client exprime explicitement l'intention d'abandonner, d'annuler, "
@@ -617,7 +633,7 @@ def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> Tuple[
         )
         response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=f"Message du client : {user_message}",
+            contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
@@ -1009,7 +1025,7 @@ def run_orchestrator(
     should_release_lock = False
     is_abandonment = False
     if current_agent == "CHECKOUT" and conversation.state in {"LLM_ACTIVE", "LLM_CONFIRMING"}:
-        should_release_lock, is_abandonment = _detect_checkout_abandon_with_llm(user_message, api_key)
+        should_release_lock, is_abandonment = _detect_checkout_abandon_with_llm(user_message, history, api_key)
 
     # Check if the user is in an active checkout and explicitly cancels or abandons
     checkout_abandoned = False
