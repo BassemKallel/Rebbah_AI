@@ -361,6 +361,10 @@ def run_checkout_correction_and_confirm_test():
     print(f"Phone in DB: {phone}")
     assert phone == "50152515", f"Expected phone to be corrected to 50152515, but got {phone}"
     
+    # - La réponse doit inclure le calcul des prix (prix du jeu 59 + livraison 7 = 66 TND)
+    assert "66" in res1['text'], f"Expected total price '66' in confirmation text, but got: '{res1['text']}'"
+    assert "7" in res1['text'], f"Expected delivery fee '7' in confirmation text, but got: '{res1['text']}'"
+
     # - L'état de la conversation doit RESTER LLM_CONFIRMING puisque toutes les infos sont complètes et prêtes
     print(f"Conversation state in DB after correction: {conv.state}")
     assert conv.state == "LLM_CONFIRMING", f"Expected state to remain LLM_CONFIRMING, but got {conv.state}"
