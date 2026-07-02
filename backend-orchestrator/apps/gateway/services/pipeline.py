@@ -1059,7 +1059,17 @@ class MessagePipeline:
         
         wallet, _ = BillingWallet.objects.get_or_create(company=company)
         wallet.current_month_usage += total_cost
-        wallet.save(update_fields=['current_month_usage', 'last_updated'])
+        
+        wallet.total_messages_count += 1
+        old_count = wallet.total_messages_count - 1
+        if old_count == 0:
+            wallet.average_cost_per_message = total_cost
+        else:
+            wallet.average_cost_per_message = (
+                (wallet.average_cost_per_message * old_count) + total_cost
+            ) / wallet.total_messages_count
+
+        wallet.save(update_fields=['current_month_usage', 'total_messages_count', 'average_cost_per_message', 'last_updated'])
 
     def _write_pipeline_log(self, shop_id, sender_id, text, bot_text, detected_intent, image_url, state_before, new_state, llm_result, duration_ms, collected_logs):
         try:
