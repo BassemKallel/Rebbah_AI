@@ -4,8 +4,6 @@
 
 Rebbah AI est une plateforme conversationnelle multi-agents dédiée à l'e-commerce. Elle accueille les clients d'une boutique sur Messenger et Instagram, répond à leurs questions, recommande des produits, enregistre leurs commandes et assure le suivi après-vente, en dialecte tunisien (Derja) comme en français.
 
-Le projet a été réalisé dans le cadre d'un Projet de Fin d'Études (PFE).
-
 ---
 
 ## Sommaire
@@ -22,7 +20,7 @@ Le projet a été réalisé dans le cadre d'un Projet de Fin d'Études (PFE).
 10. [API](#api)
 11. [Tests](#tests)
 12. [Contribution](#contribution)
-13. [Propriété et auteurs](#propriété-et-auteurs)
+13. [Propriété et auteur](#propriété-et-auteur)
 
 ---
 
@@ -243,7 +241,7 @@ Meta exige une URL HTTPS publique pour le webhook.
 
 **En production**, l'URL de rappel est `https://<DOMAINE_PUBLIC>/api/v1/gateway/meta/webhook`.
 
-Meta n'autorisant qu'une seule URL de webhook active par page de test, les membres de l'équipe doivent se coordonner : chacun met à jour l'URL de rappel avec son propre tunnel lorsqu'il teste en local.
+Meta n'autorisant qu'une seule URL de webhook active par page de test, mettez à jour l'URL de rappel avec votre propre tunnel lorsque vous testez en local.
 
 ---
 
@@ -300,11 +298,10 @@ Les règles de développement sont détaillées dans [CONTRIBUTING.md](CONTRIBUT
 
 ---
 
-## Propriété et auteurs
+## Propriété et auteur
 
-Ce projet est la propriété de l'équipe Rebbah AI, dans le cadre de son Projet de Fin d'Études (PFE).
+Ce projet est la propriété de l'équipe Rebbah AI.
 
-**Auteurs :**
+**Auteur :**
 
 - Bassem Kallel
-- Aziz Belgaied
