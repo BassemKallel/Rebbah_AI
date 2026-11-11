@@ -218,7 +218,7 @@ Toute la configuration passe par le fichier `.env` à la racine, dont le modèle
 | `DJANGO_SECRET_KEY` | Clé secrète Django. |
 | `DJANGO_DEBUG` | `True` en développement uniquement. |
 | `ALLOWED_HOSTS` | Hôtes autorisés, séparés par des virgules. |
-| `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | Origines supplémentaires (domaine public du dashboard), séparées par des virgules. |
+| `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | Origines supplémentaires, séparées par des virgules. Le domaine de production est déjà inclus par défaut. |
 | `FIELD_ENCRYPTION_KEY` | Clé de chiffrement des secrets des boutiques stockés en base (jetons de pages Meta, clés API). |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Accès à Gemini et modèle par défaut. |
 | `VISION_SERVICE_URL`, `VISION_SEARCH_PATH`, `SIMILARITY_THRESHOLD` | Service de vision et seuil de similarité visuelle (0,75 par défaut). |
@@ -256,8 +256,9 @@ Les routes principales, toutes préfixées par `/api/v1/` :
 | `GET/POST gateway/meta/webhook` | Webhook officiel Meta (vérification et réception des messages). | Signature Meta |
 | `POST gateway/messenger/poc` | Point d'entrée de test simplifié. | En-tête `X-Shop-Token` |
 | `POST gateway/message/process/` | Traitement synchrone d'un message par un serveur tiers. La réponse du bot est renvoyée dans le corps HTTP. | En-tête `X-Shop-Token` |
-| `POST gateway/catalog/upload` | Ajout d'un produit : image vers Azure, vectorisation CLIP. | Non restreinte (`shop_id` requis) |
-| `POST gateway/catalog/import-csv` | Import de catalogue par fichier CSV. | Non restreinte (`shop_id` requis) |
+| `POST gateway/catalog/upload` | Ajout d'un produit : image vers Azure, vectorisation CLIP. | JWT ou jeton de boutique, limité à sa propre boutique |
+| `PATCH gateway/catalog/update-metadata` | Mise à jour des métadonnées d'un produit (nom, prix, description, stock). | JWT ou jeton de boutique, limité à sa propre boutique |
+| `POST gateway/catalog/import-csv` | Import de catalogue par fichier CSV. | JWT ou jeton de boutique, limité à sa propre boutique |
 | `POST crm/conversations/<id>/takeover/` | Prise de contrôle humaine : le bot est désactivé pour la conversation. | JWT ou jeton de boutique |
 | `POST crm/conversations/<id>/release/` | Réactivation du bot. | JWT ou jeton de boutique |
 | `POST crm/conversations/<id>/agent-reply/` | Envoi d'un message par l'opérateur. | JWT ou jeton de boutique |
@@ -271,18 +272,20 @@ Sur les routes de messages, un debouncer de 5 secondes regroupe les messages rap
 
 ## Tests
 
-Trois scripts d'intégration s'exécutent dans le conteneur backend. Ils s'appuient sur une boutique configurée (boutique, configuration du bot, catalogue vectorisé et clé Gemini) et appellent le modèle réel.
+Les scripts d'intégration s'exécutent dans le conteneur backend. Les trois premiers s'appuient sur une boutique configurée (configuration du bot, catalogue vectorisé et clé Gemini) et appellent le modèle réel ; `test_catalog_auth.py` est autonome.
 
 | Script | Objet |
 | --- | --- |
 | `tests/test_run.py` | Parcours conversationnel complet : routage, vente, collecte de commande, confirmation, plus les tests unitaires du normaliseur d'entités. |
 | `tests/test_debounce.py` | Deux requêtes concurrentes à une seconde d'intervalle : la première est ignorée, la seconde fusionne les textes et s'exécute. |
 | `tests/test_raw_output.py` | Structure JSON brute renvoyée par le pipeline. |
+| `tests/test_catalog_auth.py` | Contrôle d'accès des routes catalogue : 401 sans jeton valide, 403 sur la boutique d'un autre. Autonome : crée puis supprime deux boutiques temporaires. |
 
 ```bash
 docker exec rebbah-ai-backend python tests/test_run.py
 docker exec rebbah-ai-backend python tests/test_debounce.py
 docker exec rebbah-ai-backend python tests/test_raw_output.py
+docker exec rebbah-ai-backend python tests/test_catalog_auth.py
 ```
 
 ---

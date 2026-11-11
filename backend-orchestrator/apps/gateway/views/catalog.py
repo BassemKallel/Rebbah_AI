@@ -1,12 +1,15 @@
+import csv
+import io
 import json
 import logging
 import requests
+import uuid
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny
 
+from apps.crm.permissions import IsAuthenticatedShop
 from apps.gateway.services.azure_storage import azure_storage_service
 from apps.crm.models.analytics import ItemVector
 
@@ -18,7 +21,7 @@ class CatalogUploadView(APIView):
     Endpoint pour le Dashboard Frontend.
     Reçoit une image locale, l'upload sur Azure, puis l'envoie au Vision Service pour vectorisation.
     """
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedShop]
 
     def post(self, request):
         shop_id = request.data.get("shop_id")
@@ -87,7 +90,7 @@ class CatalogUpdateMetadataView(APIView):
     Met à jour uniquement les métadonnées d'un produit existant
     (nom, prix, description, in_stock) sans re-vectoriser l'image.
     """
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedShop]
 
     def patch(self, request):
         shop_id     = request.data.get("shop_id")
@@ -132,13 +135,9 @@ class CatalogImportCsvView(APIView):
     Importe un catalogue via un fichier CSV.
     Les produits sont créés sans image ni vecteur (Vector RAG).
     """
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedShop]
 
     def post(self, request):
-        import csv
-        import uuid
-        import io
-
         shop_id = request.data.get("shop_id")
         csv_file = request.FILES.get("file")
 
