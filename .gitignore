@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# VSCode
+.vscode/
+.env
+
+# Data/Models
+*.bin
+*.pt
+postgres_data/
+*.safetensors
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Postman collections (contain API tokens)
+*.postman_collection.json
+
+# Patch/diff files (generated locally, never commit)
+*.patch
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# Django generated static files
+backend-orchestrator/staticfiles/
+
+# AI Agent workflows
+.agents/
+
+# Ignore all markdown files except CONTRIBUTING.md
+*.md
+!CONTRIBUTING.md
+!README.md
+context.md
+
+# Local Python venvs
+.venv/
+backend-orchestrator/.venv/
+ngrok.exe
+
+# PDF API Documentation & Generation script
+backend-orchestrator/direct_api_documentation.pdf
+backend-orchestrator/tests/generate_pdf.py
+api_documentation.pdf

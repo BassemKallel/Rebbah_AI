@@ -1,0 +1,22 @@
+# Overrides DevOps / Jenkins : ports localhost pour Nginx, API publique ai2.
+# Utiliser avec docker-compose.effective.yml (sans ports internes exposés).
+services:
+  backend-orchestrator:
+    ports:
+      - "127.0.0.1:8010:8000"
+
+  frontend:
+    build:
+      args:
+        REACT_APP_API_BASE_URL: https://ai2.tiktakpro.com
+    ports:
+      - "127.0.0.1:3011:3000"
+
+  vision-service:
+    ports: !override []
+
+  db:
+    ports: []
+
+  redis:
+    ports: []

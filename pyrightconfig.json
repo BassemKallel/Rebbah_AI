@@ -1,0 +1,16 @@
+{
+  "include": ["."],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/migrations", "**/venv", "**/.venv"],
+  "typeCheckingMode": "off",
+  "pythonVersion": "3.10",
+  "reportMissingModuleSource": "none",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportOptionalSubscript": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalCall": "none",
+  "reportOptionalIterable": "none",
+  "reportOptionalContextManager": "none",
+  "reportOptionalOperand": "none"
+}

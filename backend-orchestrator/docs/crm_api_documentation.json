@@ -1,0 +1,433 @@
+{
+    "title": "Rebbah AI — CRM API Documentation",
+    "version": "1.0",
+    "base_url": "/api/v1/crm",
+    "authentication": {
+        "type": "Bearer Token",
+        "header": "Authorization: Bearer <dashboard_token>",
+        "description": "Chaque shop a un dashboard_token unique configuré dans la table Company. Le token doit être envoyé dans le header Authorization."
+    },
+    "endpoints": {
+        "bot_configuration": {
+            "description": "Configuration globale du bot IA pour chaque shop : nom, langue, personnalité.",
+            "endpoints": [
+                {
+                    "name": "Lire la configuration",
+                    "method": "GET",
+                    "url": "/api/v1/crm/bot-configurations/{shop_id}/",
+                    "description": "Retourne la configuration du bot pour un shop. Crée automatiquement une config par défaut si elle n'existe pas.",
+                    "path_params": {
+                        "shop_id": "string — Identifiant unique du shop (ex: '1LXybpj')"
+                    },
+                    "request_headers": {
+                        "Authorization": "Bearer <dashboard_token>"
+                    },
+                    "request_body": null,
+                    "response_200": {
+                        "id": 1,
+                        "shop_id": "1LXybpj",
+                        "shop_name": "Iconic Store",
+                        "language": "AUTO",
+                        "ai_agent_name": "Iconic Store AI",
+                        "created_at": "2026-03-30T14:00:00Z",
+                        "updated_at": "2026-03-31T02:30:00Z"
+                    },
+                    "response_401": {
+                        "detail": "Authentication credentials were not provided."
+                    }
+                },
+                {
+                    "name": "Créer ou mettre à jour la configuration (full)",
+                    "method": "PUT",
+                    "url": "/api/v1/crm/bot-configurations/",
+                    "description": "Crée ou remplace entièrement la configuration d'un shop. Le shop_id est dans le body, pas dans l'URL.",
+                    "request_headers": {
+                        "Authorization": "Bearer <dashboard_token>",
+                        "Content-Type": "application/json"
+                    },
+                    "request_body": {
+                        "shop_id": "1LXybpj",
+                        "shop_name": "Iconic Store",
+                        "language": "AUTO",
+                        "ai_agent_name": "Sara"
+                    },
+                    "response_201_created": {
+                        "id": 1,
+                        "shop_id": "1LXybpj",
+                        "shop_name": "Iconic Store",
+                        "language": "AUTO",
+                        "ai_agent_name": "Sara",
+                        "created_at": "2026-03-31T02:30:00Z",
+                        "updated_at": "2026-03-31T02:30:00Z"
+                    },
+                    "response_200_updated": {
+                        "id": 1,
+                        "shop_id": "1LXybpj",
+                        "shop_name": "Iconic Store",
+                        "language": "AUTO",
+                        "ai_agent_name": "Sara",
+                        "created_at": "2026-03-30T14:00:00Z",
+                        "updated_at": "2026-03-31T02:30:00Z"
+                    },
+                    "response_400": {
+                        "error": "Le champ 'shop_id' est requis dans le JSON (payload)."
+                    }
+                },
+                {
+                    "name": "Mise à jour partielle",
+                    "method": "PATCH",
+                    "url": "/api/v1/crm/bot-configurations/",
+                    "description": "Met à jour un ou plusieurs champs sans toucher aux autres.",
+                    "request_body_example_change_language": {
+                        "shop_id": "1LXybpj",
+                        "language": "AR"
+                    },
+                    "request_body_example_change_name": {
+                        "shop_id": "1LXybpj",
+                        "ai_agent_name": "Ali"
+                    },
+                    "response_200": {
+                        "id": 1,
+                        "shop_id": "1LXybpj",
+                        "shop_name": "Iconic Store",
+                        "language": "AR",
+                        "ai_agent_name": "Ali",
+                        "created_at": "2026-03-30T14:00:00Z",
+                        "updated_at": "2026-03-31T02:35:00Z"
+                    }
+                }
+            ],
+            "fields_description": {
+                "shop_id": {
+                    "type": "string",
+                    "required": true,
+                    "description": "Identifiant unique du shop"
+                },
+                "shop_name": {
+                    "type": "string",
+                    "required": false,
+                    "description": "Nom d'affichage du shop dans les réponses du bot (variable {shop_name})"
+                },
+                "language": {
+                    "type": "enum",
+                    "required": false,
+                    "default": "FR",
+                    "values": {
+                        "AUTO": "Détection automatique — la langue du premier message est utilisée pour toute la conversation",
+                        "FR": "Toujours répondre en français",
+                        "AR": "Toujours répondre en arabe",
+                        "EN": "Toujours répondre en anglais"
+                    }
+                },
+                "ai_agent_name": {
+                    "type": "string",
+                    "required": false,
+                    "default": "Rebbah AI",
+                    "description": "Le nom affiché du bot dans les réponses (variable {ai_agent_name})"
+                }
+            }
+        },
+        "response_templates": {
+            "description": "Templates de réponses personnalisables par shop, catégorie, langue et intent. Permet au frontend d'afficher et de modifier les réponses du bot.",
+            "endpoints": [
+                {
+                    "name": "Lister les templates",
+                    "method": "GET",
+                    "url": "/api/v1/crm/templates/",
+                    "description": "Retourne tous les templates. Filtrable par category, language, shop_id, is_default.",
+                    "query_params": {
+                        "category": "string — Filtrer par catégorie (ex: 'response', 'missing_entity')",
+                        "language": "string — Filtrer par langue ('FR', 'AR')",
+                        "shop_id": "string — Filtrer par shop",
+                        "is_default": "boolean — true pour les templates système uniquement"
+                    },
+                    "request_example": "GET /api/v1/crm/templates/?category=response&language=AR",
+                    "response_200": {
+                        "count": 2,
+                        "results": [
+                            {
+                                "id": 86,
+                                "category": "response",
+                                "sub_key": "GREETING",
+                                "language": "AR",
+                                "content": "مرحبا بك في {shop_name}! 🛍️ كيفاش نقدر نعاونك؟",
+                                "shop_id": null,
+                                "is_default": true,
+                                "available_variables": [
+                                    "shop_name",
+                                    "ai_agent_name"
+                                ],
+                                "created_at": "2026-03-30T14:00:00Z",
+                                "updated_at": "2026-03-30T14:00:00Z"
+                            },
+                            {
+                                "id": 150,
+                                "category": "response",
+                                "sub_key": "GREETING",
+                                "language": "AR",
+                                "content": "أهلاً في {shop_name}! أنا {ai_agent_name} 🤖",
+                                "shop_id": "1LXybpj",
+                                "is_default": false,
+                                "available_variables": [
+                                    "shop_name",
+                                    "ai_agent_name"
+                                ],
+                                "created_at": "2026-03-31T01:00:00Z",
+                                "updated_at": "2026-03-31T01:00:00Z"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "Lire un template",
+                    "method": "GET",
+                    "url": "/api/v1/crm/templates/{id}/",
+                    "response_200": {
+                        "id": 86,
+                        "category": "response",
+                        "sub_key": "GREETING",
+                        "language": "AR",
+                        "content": "مرحبا بك في {shop_name}! 🛍️ كيفاش نقدر نعاونك؟",
+                        "shop_id": null,
+                        "is_default": true,
+                        "available_variables": [
+                            "shop_name",
+                            "ai_agent_name"
+                        ],
+                        "created_at": "2026-03-30T14:00:00Z",
+                        "updated_at": "2026-03-30T14:00:00Z"
+                    }
+                },
+                {
+                    "name": "Créer un template (override shop)",
+                    "method": "POST",
+                    "url": "/api/v1/crm/templates/",
+                    "description": "Crée un nouveau template pour un shop spécifique. Si shop_id est fourni, ce template overridera le template système pour ce shop.",
+                    "request_body": {
+                        "category": "response",
+                        "sub_key": "GREETING",
+                        "language": "AR",
+                        "content": "أهلاً في {shop_name}! أنا {ai_agent_name} 🤖 شنوة تحب؟",
+                        "shop_id": "1LXybpj"
+                    },
+                    "response_201": {
+                        "id": 150,
+                        "category": "response",
+                        "sub_key": "GREETING",
+                        "language": "AR",
+                        "content": "أهلاً في {shop_name}! أنا {ai_agent_name} 🤖 شنوة تحب؟",
+                        "shop_id": "1LXybpj",
+                        "is_default": false,
+                        "available_variables": [
+                            "shop_name",
+                            "ai_agent_name"
+                        ],
+                        "created_at": "2026-03-31T01:00:00Z",
+                        "updated_at": "2026-03-31T01:00:00Z"
+                    }
+                },
+                {
+                    "name": "Modifier un template",
+                    "method": "PUT",
+                    "url": "/api/v1/crm/templates/{id}/",
+                    "description": "Modifie un template existant. Les templates système (is_default=true) sont protégés contre la modification.",
+                    "request_body": {
+                        "category": "response",
+                        "sub_key": "GREETING",
+                        "language": "AR",
+                        "content": "مرحبا! أنا {ai_agent_name}، مساعدك في {shop_name} 🛍️",
+                        "shop_id": "1LXybpj"
+                    },
+                    "response_200": {
+                        "id": 150,
+                        "category": "response",
+                        "sub_key": "GREETING",
+                        "language": "AR",
+                        "content": "مرحبا! أنا {ai_agent_name}، مساعدك في {shop_name} 🛍️",
+                        "shop_id": "1LXybpj",
+                        "is_default": false,
+                        "available_variables": [
+                            "shop_name",
+                            "ai_agent_name"
+                        ],
+                        "created_at": "2026-03-31T01:00:00Z",
+                        "updated_at": "2026-03-31T02:00:00Z"
+                    },
+                    "response_403_system_template": {
+                        "detail": "Les templates système ne peuvent pas être modifiés."
+                    }
+                },
+                {
+                    "name": "Supprimer un template",
+                    "method": "DELETE",
+                    "url": "/api/v1/crm/templates/{id}/",
+                    "description": "Supprime un template shop-specific. Les templates système ne peuvent pas être supprimés.",
+                    "response_204": null,
+                    "response_403_system_template": {
+                        "detail": "Les templates système ne peuvent pas être supprimés."
+                    }
+                },
+                {
+                    "name": "Prévisualiser un template",
+                    "method": "POST",
+                    "url": "/api/v1/crm/templates/{id}/preview/",
+                    "description": "Retourne le template avec les variables remplacées par des valeurs d'exemple.",
+                    "request_body": {
+                        "variables": {
+                            "shop_name": "Iconic Store",
+                            "ai_agent_name": "Sara",
+                            "product": "Capuche",
+                            "color": "Bleu",
+                            "size": "L",
+                            "price": "45.000"
+                        }
+                    },
+                    "response_200": {
+                        "preview": "مرحبا! أنا Sara، مساعدك في Iconic Store 🛍️"
+                    }
+                }
+            ],
+            "fields_description": {
+                "category": {
+                    "type": "string",
+                    "required": true,
+                    "description": "Catégorie du template",
+                    "values": [
+                        "response — Réponses aux intents (GREETING, ORDER_PRODUCT, ASK_PRICE, etc.)",
+                        "missing_entity — Questions pour les entités manquantes (size, color, phone_number, etc.)",
+                        "order_confirmed — Messages de confirmation de commande",
+                        "out_of_stock — Messages de rupture de stock",
+                        "misc — Messages divers (inform_product_default, etc.)"
+                    ]
+                },
+                "sub_key": {
+                    "type": "string",
+                    "required": true,
+                    "description": "Sous-clé identifiant le template dans sa catégorie",
+                    "examples": [
+                        "GREETING",
+                        "ORDER_PRODUCT",
+                        "ASK_PRICE",
+                        "size",
+                        "color",
+                        "phone_number",
+                        "with_ref",
+                        "no_ref"
+                    ]
+                },
+                "language": {
+                    "type": "enum",
+                    "required": true,
+                    "values": [
+                        "FR",
+                        "AR"
+                    ]
+                },
+                "content": {
+                    "type": "string",
+                    "required": true,
+                    "description": "Le texte du template avec des variables entre accolades {variable}"
+                },
+                "shop_id": {
+                    "type": "string|null",
+                    "required": false,
+                    "description": "null = template système (par défaut). Rempli = override spécifique à un shop."
+                },
+                "is_default": {
+                    "type": "boolean",
+                    "read_only": true,
+                    "description": "true = template système (protégé). false = template shop-specific."
+                },
+                "available_variables": {
+                    "type": "array[string]",
+                    "read_only": true,
+                    "description": "Liste des variables utilisables dans ce template. Utile pour le frontend (tags cliquables).",
+                    "example": [
+                        "shop_name",
+                        "ai_agent_name",
+                        "product",
+                        "color",
+                        "size",
+                        "price"
+                    ]
+                }
+            },
+            "lookup_chain": {
+                "description": "Quand le bot cherche un template, il suit cette chaîne de priorité :",
+                "priority": [
+                    "1. Template shop-specific (shop_id + category + sub_key + language)",
+                    "2. Template système (shop_id=null + category + sub_key + language)",
+                    "3. Fallback hardcodé dans le code"
+                ],
+                "example": "Si le shop '1LXybpj' a un GREETING custom en AR → utilisé. Sinon → GREETING système en AR."
+            },
+            "security_rules": {
+                "system_templates": "Les templates avec is_default=true ne peuvent pas être modifiés ni supprimés (403 Forbidden).",
+                "shop_templates": "Les templates avec un shop_id peuvent être librement créés, modifiés et supprimés."
+            },
+            "variable_mapping_by_category": {
+                "response": {
+                    "GREETING": [
+                        "shop_name",
+                        "ai_agent_name"
+                    ],
+                    "ORDER_PRODUCT": [
+                        "product"
+                    ],
+                    "ASK_PRICE": [
+                        "product",
+                        "price"
+                    ],
+                    "ASK_AVAILABILITY": [
+                        "product"
+                    ],
+                    "ASK_DELIVERY": [
+                        "shop_name"
+                    ],
+                    "CANCEL_ORDER": [],
+                    "UNKNOWN": [],
+                    "INFORM_INFO": []
+                },
+                "missing_entity": {
+                    "size": [
+                        "product"
+                    ],
+                    "color": [
+                        "product"
+                    ],
+                    "quantity": [
+                        "product"
+                    ],
+                    "phone_number": [],
+                    "address": [],
+                    "product": []
+                },
+                "order_confirmed": {
+                    "with_ref": [
+                        "product",
+                        "ref"
+                    ],
+                    "no_ref": [
+                        "product"
+                    ]
+                },
+                "out_of_stock": {
+                    "default": [
+                        "product",
+                        "color",
+                        "size"
+                    ],
+                    "available": [
+                        "avail"
+                    ],
+                    "sizes": [
+                        "avail"
+                    ],
+                    "colors": [
+                        "avail"
+                    ]
+                }
+            }
+        }
+    }
+}
