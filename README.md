@@ -1,165 +1,307 @@
-# 🛒 TikTak-AI
+# Rebbah AI
 
-TikTak-AI est une plateforme intelligente d'e-commerce et d'interaction client basée sur l'intelligence artificielle. Elle utilise le SDK officiel **Google GenAI** (modèle *Gemini*) et le framework **Google ADK (Agent Development Kit)** pour orchestrer une architecture multi-agents dynamique et réactive.
+*Rebbah (ربّاح) : « celui qui fait gagner ».*
 
-La plateforme expose un **webhook Meta Messenger** officiel et un point d'entrée de test (POC) qui intègrent la recherche visuelle multimodale (CLIP + pgvector), la Hot Memory (Redis), la Cold Memory (PostgreSQL) et la gestion de dialogue de vente intelligente avec collecte CRM automatique.
+Rebbah AI est une plateforme conversationnelle multi-agents dédiée à l'e-commerce. Elle accueille les clients d'une boutique sur Messenger et Instagram, répond à leurs questions, recommande des produits, enregistre leurs commandes et assure le suivi après-vente, en dialecte tunisien (Derja) comme en français.
+
+Le projet a été réalisé dans le cadre d'un Projet de Fin d'Études (PFE).
 
 ---
 
-## 🏗️ Architecture Globale & Services
+## Sommaire
+
+1. [Fonctionnalités](#fonctionnalités)
+2. [Architecture](#architecture)
+3. [Système multi-agents](#système-multi-agents)
+4. [Machine à états de la conversation](#machine-à-états-de-la-conversation)
+5. [Stack technique](#stack-technique)
+6. [Structure du dépôt](#structure-du-dépôt)
+7. [Installation et démarrage](#installation-et-démarrage)
+8. [Configuration](#configuration)
+9. [Intégration Meta (Messenger et Instagram)](#intégration-meta-messenger-et-instagram)
+10. [API](#api)
+11. [Tests](#tests)
+12. [Contribution](#contribution)
+13. [Propriété et auteurs](#propriété-et-auteurs)
+
+---
+
+## Fonctionnalités
+
+- **Dialogue multi-agents** : un routeur basé sur Gemini oriente chaque message vers l'agent compétent (FAQ, vente, commande, après-vente), orchestrés avec Google ADK.
+- **Collecte de commande structurée** : l'agent de commande extrait les informations du client et les valide par un schéma Pydantic avant toute écriture dans le CRM.
+- **Recherche visuelle (Visual RAG)** : à partir d'une photo envoyée par le client, le service de vision (CLIP et pgvector) identifie le produit du catalogue correspondant.
+- **Debouncer à fenêtre glissante** : les messages successifs rapides d'un même client sont regroupés dans Redis en un seul message avant d'invoquer le modèle, ce qui évite les exécutions concurrentes et les réponses fragmentées.
+- **Bascule vers un opérateur humain** : prise de contrôle manuelle depuis le dashboard, désactivation automatique du bot si le quota est dépassé ou si l'API Gemini échoue trois fois de suite pour un client (circuit breaker).
+- **Contrôle du budget** : chaque appel au modèle est comptabilisé (jetons et coût) et comparé au plafond mensuel de la boutique.
+- **Contrôle de stock** : une commande ne peut être confirmée que si les produits demandés sont disponibles dans le catalogue.
+- **Dashboard marchand** : configuration du bot (ton, langue, règles), synchronisation du catalogue, supervision des conversations.
+
+---
+
+## Architecture
 
 ```text
-Meta Messenger (Webhook)
-       │
-       ▼
-Production: https://ai2.tiktakpro.com/  /  Local: ngrok tunnel (port 8010)
-       │
-       ▼
-backend-orchestrator :8010   (Django — Dialog Manager & Multi-Agents ADK)
-       │
-       ├──► vision-service    :8020 (FastAPI — CLIP Vector Search)
-       ├──► redis             :6380 (Hot Memory & Sliding Window Debouncer)
-       └──► postgres-db (db)  :5434 (PostgreSQL + pgvector)
+Meta Messenger / Instagram (webhook)
+              |
+              v
+   backend-orchestrator :8010        Django : API, Dialog Manager, agents ADK
+              |
+              +--> celery-worker     Traitement asynchrone et debouncing
+              +--> vision-service    :8020   FastAPI : embeddings CLIP, recherche visuelle
+              +--> redis             :6380   Mémoire chaude, tampon de debouncing, broker
+              +--> db (PostgreSQL)   :5434   Données CRM, embeddings (pgvector)
+
+   frontend :3010                    React : dashboard marchand
 ```
 
-### Services
+### Services Docker
 
-| Service | Port (Externe) | Port (Interne) | Description |
+| Service | Port externe | Port interne | Rôle |
 | --- | --- | --- | --- |
-| `backend-orchestrator` | `8010` | `8000` | Cœur du système — Dialog Manager, Multi-Agents ADK, APIs CRM, validation de quotas et synchronisation de catalogue. Limite : 512 Mo RAM. |
-| `frontend` | `3010` | `3000` | Dashboard client de gestion TikTak Pro. Limite : 256 Mo RAM. |
-| `vision-service` | `8020` | `8002` | CLIP embeddings & similarité visuelle (Vector RAG). Limite : 4 Go RAM, GPU Nvidia optionnel. |
-| `db` | `5434` | `5432` | PostgreSQL + **pgvector** — Stockage des données CRM et des embeddings vectoriels des images produits. Limite : 768 Mo RAM. |
-| `redis` | `6380` | `6379` | Hot Memory (historique de conversation) + Queue de debouncing et coalescence temporelle. Limite : 256 Mo RAM. |
+| `backend-orchestrator` | 8010 | 8000 | Webhooks Meta, API REST, Dialog Manager multi-agents, facturation, administration Django. |
+| `celery-worker` | n/a | n/a | Exécution asynchrone du pipeline et du debouncing. Même image que le backend. |
+| `frontend` | 3010 | 3000 | Dashboard marchand (React, TypeScript, Tailwind CSS). |
+| `vision-service` | 8020 | 8002 | Embeddings CLIP à 512 dimensions et recherche par similarité visuelle. GPU Nvidia optionnel. |
+| `db` | 5434 | 5432 | PostgreSQL avec l'extension pgvector. |
+| `redis` | 6380 | 6379 | Contexte de conversation, tampon de debouncing, compteurs du circuit breaker, broker Celery. |
+
+Toute la logique NLU s'exécute dans `backend-orchestrator` : il n'existe pas de service NLU externe.
+
+### Mémoire à deux niveaux
+
+- **Mémoire chaude (Redis)** : historique récent de la conversation, clé `chat_context:{shop_id}:{user_id}`, expiration d'une heure. Elle est reconstruite depuis PostgreSQL en cas d'absence.
+- **Mémoire froide (PostgreSQL)** : leads, conversations, messages, commandes, journaux d'utilisation.
 
 ---
 
-## 🤖 Architecture Multi-Agents & Google ADK
+## Système multi-agents
 
-Le traitement NLU et la gestion du dialogue reposent sur une architecture multi-agents développée à l'aide de **Google ADK (Agent Development Kit)**. 
+Le traitement conversationnel est implémenté avec Google ADK dans `backend-orchestrator/apps/gateway/services/agents.py`.
 
-### Le Routeur Intelligent
-Lorsqu'un message utilisateur arrive, un routeur basé sur l'API Gemini analyse le message et l'historique de conversation récent pour l'orienter dynamiquement vers l'agent ayant la responsabilité adéquate.
+**Routeur.** À chaque message, la fonction `determine_target_agent_with_llm` interroge Gemini avec l'historique récent. La décision est validée par le schéma Pydantic `AgentRoutingDecision` (`target_agent`, `reasoning`).
 
-### Les 4 Agents Spécialisés
-Chaque agent est défini comme un `google.adk.agents.Agent` autonome, possède des instructions de rôle strictes, des prompts en dialecte tunisien (Derja) ou français, et des outils dédiés coordonnés via un `InMemoryRunner` :
+**Agents spécialisés.** Chaque agent hérite de `google.adk.agents.Agent` et s'exécute dans un `InMemoryRunner`.
 
-* **Agent `FAQ`** : Gère toutes les questions générales, les horaires d'ouverture, les coordonnées de la boutique, les politiques de livraison et les modalités d'achat génériques.
-* **Agent `SALES`** : S'occupe de l'exploration du catalogue de produits. Il utilise un outil de recherche sémantique (`search_products`) connecté à la base vectorielle pour recommander des produits adaptés.
-* **Agent `CHECKOUT`** : Orchestre le flux de commande. Il collecte dynamiquement et séquentiellement les informations obligatoires du CRM (`full_name`, `phone_number`, `shop_name`, `daily_volume`), présente un récapitulatif structuré et attend la confirmation finale du client.
-* **Agent `POST_SALES`** : Gère le support après-vente et le suivi de colis grâce à l'outil `check_order_status` connecté à l'historique d'achat du client.
+| Agent | Responsabilité |
+| --- | --- |
+| `FAQ` | Questions générales : horaires, adresse, contact, livraison, modalités d'achat. |
+| `SALES` | Exploration du catalogue et recommandations via l'outil `search_products`. |
+| `CHECKOUT` | Collecte des informations de commande, validées par `DynamicCheckoutSchema` (`response_text`, `extracted_entities`, `order_ready`, `order_confirmed`, `carousel_items`). Vérifie la disponibilité du produit avant de collecter. |
+| `POST_SALES` | Support après-vente et suivi de commande via l'outil `check_order_status`. |
 
----
-
-## 🚀 Fonctionnalités Clés
-
-- **Webhook Meta Messenger & POC** : Réception des messages de production sur Messenger/Instagram et point d'entrée POC simplifié sécurisé par token (`X-Shop-Token`) pour l'intégration continue.
-- **Sliding Window Message Debouncer** : File d'attente Redis qui regroupe automatiquement les messages successifs rapides d'un client (ex: *"nheb t-shirt"* puis *"bleu"* une seconde plus tard) sous une fenêtre glissante de 3 secondes en un seul message consolidé (*"nheb t-shirt bleu"*). Prévient les exécutions concurrentes de l'IA et évite les réponses fragmentées ou multiples.
-- **Circuit Breaker par Client** : Compteur glissant d'erreurs d'API Gemini sur 5 minutes pour chaque client. Si un client rencontre 3 erreurs successives, le bot bascule automatiquement la conversation en mode manuel (`is_human_controlled = True`) pour ne pas bloquer l'utilisateur.
-- **Contrôle de Quota Financier (Billing Wallet)** : Contrôle en temps réel du budget mensuel alloué à la boutique (`BillingWallet`). L'IA est désactivée automatiquement au profit d'un opérateur humain si le quota de la boutique est dépassé.
-- **Préchargement du Contexte CRM** : Injection automatique du profil CRM (nom, numéro de téléphone, historique) au premier contact pour les clients récurrents afin d'éviter de reposer les mêmes questions.
-- **Recherche Visuelle Multimodale (Visual RAG)** : Envoi d'une photo de produit ➔ identification automatique par le Vision Service et pré-remplissage du panier.
+Les instructions de chaque agent sont construites dynamiquement à partir de la configuration de la boutique (`BotConfiguration`) : nom de l'assistant, domaine d'activité, ton, règles de langue, politique de livraison, informations de commande requises.
 
 ---
 
-## 💻 Installation et Démarrage Local
+## Machine à états de la conversation
 
-### Prérequis
-- Docker Desktop avec Docker Compose
-- Clé API Google Gemini
-
-### 1. Cloner le dépôt et configurer l'environnement
-```bash
-git clone https://github.com/BassemKallel/tiktak-ai-v2.git
-cd tiktak-ai-v2
-cp .env.example .env
+```mermaid
+stateDiagram-v2
+    [*] --> NEW_CONVERSATION
+    NEW_CONVERSATION --> LLM_ACTIVE : premier message
+    LLM_ACTIVE --> LLM_CONFIRMING : order_ready
+    LLM_CONFIRMING --> COMPLETED : order_confirmed
+    LLM_CONFIRMING --> LLM_ACTIVE : correction ou question
+    COMPLETED --> [*]
 ```
-Ouvrir le fichier `.env` et renseigner les variables d'environnement nécessaires (les variables sont auto-documentées dans le fichier `.env.example`).
-
-### 2. Build et démarrage des services Docker
-```bash
-docker compose up --build -d
-```
-Au premier démarrage, la commande `setup_initial_data` s'exécute automatiquement pour initialiser le superutilisateur Django et la boutique par défaut.
-
-**Restart après modification de code Python :**
-```bash
-docker compose restart backend-orchestrator
-```
-
-**Arrêter les services et libérer les ressources :**
-```bash
-docker compose down
-```
-
-### 3. Tester localement avec `ngrok`
-Puisque le webhook Meta requiert une URL HTTPS publique pour envoyer les événements :
-1. Démarrez un tunnel ngrok vers le port externe du backend :
-   ```bash
-   ngrok http 8010
-   ```
-2. Copiez l'URL HTTPS générée par ngrok (ex: `https://abcd-1234.ngrok-free.app`).
-3. Configurez cette URL comme **URL de rappel** dans votre portail Meta Developer : `https://abcd-1234.ngrok-free.app/api/v1/gateway/meta/webhook`.
-4. Renseignez la clé de vérification configurée dans votre fichier `.env` (`META_VERIFY_TOKEN`).
-
----
-
-## 🧪 Suite de Tests & Validation
-
-La plateforme intègre trois scripts de tests automatisés autonomes pour valider le comportement du système à l'intérieur du conteneur Django (regroupés dans le dossier `tests/`) :
-
-1. **`tests/test_run.py`** : Valide le flux conversationnel complet en simulant une conversation interactive de bout en bout (salutations ➔ collecte de nom ➔ téléphone ➔ boutique ➔ volume ➔ confirmation finale et clôture de commande).
-2. **`tests/test_debounce.py`** : Valide la file d'attente temporelle glissante (debouncer). Il simule deux requêtes webhooks concurrentes envoyées par le même client à 1 seconde d'intervalle et vérifie que la première est annulée avec le statut `queued_and_skipped` et que la seconde fusionne le texte et s'exécute avec succès.
-3. **`tests/test_raw_output.py`** : Valide le format JSON brut retourné par le pipeline de messages.
-
-**Commandes pour exécuter les tests :**
-```bash
-# Lancer le test complet du flux conversationnel
-docker exec tiktak-ai-v2-backend python tests/test_run.py
-
-# Lancer le test de concurrence et de debouncing Redis
-docker exec tiktak-ai-v2-backend python tests/test_debounce.py
-
-# Lancer le test de structure des sorties
-docker exec tiktak-ai-v2-backend python tests/test_raw_output.py
-```
-
----
-
-## 🧠 Dialog Manager — Machine à États
-
-La conversation avec chaque client progresse à travers 4 états distincts enregistrés en base de données :
 
 | État | Description |
 | --- | --- |
-| `NEW_CONVERSATION` | Session de conversation initialement ouverte. |
-| `LLM_ACTIVE` | Phase active de dialogue (vente ou FAQ) gérée dynamiquement par l'orchestrateur multi-agents Google ADK. |
-| `LLM_CONFIRMING` | Toutes les informations CRM requises ont été collectées. Le récapitulatif est présenté au client et le système attend sa confirmation finale (Oui/Non). |
-| `COMPLETED` | Le client a validé son récapitulatif. La commande est définitivement enregistrée dans le CRM. |
+| `NEW_CONVERSATION` | Conversation créée, aucun échange traité. |
+| `LLM_ACTIVE` | Dialogue en cours (FAQ, vente, collecte de commande). |
+| `LLM_CONFIRMING` | Informations complètes : le récapitulatif est présenté, le client doit confirmer. |
+| `COMPLETED` | Commande confirmée et enregistrée dans le CRM. |
+
+Deux garde-fous déterministes encadrent les transitions : une commande ne peut passer à `COMPLETED` que depuis `LLM_CONFIRMING`, et la confirmation est annulée si un produit est en rupture de stock au moment de la validation.
 
 ---
 
-## 🤝 Travailler en Binôme
+## Stack technique
 
-Meta n'autorisant qu'**une seule URL de webhook** active à la fois par page Facebook de test :
-* **Règle de rotation** : Chaque membre de l'équipe met à jour l'URL de rappel dans le portail Meta Developer avec son adresse publique `ngrok` active lorsqu'il teste ses modifications locales.
-* En production, l'URL pointe vers l'adresse stable hébergée : **`https://ai2.tiktakpro.com/api/v1/gateway/meta/webhook`**.
-
----
-
-## 🤝 Contribuer
-
-Les push directs sur les branches principales (`main`, `dev`) sont bloqués par les règles du dépôt.
-1. Créez une branche de fonctionnalité depuis `dev` (ex : `feat/ma-fonctionnalite` ou `fix/mon-correctif`).
-2. Faites vos commits et poussez votre branche.
-3. Ouvrez une Pull Request (PR) vers `dev` pour examen.
+| Couche | Technologies |
+| --- | --- |
+| Backend | Python 3.10, Django, Django REST Framework, SimpleJWT, Celery |
+| IA | Google ADK, Google GenAI (Gemini), Pydantic |
+| Vision | FastAPI, PyTorch, Transformers (`openai/clip-vit-base-patch32`) |
+| Données | PostgreSQL, pgvector (index HNSW, distance cosinus), Redis |
+| Frontend | React 19, TypeScript, Tailwind CSS, React Router |
+| Stockage média | Azure Blob Storage |
+| Infrastructure | Docker, Docker Compose |
 
 ---
 
-## 📄 Licence et Propriété
+## Structure du dépôt
 
-Ce projet est la propriété de l'équipe TikTak-AI dans le cadre de leur Projet de Fin d'Études (PFE).
+```text
+.
+|-- backend-orchestrator/        Backend Django
+|   |-- apps/gateway/            Webhooks, pipeline de messages, agents, debouncer
+|   |   |-- services/            agents.py, pipeline.py, context_manager.py, entity_normalizer.py
+|   |   `-- views/               webhook.py, catalog.py, health.py
+|   |-- apps/crm/                Modèles, API du dashboard, administration, facturation
+|   |-- core/                    Réglages Django, Celery, middleware
+|   |-- docs/                    Documentation d'API
+|   `-- tests/                   Scripts de test d'intégration
+|-- frontend/                    Dashboard React
+|-- vision-service/              Service de vision (FastAPI, CLIP)
+|-- docker-compose.yml
+`-- .env.example
+```
+
+---
+
+## Installation et démarrage
+
+### Prérequis
+
+- Docker Desktop avec Docker Compose
+- Une clé API Google Gemini
+- Un compte de stockage Azure Blob pour les images du catalogue (nécessaire pour l'import de produits)
+
+### 1. Récupérer le projet et configurer l'environnement
+
+```bash
+git clone https://github.com/BassemKallel/rebbah-ai.git
+cd rebbah-ai
+cp .env.example .env
+```
+
+Renseignez ensuite les valeurs dans `.env` (voir [Configuration](#configuration)).
+
+### 2. Démarrer les services
+
+```bash
+docker compose up --build -d
+```
+
+Au démarrage, le backend applique les migrations, collecte les fichiers statiques et exécute `setup_initial_data`, qui crée le superutilisateur Django et la boutique par défaut à partir des variables `DJANGO_SUPERUSER_*` et `SHOP_ID`.
+
+### 3. Accéder aux interfaces
+
+| Interface | URL |
+| --- | --- |
+| Administration Django | http://localhost:8010/admin/ |
+| Dashboard marchand | http://localhost:3010 |
+| Santé des services (session admin requise) | http://localhost:8010/api/v1/gateway/health/ |
+
+Un utilisateur marchand, lié à une boutique, peut être créé pour le dashboard :
+
+```bash
+docker exec rebbah-ai-backend python manage.py create_merchant_user \
+  --username <utilisateur> --password <mot_de_passe> --shop-id <SHOP_ID>
+```
+
+### Commandes utiles
+
+```bash
+# Appliquer les changements de code Python
+docker compose restart backend-orchestrator celery-worker
+
+# Suivre les journaux du backend
+docker logs -f rebbah-ai-backend
+
+# Arrêter les services
+docker compose down
+```
+
+---
+
+## Configuration
+
+Toute la configuration passe par le fichier `.env` à la racine, dont le modèle est `.env.example`. Ne versionnez jamais ce fichier.
+
+| Variable | Description |
+| --- | --- |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Accès à la base PostgreSQL. |
+| `VECTOR_DB_HOST`, `VECTOR_DB_PORT`, `VECTOR_DB_USER`, `VECTOR_DB_PASSWORD`, `VECTOR_DB_NAME` | Accès du service de vision à la base pgvector. |
+| `DJANGO_SECRET_KEY` | Clé secrète Django. |
+| `DJANGO_DEBUG` | `True` en développement uniquement. |
+| `ALLOWED_HOSTS` | Hôtes autorisés, séparés par des virgules. |
+| `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | Origines supplémentaires (domaine public du dashboard), séparées par des virgules. |
+| `FIELD_ENCRYPTION_KEY` | Clé de chiffrement des secrets des boutiques stockés en base (jetons de pages Meta, clés API). |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Accès à Gemini et modèle par défaut. |
+| `VISION_SERVICE_URL`, `VISION_SEARCH_PATH`, `SIMILARITY_THRESHOLD` | Service de vision et seuil de similarité visuelle (0,75 par défaut). |
+| `AZURE_ACCOUNT_NAME`, `AZURE_ACCOUNT_KEY`, `AZURE_CONTAINER` | Stockage des images du catalogue. |
+| `META_VERIFY_TOKEN`, `META_APP_SECRET` | Vérification du webhook et validation de la signature `X-Hub-Signature-256`. |
+| `NGROK_URL` | URL du tunnel de développement, ajoutée automatiquement aux origines CSRF. |
+| `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, `DJANGO_SUPERUSER_PASSWORD` | Compte administrateur créé au premier démarrage. |
+| `SHOP_ID`, `SHOP_NAME` | Boutique initiale créée au premier démarrage. |
+| `EXTERNAL_REQUEST_TIMEOUT` | Délai maximal des appels externes, en secondes. |
+
+---
+
+## Intégration Meta (Messenger et Instagram)
+
+Meta exige une URL HTTPS publique pour le webhook.
+
+**En développement, avec ngrok :**
+
+1. Ouvrez un tunnel vers le backend : `ngrok http 8010`.
+2. Dans le portail Meta Developer, définissez l'URL de rappel : `https://<sous-domaine>.ngrok-free.app/api/v1/gateway/meta/webhook`.
+3. Saisissez comme jeton de vérification la valeur de `META_VERIFY_TOKEN`.
+
+**En production**, l'URL de rappel est `https://<DOMAINE_PUBLIC>/api/v1/gateway/meta/webhook`.
+
+Meta n'autorisant qu'une seule URL de webhook active par page de test, les membres de l'équipe doivent se coordonner : chacun met à jour l'URL de rappel avec son propre tunnel lorsqu'il teste en local.
+
+---
+
+## API
+
+Les routes principales, toutes préfixées par `/api/v1/` :
+
+| Méthode et route | Description | Authentification |
+| --- | --- | --- |
+| `GET/POST gateway/meta/webhook` | Webhook officiel Meta (vérification et réception des messages). | Signature Meta |
+| `POST gateway/messenger/poc` | Point d'entrée de test simplifié. | En-tête `X-Shop-Token` |
+| `POST gateway/message/process/` | Traitement synchrone d'un message par un serveur tiers. La réponse du bot est renvoyée dans le corps HTTP. | En-tête `X-Shop-Token` |
+| `POST gateway/catalog/upload` | Ajout d'un produit : image vers Azure, vectorisation CLIP. | Non restreinte (`shop_id` requis) |
+| `POST gateway/catalog/import-csv` | Import de catalogue par fichier CSV. | Non restreinte (`shop_id` requis) |
+| `POST crm/conversations/<id>/takeover/` | Prise de contrôle humaine : le bot est désactivé pour la conversation. | JWT ou jeton de boutique |
+| `POST crm/conversations/<id>/release/` | Réactivation du bot. | JWT ou jeton de boutique |
+| `POST crm/conversations/<id>/agent-reply/` | Envoi d'un message par l'opérateur. | JWT ou jeton de boutique |
+| `GET gateway/health/` | État de PostgreSQL, Redis, du service de vision et de Celery. | Session administrateur |
+
+Le détail des requêtes et des réponses se trouve dans `backend-orchestrator/docs/`.
+
+Sur les routes de messages, un debouncer de 5 secondes regroupe les messages rapprochés d'un même client. Une requête remplacée par un message plus récent répond `queued_and_skipped` (ou `skipped` sur la route synchrone).
+
+---
+
+## Tests
+
+Trois scripts d'intégration s'exécutent dans le conteneur backend. Ils s'appuient sur une boutique configurée (boutique, configuration du bot, catalogue vectorisé et clé Gemini) et appellent le modèle réel.
+
+| Script | Objet |
+| --- | --- |
+| `tests/test_run.py` | Parcours conversationnel complet : routage, vente, collecte de commande, confirmation, plus les tests unitaires du normaliseur d'entités. |
+| `tests/test_debounce.py` | Deux requêtes concurrentes à une seconde d'intervalle : la première est ignorée, la seconde fusionne les textes et s'exécute. |
+| `tests/test_raw_output.py` | Structure JSON brute renvoyée par le pipeline. |
+
+```bash
+docker exec rebbah-ai-backend python tests/test_run.py
+docker exec rebbah-ai-backend python tests/test_debounce.py
+docker exec rebbah-ai-backend python tests/test_raw_output.py
+```
+
+---
+
+## Contribution
+
+Les règles de développement sont détaillées dans [CONTRIBUTING.md](CONTRIBUTING.md). En résumé :
+
+1. Créez une branche depuis `dev` (`feat/...` ou `fix/...`).
+2. Les poussées directes vers `main` et `dev` sont bloquées : ouvrez une Pull Request vers `dev`.
+3. Gardez les fonctions courtes à responsabilité unique, déclarez les imports en tête de fichier et typez toutes les signatures.
+
+---
+
+## Propriété et auteurs
+
+Ce projet est la propriété de l'équipe Rebbah AI, dans le cadre de son Projet de Fin d'Études (PFE).
 
 **Auteurs :**
+
 - Bassem Kallel
 - Aziz Belgaied

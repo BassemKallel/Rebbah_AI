@@ -1,6 +1,6 @@
-# Guide de Contribution - TikTak-AI
+# Guide de Contribution - Rebbah AI
 
-Merci de contribuer au projet TikTak-AI ! Afin de maintenir un code de haute qualité et une collaboration fluide, ce document définit les règles de développement et le flux de travail (workflow) à respecter par toute l'équipe.
+Merci de contribuer au projet Rebbah AI ! Afin de maintenir un code de haute qualité et une collaboration fluide, ce document définit les règles de développement et le flux de travail (workflow) à respecter par toute l'équipe.
 
 ## 1. Stratégie des Branches
 
