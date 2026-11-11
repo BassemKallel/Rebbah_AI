@@ -162,8 +162,8 @@ Deux garde-fous déterministes encadrent les transitions : une commande ne peut 
 ### 1. Récupérer le projet et configurer l'environnement
 
 ```bash
-git clone https://github.com/BassemKallel/rebbah-ai.git
-cd rebbah-ai
+git clone https://github.com/Tiktak-Ai/Rebbah_AI.git
+cd Rebbah_AI
 cp .env.example .env
 ```
 
