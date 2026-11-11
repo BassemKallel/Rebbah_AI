@@ -7,7 +7,7 @@ networks:
 services:
   backend-orchestrator:
     build: ./backend-orchestrator
-    container_name: tiktak-ai-v2-backend
+    container_name: rebbah-ai-backend
     restart: unless-stopped
     volumes:
       - ./backend-orchestrator:/app
@@ -44,7 +44,7 @@ services:
 
   celery-worker:
     build: ./backend-orchestrator
-    container_name: tiktak-ai-v2-celery
+    container_name: rebbah-ai-celery
     restart: unless-stopped
     volumes:
       - ./backend-orchestrator:/app
@@ -73,8 +73,8 @@ services:
     build:
       context: ./frontend
       args:
-        REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-https://ai.tiktakpro.com}
-    container_name: tiktak-ai-v2-frontend
+        REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-http://localhost:8010}
+    container_name: rebbah-ai-frontend
     restart: unless-stopped
     depends_on:
       - backend-orchestrator
@@ -89,7 +89,7 @@ services:
 
   vision-service:
     build: ./vision-service
-    container_name: tiktak-ai-v2-vision
+    container_name: rebbah-ai-vision
     restart: unless-stopped
     env_file:
       - .env
@@ -113,7 +113,7 @@ services:
 
   db:
     image: ankane/pgvector:v0.5.1
-    container_name: tiktak-ai-v2-postgres
+    container_name: rebbah-ai-postgres
     restart: unless-stopped
     env_file:
       - .env
@@ -139,7 +139,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: tiktak-ai-v2-redis
+    container_name: rebbah-ai-redis
     restart: unless-stopped
     ports:
       - "6380:6379"
