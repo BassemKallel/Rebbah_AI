@@ -97,8 +97,8 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-# Local dashboard and production origin, plus extra origins via CORS_ALLOWED_ORIGINS (comma-separated)
-CORS_ALLOWED_ORIGINS = ["http://localhost:3010", PRODUCTION_ORIGIN] + [
+# Local dashboard (ports 3010 and 3011) and production origin, plus extra origins via CORS_ALLOWED_ORIGINS (comma-separated)
+CORS_ALLOWED_ORIGINS = ["http://localhost:3010", "http://localhost:3011", PRODUCTION_ORIGIN] + [
     origin.strip()
     for origin in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
     if origin.strip()
