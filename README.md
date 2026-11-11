@@ -50,7 +50,7 @@ Meta Messenger / Instagram (webhook)
               +--> redis             :6380   Mémoire chaude, tampon de debouncing, broker
               +--> db (PostgreSQL)   :5434   Données CRM, embeddings (pgvector)
 
-   frontend :3010                    React : dashboard marchand
+   frontend :3011                    React : dashboard marchand
 ```
 
 ### Services Docker
@@ -59,7 +59,7 @@ Meta Messenger / Instagram (webhook)
 | --- | --- | --- | --- |
 | `backend-orchestrator` | 8010 | 8000 | Webhooks Meta, API REST, Dialog Manager multi-agents, facturation, administration Django. |
 | `celery-worker` | n/a | n/a | Exécution asynchrone du pipeline et du debouncing. Même image que le backend. |
-| `frontend` | 3010 | 3000 | Dashboard marchand (React, TypeScript, Tailwind CSS). |
+| `frontend` | 3011 | 3000 | Dashboard marchand (React, TypeScript, Tailwind CSS). |
 | `vision-service` | 8020 | 8002 | Embeddings CLIP à 512 dimensions et recherche par similarité visuelle. GPU Nvidia optionnel. |
 | `db` | 5434 | 5432 | PostgreSQL avec l'extension pgvector. |
 | `redis` | 6380 | 6379 | Contexte de conversation, tampon de debouncing, compteurs du circuit breaker, broker Celery. |
@@ -180,7 +180,7 @@ Au démarrage, le backend applique les migrations, collecte les fichiers statiqu
 | Interface | URL |
 | --- | --- |
 | Administration Django | http://localhost:8010/admin/ |
-| Dashboard marchand | http://localhost:3010 |
+| Dashboard marchand | http://localhost:3011 |
 | Santé des services (session admin requise) | http://localhost:8010/api/v1/gateway/health/ |
 
 Un utilisateur marchand, lié à une boutique, peut être créé pour le dashboard :
@@ -217,6 +217,7 @@ Toute la configuration passe par le fichier `.env` à la racine, dont le modèle
 | `DJANGO_DEBUG` | `True` en développement uniquement. |
 | `ALLOWED_HOSTS` | Hôtes autorisés, séparés par des virgules. |
 | `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | Origines supplémentaires, séparées par des virgules. |
+| `REDIS_PASSWORD` | Mot de passe Redis : le conteneur `redis` démarre avec `--requirepass` et le backend, Celery et le healthcheck l'utilisent. |
 | `FIELD_ENCRYPTION_KEY` | Clé de chiffrement des secrets des boutiques stockés en base (jetons de pages Meta, clés API). |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Accès à Gemini et modèle par défaut. |
 | `VISION_SERVICE_URL`, `VISION_SEARCH_PATH`, `SIMILARITY_THRESHOLD` | Service de vision et seuil de similarité visuelle (0,75 par défaut). |
