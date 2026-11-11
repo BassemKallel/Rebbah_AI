@@ -17,7 +17,7 @@ const Sidebar: React.FC = () => {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-gray-900 font-extrabold text-base leading-tight tracking-tight truncate">
-              TIKTAK <span className="text-[#0f6885]">PRO</span>
+              REBBAH <span className="text-[#0f6885]">AI</span>
             </p>
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
               Agent Builder

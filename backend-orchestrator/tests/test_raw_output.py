@@ -19,7 +19,7 @@ def test():
     Lead.objects.filter(platform_id=user_id).delete()
     
     pipeline = MessagePipeline()
-    res = pipeline.run(user_id=user_id, shop_id=shop_id, text="Bonjour, j'aimerais tester votre solution Tiktak Pro s'il vous plaît")
+    res = pipeline.run(user_id=user_id, shop_id=shop_id, text="Bonjour, j'aimerais tester votre solution Rebbah AI s'il vous plaît")
     print("Pipeline result:")
     print(res)
 

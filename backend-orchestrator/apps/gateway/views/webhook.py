@@ -19,7 +19,7 @@ from apps.gateway.tasks import process_webhook_message_async
 
 logger = logging.getLogger(__name__)
 
-META_VERIFY_TOKEN = getattr(settings, "META_VERIFY_TOKEN", "tiktak_verify_token")
+META_VERIFY_TOKEN = getattr(settings, "META_VERIFY_TOKEN", "rebbah_verify_token")
 
 
 def _verify_meta_signature(request) -> bool:

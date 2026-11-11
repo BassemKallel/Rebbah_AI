@@ -28,6 +28,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='company',
             name='tiktak_api_token',
-            field=models.TextField(blank=True, help_text="Token d'authentification pour l'API Tiktak", null=True),
+            field=models.TextField(blank=True, help_text="Token d'authentification pour l'API", null=True),
         ),
     ]

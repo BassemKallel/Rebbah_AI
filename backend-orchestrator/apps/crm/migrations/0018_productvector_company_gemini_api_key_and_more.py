@@ -56,7 +56,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='company',
             name='tiktak_api_token',
-            field=apps.crm.encryption.EncryptedTextField(blank=True, help_text="Token d'authentification pour l'API Tiktak — chiffré en base (AES Fernet)", null=True),
+            field=apps.crm.encryption.EncryptedTextField(blank=True, help_text="Token d'authentification pour l'API — chiffré en base (AES Fernet)", null=True),
         ),
         migrations.CreateModel(
             name='UserProfile',

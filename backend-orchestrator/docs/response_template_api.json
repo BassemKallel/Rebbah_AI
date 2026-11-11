@@ -3,8 +3,8 @@
   "baseUrl": "/api/v1/crm/templates/",
   "authentication": {
     "type": "Bearer Token",
-    "header": "Authorization: Bearer <tiktak_api_token>",
-    "description": "Token d'authentification TikTak (stocké dans Company.tiktak_api_token)"
+    "header": "Authorization: Bearer <dashboard_token>",
+    "description": "Token d'authentification de la boutique (stocké dans Company.dashboard_token)"
   },
   "endpoints": [
     {

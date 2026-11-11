@@ -27,7 +27,6 @@ postgres_data/
 Thumbs.db
 
 # Postman collections (contain API tokens)
-TikTak_Templates_API.postman_collection.json
 *.postman_collection.json
 
 # Patch/diff files (generated locally, never commit)
@@ -58,3 +57,4 @@ ngrok.exe
 # PDF API Documentation & Generation script
 backend-orchestrator/direct_api_documentation.pdf
 backend-orchestrator/tests/generate_pdf.py
+api_documentation.pdf

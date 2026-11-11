@@ -361,6 +361,10 @@ def run_checkout_correction_and_confirm_test():
     print(f"Phone in DB: {phone}")
     assert phone == "50152515", f"Expected phone to be corrected to 50152515, but got {phone}"
     
+    # - La réponse doit inclure le calcul des prix (prix du jeu 59 + livraison 7 = 66 TND)
+    assert "66" in res1['text'], f"Expected total price '66' in confirmation text, but got: '{res1['text']}'"
+    assert "7" in res1['text'], f"Expected delivery fee '7' in confirmation text, but got: '{res1['text']}'"
+
     # - L'état de la conversation doit RESTER LLM_CONFIRMING puisque toutes les infos sont complètes et prêtes
     print(f"Conversation state in DB after correction: {conv.state}")
     assert conv.state == "LLM_CONFIRMING", f"Expected state to remain LLM_CONFIRMING, but got {conv.state}"
@@ -471,6 +475,65 @@ def run_checkout_cancellation_test():
     print("=== CHECKOUT CANCELLATION UNIT TEST PASSED ===\n")
 
 
+def run_cancellation_false_positive_test():
+    print("=== STARTING CANCELLATION FALSE POSITIVE UNIT TEST ===")
+    user_id = "test_user_false_cancel_888"
+    shop_id = "xLK0QPj" # Active shop (Lama)
+    
+    Conversation.objects.filter(sender_id=user_id, shop_id=shop_id).delete()
+    Lead.objects.filter(platform_id=user_id).delete()
+    
+    # Clear Redis hot context memory
+    from apps.gateway.services.pipeline import context_manager
+    context_manager.clear_context(user_id, shop_id)
+    
+    pipeline = MessagePipeline()
+    
+    # 1. Simuler un état de checkout actif (state="LLM_ACTIVE", agent="CHECKOUT", items présents)
+    lead = Lead.objects.create(
+        platform_id=user_id,
+        shop_id=shop_id
+    )
+    conv = Conversation.objects.create(
+        lead=lead,
+        lead_uuid=lead.uuid,
+        sender_id=user_id,
+        shop_id=shop_id,
+        platform="poc",
+        state="LLM_ACTIVE",
+        context_data={
+            "product": "Jeu Ken T7ebni",
+            "_last_viewed_product": "Jeu Ken T7ebni",
+            "_active_agent": "CHECKOUT",
+            "items": [{"product_name": "Jeu Ken T7ebni", "quantity": 2, "attributes": {}}],
+        }
+    )
+    
+    # Étape 1 : Le bot demande l'adresse de livraison.
+    # On simule cette étape dans l'historique Redis pour donner du contexte.
+    context_manager.add_message(user_id, role="user", text="behi a3tini ka3btin ken t7ebni", intent="ORDER_PRODUCT", shop_id=shop_id)
+    context_manager.add_message(user_id, role="bot", text="تمام، تم إضافة لعبتين إلى سلة مشترياتكم. يرجى تزويدنا بعنوان التوصيل لو سمحتم.", shop_id=shop_id)
+    
+    # Étape 2 : Le client répond par l'adresse "fouchena".
+    print("\nUser: 'fouchena'")
+    res = pipeline.run(user_id=user_id, shop_id=shop_id, text="fouchena")
+    print(f"Bot: '{res['text']}'")
+    
+    conv.refresh_from_db()
+    print(f"Conversation state in DB: {conv.state}")
+    
+    # Vérifications :
+    # - La conversation ne doit PAS avoir été annulée
+    assert conv.state == "LLM_ACTIVE", f"Expected conversation to stay in LLM_ACTIVE, but it transitioned to {conv.state}"
+    # - Le panier ne doit pas avoir été vidé
+    items = conv.context_data.get("items", [])
+    assert len(items) > 0, "Expected basket items to be preserved, but basket was cleared!"
+    # - L'adresse de livraison doit avoir été capturée ou du moins pas annulée
+    assert "إلغاء" not in res['text'] and "annulée" not in res['text'], "Checkout was incorrectly cancelled!"
+    
+    print("=== CANCELLATION FALSE POSITIVE UNIT TEST PASSED ===\n")
+
+
 def run_test():
     run_normalizer_unit_tests()
     run_anaphora_resolution_test()
@@ -480,6 +543,7 @@ def run_test():
     run_routing_and_id_safety_tests()
     run_checkout_correction_and_confirm_test()
     run_checkout_cancellation_test()
+    run_cancellation_false_positive_test()
     user_id = "test_user_unique_12345"
     shop_id = "abcd"
     
@@ -495,7 +559,7 @@ def run_test():
     
     # Sequence of user messages to test the checkout flow
     messages = [
-        "Bonjour, j'aimerais tester votre solution Tiktak Pro s'il vous plaît",
+        "Bonjour, j'aimerais tester votre solution Rebbah AI s'il vous plaît",
         "Je m'appelle Mohamed Kallel",
         "Mon numéro est le 98123456",
         "Ma boutique s'appelle Kallel Shop et je fais environ 20 commandes par jour",

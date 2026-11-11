@@ -13,7 +13,7 @@ from celery import Celery
 # Set the default Django settings module for the 'celery' program.
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 
-app = Celery('tiktak_core')
+app = Celery('rebbah_core')
 
 # Namespace 'CELERY' means all celery-related configuration keys
 # in settings.py must start with the CELERY_ prefix.

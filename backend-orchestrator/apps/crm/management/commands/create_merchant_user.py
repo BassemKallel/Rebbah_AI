@@ -3,7 +3,7 @@ create_merchant_user — Management command to create an initial merchant user.
 
 Usage:
     python manage.py create_merchant_user --username admin --password admin123 --shop-id 1LXybpj
-    python manage.py create_merchant_user --username admin --password admin123 --shop-id 1LXybpj --email admin@tiktakpro.com
+    python manage.py create_merchant_user --username admin --password admin123 --shop-id 1LXybpj --email admin@rebbah.ai
 """
 from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth.models import User

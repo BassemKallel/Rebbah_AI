@@ -21,6 +21,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='botconfiguration',
             name='ai_agent_name',
-            field=models.CharField(default='Tiktak AI', help_text='Le nom donné au Ai agent', max_length=255),
+            field=models.CharField(default='Rebbah AI', help_text='Le nom donné au Ai agent', max_length=255),
         ),
     ]

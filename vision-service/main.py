@@ -1,5 +1,5 @@
 """
-TikTak Vision Service — CLIP-based Image-to-Image search with pgvector
+Rebbah Vision Service — CLIP-based Image-to-Image search with pgvector
 
 Architecture:
 - Pure Image-to-Image similarity search (Visual RAG)
@@ -56,8 +56,8 @@ def _create_db_pool() -> SimpleConnectionPool:
         maxconn=10,
         host=os.getenv("VECTOR_DB_HOST", "vector-db"),
         port=os.getenv("VECTOR_DB_PORT", "5432"),
-        dbname=os.getenv("VECTOR_DB_NAME", "tiktak_vectors"),
-        user=os.getenv("VECTOR_DB_USER", "tiktak_vector"),
+        dbname=os.getenv("VECTOR_DB_NAME", "rebbah_vectors"),
+        user=os.getenv("VECTOR_DB_USER", "rebbah_vector"),
         password=os.getenv("VECTOR_DB_PASSWORD", "vector_pass"),
     )
 
@@ -231,7 +231,7 @@ async def lifespan(app: FastAPI):
         db_pool.closeall()
 
 
-app = FastAPI(title="TikTak Vision Service", lifespan=lifespan)
+app = FastAPI(title="Rebbah Vision Service", lifespan=lifespan)
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────

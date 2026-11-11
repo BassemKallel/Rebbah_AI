@@ -91,7 +91,7 @@ const TopBar: React.FC = () => {
             </div>
             <div className="text-left hidden sm:block">
               <p className="text-[12px] font-bold text-gray-800 leading-tight">{username || 'Utilisateur'}</p>
-              <p className="text-[10px] text-gray-400 leading-tight">{companyName || 'TikTak AI'}</p>
+              <p className="text-[10px] text-gray-400 leading-tight">{companyName || 'Rebbah AI'}</p>
             </div>
             <ChevronDown
               className={`hidden sm:block w-3.5 h-3.5 text-gray-400 group-hover:text-gray-600 transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}
@@ -112,7 +112,7 @@ const TopBar: React.FC = () => {
                     <p className="text-[13px] font-bold text-gray-800 truncate">{username || 'Utilisateur'}</p>
                     <div className="flex items-center gap-1 mt-0.5">
                       <Building2 className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                      <p className="text-[11px] text-gray-400 truncate">{companyName || 'TikTak AI'}</p>
+                      <p className="text-[11px] text-gray-400 truncate">{companyName || 'Rebbah AI'}</p>
                     </div>
                   </div>
                 </div>

@@ -20,6 +20,8 @@ from .entity_normalizer import normalize_entities
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_AI_AGENT_NAME: str = "Rebbah AI"
+
 # Silence Google ADK session service deprecation warning log
 logging.getLogger("google_adk.google.adk.sessions.in_memory_session_service").setLevel(logging.ERROR)
 
@@ -171,7 +173,8 @@ RÈGLES CRITIQUES DE ROUTAGE :
 - Le dialecte tunisien (Derja) est couramment utilisé. Analyse attentivement les mots en arabizi (ex: aandkom, nechri, lo3ab, win, ba3tha) et en arabe (عندكم، نحب، ألعاب، وين).
 - Si le client dit simplement "bonjour", "aslema", "salut" ou s'il s'agit d'une salutation d'ouverture, dirige-le vers FAQ ou garde l'agent actuel si une transaction est déjà engagée.
 - Si le dernier message du client contient des informations de contact ou de commande (comme un nom propre, un numéro de téléphone à 8 chiffres, une adresse, un nom de boutique, ou un volume de commandes), ou s'il s'agit d'une réponse à une collecte d'informations, dirige-le STRICTEMENT vers CHECKOUT.
-- Si le dernier message du client exprime directement l'intention d'obtenir, commander ou acheter un produit spécifique (ex: "atini lo3bet X", "a3tini ka3ba", "اعطيني لعبة..."), même sans mentionner explicitement de quantité, dirige-le STRICTEMENT vers CHECKOUT.
+- Si le dernier message du client exprime directement l'intention d'obtenir, commander, prendre ou acheter un produit spécifique (ex: "atini lo3bet X", "a3tini ka3ba", "اعطيني لعبة...", "nheb nechri", "je veux commander", "je prends X"), même sans mentionner explicitement de quantité, dirige-le STRICTEMENT vers CHECKOUT. Les expressions formulant une intention d'achat (ex: "atini lo3bet ken thebni") doivent être dirigées vers CHECKOUT et non vers SALES.
+- ATTENTION : En dialecte tunisien (Derja), l'expression de demande "donne-moi" ou "je veux" sous les formes "atini", "a3tini", "اعطيني", "نحب", "nheb" suivie d'un produit (ex: "atini lo3bet ken thebni") exprime formellement une commande (intention d'achat directe). Tu dois STRICTEMENT la rediriger vers CHECKOUT (et non SALES).
 - Si l'AGENT ACTUEL est CHECKOUT et que le message semble etre une reponse a une question en cours de collecte (nom de produit, taille, couleur, quantite, adresse, telephone, confirmation, correction ou toute autre information de livraison), maintiens STRICTEMENT l'agent CHECKOUT. Un mot isole ou une phrase courte qui ne contient PAS de signal explicite d'abandon ne doit JAMAIS declencher un changement d'agent depuis CHECKOUT.
 """
 
@@ -595,7 +598,9 @@ def _init_orchestrator_result() -> Dict[str, Any]:
     }
 
 
-def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> Tuple[bool, bool]:
+def _detect_checkout_abandon_with_llm(
+    user_message: str, history: List[Dict[str, Any]], api_key: str
+) -> Tuple[bool, bool]:
     """
     Detect whether an active checkout lock should be released and/or if the checkout is abandoned.
 
@@ -603,10 +608,24 @@ def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> Tuple[
     """
     try:
         client = Client(api_key=api_key)
+        
+        # Format recent history for classification context
+        history_lines = []
+        for msg in history[-5:]:
+            role = "Client" if msg.get("role") == "user" else "Assistant"
+            history_lines.append(f"{role}: {msg.get('text', '')}")
+        history_context = "\n".join(history_lines)
+
+        contents = f"""HISTORIQUE RÉCENT DE LA CONVERSATION :
+{history_context}
+
+DERNIER MESSAGE DU CLIENT À ÉVALUER :
+Client: {user_message}"""
+
         system_instruction = (
             "Tu es un classificateur binaire pour libérer ou non le verrou de checkout. "
             "Un client est actuellement dans un processus de checkout actif. "
-            "Tu dois remplir le schéma JSON en évaluant deux variables :\n"
+            "Tu devez remplir le schéma JSON en évaluant deux variables :\n"
             "1. 'should_release_lock': True si le dernier message du client pose une question (prix, stock, livraison, etc.) "
             "OU s'il souhaite annuler/abandonner la commande en cours. False s'il continue simplement le checkout.\n"
             "2. 'is_abandonment': True uniquement si le client exprime explicitement l'intention d'abandonner, d'annuler, "
@@ -617,7 +636,7 @@ def _detect_checkout_abandon_with_llm(user_message: str, api_key: str) -> Tuple[
         )
         response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=f"Message du client : {user_message}",
+            contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
@@ -713,7 +732,7 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
     target_audience = "Grand public"
     communication_tone = "Chaleureux et professionnel"
     language_rules = "Réponds en ARABE si le client écrit en arabe ou arabizi. Réponds en FRANÇAIS si le client écrit en français."
-    ai_agent_name = "Tiktak AI"
+    ai_agent_name = DEFAULT_AI_AGENT_NAME
 
     if bot_config:
         shop_name = bot_config.shop_name or company.name
@@ -724,7 +743,7 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
         target_audience = bot_config.target_audience or "Grand public"
         communication_tone = bot_config.communication_tone or "Chaleureux et professionnel"
         language_rules = bot_config.language_rules or "Réponds en ARABE si le client écrit en arabe ou arabizi. Réponds en FRANÇAIS si le client écrit en français."
-        ai_agent_name = bot_config.ai_agent_name or "Tiktak AI"
+        ai_agent_name = bot_config.ai_agent_name or DEFAULT_AI_AGENT_NAME
 
     dynamic_linguistic_rules = (
         f"RÈGLES DE LANGUE ET DE TON (CRITIQUE DE SÉCURITÉ) :\n"
@@ -786,6 +805,7 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
             f"INDEX DU CATALOGUE DES PRODUITS DE LA BOUTIQUE (SANS DESCRIPTION) :\n"
             f"{catalog_text}\n\n"
             f"INFORMATIONS OBLIGATOIRES À COLLECTER :\n{required_checkout_info}\n\n"
+            f"LIVRAISON ET PAIEMENT :\n{delivery_policy}\n\n"
             f"{last_viewed_rule}"
             f"{collected_info_str}"
             f"RÈGLES DE COLLECTE ET DE CONFIRMATION :\n"
@@ -801,7 +821,11 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
             f"- Dès que TOUTES les informations requises ont une valeur valide et non vide dans l'historique ou dans 'INFORMATIONS DÉJÀ COLLECTÉES', passe 'order_ready' à True.\n"
             f"- Si le client demande à corriger ou modifier une information (ex: 'L'adresse beb mnara', 'Desloe beb mnara', 'non mon numero est 98...'), tu DOIS extraire cette nouvelle valeur corrigée dans 'extracted_entities' sous la clé correspondante (ex: 'address' ou 'phone_number') pour écraser la précédente, et confirme poliment la modification.\n"
             f"- Si le client refuse, s'oppose, dit 'Non', ou demande à annuler la commande (ex: 'Non annule', 'annuler'), garde 'order_confirmed' à False, indique poliment dans ton message que le changement ou l'annulation a été pris en compte, et passe 'order_ready' à False pour lui permettre de modifier ou de recommencer.\n"
-            f"- Quand 'order_ready' vaut True (et seulement s'il n'y a pas d'annulation/refusal ou de correction en cours), ta réponse au client DOIT toujours contenir un récapitulatif clair de toutes les entités collectées (produits/quantités, adresse, téléphone, nom et champs métier dynamiques), puis une question de confirmation explicite.\n"
+            f"- Quand 'order_ready' vaut True (et seulement s'il n'y a pas d'annulation/refusal ou de correction en cours), ta réponse au client DOIT toujours contenir un récapitulatif très clair, aéré et convivial (user-friendly) contenant les informations suivantes :\n"
+            f"  1. Liste des articles commandés avec quantités et prix unitaires.\n"
+            f"  2. Adresse et numéro de téléphone de livraison.\n"
+            f"  3. Calcul détaillé du prix (si applicable et s'il s'agit de produits physiques/payants) : Sous-total des articles, Frais de livraison (extraits de la section LIVRAISON ET PAIEMENT ci-dessus), et le PRIX TOTAL final à payer (Somme des articles + Livraison) calculé précisément.\n"
+            f"  4. Une question finale de confirmation conviviale (ex: 'هل تؤكدون الطلب؟').\n"
             f"- Ne finalise jamais sans cette étape de récapitulatif : le client doit répondre clairement oui/non après avoir vu les informations collectées.\n"
             f"- Une fois le récapitulatif présenté, si le client confirme explicitement son accord (sois très flexible et accepte toutes les variantes courantes : 'oui', 'ey', 'ok', 'okay', 'mrigl', 'c'est bon', 'd'accord', 'عديها'), passe 'order_confirmed' à True et génère un message de remerciement et de confirmation de commande/démo très chaleureux et rassurant, en accord parfait avec le domaine d'activité de la boutique (ex: confirmer qu'un expert va appeler pour la démo B2B, ou que le colis B2C est enregistré pour expédition sous 2-3 jours) et ses règles de langue.\n"
             f"- Si le client s'oppose, annule ou modifie une information, garde 'order_confirmed' à False et ajuste les informations ou réponds de manière appropriée.\n"
@@ -1009,7 +1033,7 @@ def run_orchestrator(
     should_release_lock = False
     is_abandonment = False
     if current_agent == "CHECKOUT" and conversation.state in {"LLM_ACTIVE", "LLM_CONFIRMING"}:
-        should_release_lock, is_abandonment = _detect_checkout_abandon_with_llm(user_message, api_key)
+        should_release_lock, is_abandonment = _detect_checkout_abandon_with_llm(user_message, history, api_key)
 
     # Check if the user is in an active checkout and explicitly cancels or abandons
     checkout_abandoned = False

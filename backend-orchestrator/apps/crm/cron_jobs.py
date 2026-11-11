@@ -1,5 +1,5 @@
 """
-cron_jobs.py — Background job functions for TikTak AI
+cron_jobs.py — Background job functions for Rebbah AI
 
 These are plain Python functions/classes called by Django management commands.
 No external scheduler dependency needed.

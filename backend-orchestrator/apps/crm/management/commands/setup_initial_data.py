@@ -10,17 +10,20 @@ Run automatically at startup via docker-compose, or manually:
 
 Required env vars:
     DJANGO_SUPERUSER_USERNAME  (default: admin)
-    DJANGO_SUPERUSER_EMAIL     (default: admin@tiktakpro.com)
+    DJANGO_SUPERUSER_EMAIL     (default: admin@rebbah.ai)
     DJANGO_SUPERUSER_PASSWORD  (required for creation)
     SHOP_ID                    (required for Company creation)
-    SHOP_NAME                  (default: TikTak Shop)
-    TIKTAK_API_TOKEN           (required for Company creation)
+    SHOP_NAME                  (default: Rebbah Shop)
+
+The Company dashboard_token is generated automatically on first save.
 """
 import os
 import logging
 
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
+
+from apps.crm.models import Company
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,7 @@ class Command(BaseCommand):
     def _create_superuser(self):
         User = get_user_model()
         username = os.getenv("DJANGO_SUPERUSER_USERNAME", "admin")
-        email    = os.getenv("DJANGO_SUPERUSER_EMAIL", "admin@tiktakpro.com")
+        email    = os.getenv("DJANGO_SUPERUSER_EMAIL", "admin@rebbah.ai")
         password = os.getenv("DJANGO_SUPERUSER_PASSWORD", "")
 
         if not password:
@@ -55,25 +58,21 @@ class Command(BaseCommand):
 
     # ── Company ────────────────────────────────────────────────────────────────
 
-    def _create_company(self):
-        from apps.crm.models import Company
-
+    def _create_company(self) -> None:
         shop_id   = os.getenv("SHOP_ID", "")
-        shop_name = os.getenv("SHOP_NAME", "TikTak Shop")
-        token     = os.getenv("TIKTAK_API_TOKEN", "")
+        shop_name = os.getenv("SHOP_NAME", "Rebbah Shop")
 
-        if not shop_id or not token:
+        if not shop_id:
             self.stdout.write(self.style.WARNING(
-                "[setup] SHOP_ID or TIKTAK_API_TOKEN not set — skipping Company creation."
+                "[setup] SHOP_ID not set — skipping Company creation."
             ))
             return
 
         company, created = Company.objects.get_or_create(
             shop_id=shop_id,
             defaults={
-                "name":             shop_name,
-                "tiktak_api_token": token,
-                "is_active":        True,
+                "name":      shop_name,
+                "is_active": True,
             },
         )
 

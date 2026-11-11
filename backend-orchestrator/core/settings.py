@@ -4,13 +4,15 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-tiktak-ai-key')
+# Production domain, always allowed in addition to the values read from the environment
+PRODUCTION_DOMAIN = 'ai2.tiktakpro.com'
+PRODUCTION_ORIGIN = f'https://{PRODUCTION_DOMAIN}'
+
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-rebbah-ai-key')
 DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-# Ensure production domains are always allowed statically
-for host in ['ai2.tiktakpro.com']:
-    if host not in ALLOWED_HOSTS:
-        ALLOWED_HOSTS.append(host)
+if PRODUCTION_DOMAIN not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(PRODUCTION_DOMAIN)
 
 
 
@@ -71,7 +73,7 @@ TEMPLATES = [
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'tiktak'),
+        'NAME': os.getenv('POSTGRES_DB', 'rebbah'),
         'USER': os.getenv('POSTGRES_USER', ''),
         'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
         'HOST': os.getenv('POSTGRES_HOST', 'db'),
@@ -95,9 +97,11 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3010",
-    "https://ai2.tiktakpro.com"
+# Local dashboard (ports 3010 and 3011) and production origin, plus extra origins via CORS_ALLOWED_ORIGINS (comma-separated)
+CORS_ALLOWED_ORIGINS = ["http://localhost:3010", "http://localhost:3011", PRODUCTION_ORIGIN] + [
+    origin.strip()
+    for origin in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+    if origin.strip()
 ]
 
 # Allow all ngrok subdomains for local development
@@ -111,16 +115,11 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 # Trusted origins for CSRF — must include all domains that POST to Django
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv(
-        'CSRF_TRUSTED_ORIGINS',
-        'https://ai2.tiktakpro.com'
-    ).split(',')
+    for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
     if origin.strip()
 ]
-# Ensure production domains are always allowed in CSRF trusted origins
-for origin in ['https://ai2.tiktakpro.com']:
-    if origin not in CSRF_TRUSTED_ORIGINS:
-        CSRF_TRUSTED_ORIGINS.append(origin)
+if PRODUCTION_ORIGIN not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(PRODUCTION_ORIGIN)
 
 # Allow ngrok for local development — Meta webhook can POST from ngrok URLs
 _ngrok_host = os.getenv('NGROK_URL', '')  # e.g. https://xxxx.ngrok-free.app

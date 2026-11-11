@@ -57,7 +57,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 **Exemple:**
 ```bash
-curl -X POST https://ai.tiktakpro.com/api/v1/gateway/sync/trigger/1LXybpj \
+curl -X POST https://<DOMAINE_PUBLIC>/api/v1/gateway/sync/trigger/1LXybpj \
   -H "Authorization: Bearer your-jwt-token"
 ```
 
@@ -89,7 +89,7 @@ Authorization: Bearer <JWT_TOKEN>
 {
   "status": "ok",
   "vision_service": "http://vision-service:8002",
-  "tiktak_api": "https://api.tiktakpro.com",
+  "catalog_api": "https://<API_CATALOGUE>",
   "active_companies": 3
 }
 ```
@@ -110,7 +110,7 @@ Tous les endpoints nécessitent une authentification :
 1. POST /sync/trigger
    ↓
 2. Pour chaque company active:
-   a. Fetch produits depuis TikTak API
+   a. Fetch produits depuis API catalogue
    b. Extraire images (produits + variations)
    c. POST vers Vision Service /vectorize
    ↓
@@ -126,7 +126,7 @@ Tous les endpoints nécessitent une authentification :
 1. **is_active** = True
 2. **shop_id** = UUID du shop
 
-**Note:** L'API TikTak est publique, aucun token n'est requis.
+**Note:** L'API catalogue est publique, aucun token n'est requis.
 
 ---
 
@@ -136,21 +136,21 @@ Tous les endpoints nécessitent une authentification :
 
 ```bash
 # 1. Login
-curl -X POST https://ai.tiktakpro.com/api/v1/auth/login/ \
+curl -X POST https://<DOMAINE_PUBLIC>/api/v1/auth/login/ \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "admin123"}'
 
 # Réponse: {"access": "eyJ0eXAi...", "refresh": "..."}
 
 # 2. Trigger sync
-curl -X POST https://ai.tiktakpro.com/api/v1/gateway/sync/trigger \
+curl -X POST https://<DOMAINE_PUBLIC>/api/v1/gateway/sync/trigger \
   -H "Authorization: Bearer eyJ0eXAi..."
 ```
 
 ### Avec Static Token
 
 ```bash
-curl -X POST https://ai.tiktakpro.com/api/v1/gateway/sync/trigger \
+curl -X POST https://<DOMAINE_PUBLIC>/api/v1/gateway/sync/trigger \
   -H "X-Dashboard-Token: your-static-token"
 ```
 
@@ -163,7 +163,7 @@ curl -X POST https://ai.tiktakpro.com/api/v1/gateway/sync/trigger \
 | 404 | No active companies found | Activer company dans Django Admin |
 | 401 | Authentication failed | Vérifier JWT/Static Token |
 | 500 | Vision service unavailable | Vérifier que vision-service est démarré |
-| 500 | TikTak API unavailable | Vérifier connectivité réseau |
+| 500 | API catalogue unavailable | Vérifier connectivité réseau |
 
 ---
 

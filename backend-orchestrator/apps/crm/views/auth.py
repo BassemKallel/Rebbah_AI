@@ -87,7 +87,7 @@ class MeView(APIView):
         user = request.user
         company = request.auth  # Company instance
 
-        # Static token auth → user is _TikTakUser (no Django User)
+        # Static token auth → user is _StaticTokenUser (no Django User)
         if not hasattr(user, 'profile'):
             return Response({
                 'user': None,
