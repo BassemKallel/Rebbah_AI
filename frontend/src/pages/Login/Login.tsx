@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../providers/AuthProvider';
-import logoTiktak from '../../assets/images/logoTiktak.png';
+import logoRebbah from '../../assets/images/logoRebbah.png';
 import './Login.css';
 
 export default function Login() {
@@ -40,21 +40,21 @@ export default function Login() {
       <div className="login-left">
         <div className="login-left-content">
           <div className="login-brand">
-            <img src={logoTiktak} alt="TikTak AI" className="login-brand-logo" />
-            <span className="login-brand-name">TikTak AI</span>
+            <img src={logoRebbah} alt="Rebbah AI" className="login-brand-logo" />
+            <span className="login-brand-name">Rebbah AI</span>
           </div>
 
           <h1 className="login-headline">
             L'assistant IA intelligent<br />pour votre boutique
           </h1>
           <p className="login-subtext">
-            Avec TikTak AI, automatisez vos conversations clients,
+            Avec Rebbah AI, automatisez vos conversations clients,
             gérez vos commandes et boostez vos ventes — le tout piloté par l'intelligence artificielle.
           </p>
         </div>
 
         <div className="login-left-footer">
-          <p>© 2026 TikTak AI. Tous droits réservés.</p>
+          <p>© 2026 Rebbah AI. Tous droits réservés.</p>
         </div>
       </div>
 

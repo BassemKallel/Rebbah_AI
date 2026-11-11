@@ -19,11 +19,11 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  access: 'tiktak_access_token',
-  refresh: 'tiktak_refresh_token',
-  shopId: 'tiktak_shop_id',
-  companyName: 'tiktak_company_name',
-  username: 'tiktak_username',
+  access: 'rebbah_access_token',
+  refresh: 'rebbah_refresh_token',
+  shopId: 'rebbah_shop_id',
+  companyName: 'rebbah_company_name',
+  username: 'rebbah_username',
 } as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {

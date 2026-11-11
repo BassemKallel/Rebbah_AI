@@ -117,7 +117,7 @@ const Navbar = () => {
             <div className="absolute right-0 top-12 w-48 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100">
                 <p className="text-sm font-semibold text-gray-800">Admin</p>
-                <p className="text-xs text-gray-400">admin@tiktak.ai</p>
+                <p className="text-xs text-gray-400">admin@rebbah.ai</p>
               </div>
               <div className="py-1">
                 <button className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
