@@ -218,7 +218,7 @@ Toute la configuration passe par le fichier `.env` à la racine, dont le modèle
 | `DJANGO_SECRET_KEY` | Clé secrète Django. |
 | `DJANGO_DEBUG` | `True` en développement uniquement. |
 | `ALLOWED_HOSTS` | Hôtes autorisés, séparés par des virgules. |
-| `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | Origines supplémentaires, séparées par des virgules. Le domaine de production est déjà inclus par défaut. |
+| `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` | Origines supplémentaires, séparées par des virgules. |
 | `FIELD_ENCRYPTION_KEY` | Clé de chiffrement des secrets des boutiques stockés en base (jetons de pages Meta, clés API). |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Accès à Gemini et modèle par défaut. |
 | `VISION_SERVICE_URL`, `VISION_SEARCH_PATH`, `SIMILARITY_THRESHOLD` | Service de vision et seuil de similarité visuelle (0,75 par défaut). |
