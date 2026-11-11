@@ -4,10 +4,15 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Production domain, always allowed in addition to the values read from the environment
+PRODUCTION_DOMAIN = 'ai2.tiktakpro.com'
+PRODUCTION_ORIGIN = f'https://{PRODUCTION_DOMAIN}'
+
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-rebbah-ai-key')
 DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'
-# Production domains are declared via the ALLOWED_HOSTS environment variable (comma-separated)
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+if PRODUCTION_DOMAIN not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(PRODUCTION_DOMAIN)
 
 
 
@@ -92,8 +97,8 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-# Extra origins (e.g. the public dashboard domain) via CORS_ALLOWED_ORIGINS, comma-separated
-CORS_ALLOWED_ORIGINS = ["http://localhost:3010"] + [
+# Local dashboard and production origin, plus extra origins via CORS_ALLOWED_ORIGINS (comma-separated)
+CORS_ALLOWED_ORIGINS = ["http://localhost:3010", PRODUCTION_ORIGIN] + [
     origin.strip()
     for origin in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
     if origin.strip()
@@ -113,6 +118,8 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',')
     if origin.strip()
 ]
+if PRODUCTION_ORIGIN not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(PRODUCTION_ORIGIN)
 
 # Allow ngrok for local development — Meta webhook can POST from ngrok URLs
 _ngrok_host = os.getenv('NGROK_URL', '')  # e.g. https://xxxx.ngrok-free.app
