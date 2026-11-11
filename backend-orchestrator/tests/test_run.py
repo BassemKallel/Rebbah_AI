@@ -559,7 +559,7 @@ def run_test():
     
     # Sequence of user messages to test the checkout flow
     messages = [
-        "Bonjour, j'aimerais tester votre solution Tiktak Pro s'il vous plaît",
+        "Bonjour, j'aimerais tester votre solution Rebbah AI s'il vous plaît",
         "Je m'appelle Mohamed Kallel",
         "Mon numéro est le 98123456",
         "Ma boutique s'appelle Kallel Shop et je fais environ 20 commandes par jour",

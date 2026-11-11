@@ -8,7 +8,7 @@ class BotConfiguration(models.Model):
 
     shop_id        = models.CharField(max_length=255, unique=True)
     shop_name      = models.CharField(max_length=255, blank=True, null=True)
-    ai_agent_name  = models.CharField(max_length=255, default="Tiktak AI")
+    ai_agent_name  = models.CharField(max_length=255, default="Rebbah AI")
     custom_intents = models.JSONField(default=dict, blank=True)
 
     # ── Configuration du Contexte LLM (Fragmenté) ──────────────────────────

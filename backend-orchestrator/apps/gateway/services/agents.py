@@ -20,6 +20,8 @@ from .entity_normalizer import normalize_entities
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_AI_AGENT_NAME: str = "Rebbah AI"
+
 # Silence Google ADK session service deprecation warning log
 logging.getLogger("google_adk.google.adk.sessions.in_memory_session_service").setLevel(logging.ERROR)
 
@@ -730,7 +732,7 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
     target_audience = "Grand public"
     communication_tone = "Chaleureux et professionnel"
     language_rules = "Réponds en ARABE si le client écrit en arabe ou arabizi. Réponds en FRANÇAIS si le client écrit en français."
-    ai_agent_name = "Tiktak AI"
+    ai_agent_name = DEFAULT_AI_AGENT_NAME
 
     if bot_config:
         shop_name = bot_config.shop_name or company.name
@@ -741,7 +743,7 @@ def _compile_agent_instructions(company, catalog_text: str, collected: dict, con
         target_audience = bot_config.target_audience or "Grand public"
         communication_tone = bot_config.communication_tone or "Chaleureux et professionnel"
         language_rules = bot_config.language_rules or "Réponds en ARABE si le client écrit en arabe ou arabizi. Réponds en FRANÇAIS si le client écrit en français."
-        ai_agent_name = bot_config.ai_agent_name or "Tiktak AI"
+        ai_agent_name = bot_config.ai_agent_name or DEFAULT_AI_AGENT_NAME
 
     dynamic_linguistic_rules = (
         f"RÈGLES DE LANGUE ET DE TON (CRITIQUE DE SÉCURITÉ) :\n"

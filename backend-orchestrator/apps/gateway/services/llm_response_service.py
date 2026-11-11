@@ -132,10 +132,10 @@ def _format_catalog_for_prompt(products: list) -> str:
         if not p.get("active", True):
             continue
 
-        # Support declinaisons (TikTak API) and variations (internal format)
+        # Support declinaisons (catalog API) and variations (internal format)
         raw_variations = p.get("declinaisons") or p.get("variations") or []
 
-        # Resolve price: TikTak API uses 'price', internal uses 'base_price'
+        # Resolve price: catalog API uses 'price', internal uses 'base_price'
         try:
             price = int(float(p.get("price") or p.get("base_price") or 0))
         except (ValueError, TypeError):

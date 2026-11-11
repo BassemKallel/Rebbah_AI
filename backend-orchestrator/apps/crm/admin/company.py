@@ -23,7 +23,7 @@ class CompanyAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Identité', {'fields': ('name', 'shop_id', 'is_active')}),
-        ('Auth & Accès Dashboard', {'fields': ('dashboard_token',), 'description': 'Token statique utilisé pour les webhooks TikTak PRO.'}),
+        ('Auth & Accès Dashboard', {'fields': ('dashboard_token',), 'description': 'Token statique utilisé pour les webhooks et intégrations API.'}),
         ('Meta Integration', {'fields': ('meta_page_id', 'meta_page_access_token', 'instagram_page_id'), 'description': 'Facebook Page ID, Token Messenger.'}),
         ('Bot Configuration', {'fields': ('bot_config',), 'description': 'Lier à une configuration de bot pour la personnalisation.'}),
         ('Mode IA — LLM', {

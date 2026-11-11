@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('name', models.CharField(help_text='Nom de la boutique', max_length=255)),
-                ('shop_id', models.CharField(help_text='UUID du shop sur la plateforme Tiktak', max_length=255, unique=True)),
+                ('shop_id', models.CharField(help_text='UUID du shop sur la plateforme', max_length=255, unique=True)),
                 ('meta_page_id', models.CharField(blank=True, help_text="Facebook Page ID (depuis Meta Developer → Messenger → Token d'accès)", max_length=100, null=True, unique=True)),
                 ('meta_page_access_token', models.TextField(blank=True, help_text='Page Access Token pour envoyer des réponses via Meta Send API', null=True)),
                 ('instagram_page_id', models.CharField(blank=True, help_text='Instagram Business Account ID (si différent du Page ID)', max_length=100, null=True, unique=True)),

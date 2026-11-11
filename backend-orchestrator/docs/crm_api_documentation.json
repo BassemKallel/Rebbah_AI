@@ -1,11 +1,11 @@
 {
-    "title": "TikTak AI — CRM API Documentation",
+    "title": "Rebbah AI — CRM API Documentation",
     "version": "1.0",
     "base_url": "/api/v1/crm",
     "authentication": {
         "type": "Bearer Token",
-        "header": "Authorization: Bearer <tiktak_api_token>",
-        "description": "Chaque shop a un tiktak_api_token unique configuré dans la table Company. Le token doit être envoyé dans le header Authorization."
+        "header": "Authorization: Bearer <dashboard_token>",
+        "description": "Chaque shop a un dashboard_token unique configuré dans la table Company. Le token doit être envoyé dans le header Authorization."
     },
     "endpoints": {
         "bot_configuration": {
@@ -20,7 +20,7 @@
                         "shop_id": "string — Identifiant unique du shop (ex: '1LXybpj')"
                     },
                     "request_headers": {
-                        "Authorization": "Bearer <tiktak_api_token>"
+                        "Authorization": "Bearer <dashboard_token>"
                     },
                     "request_body": null,
                     "response_200": {
@@ -42,7 +42,7 @@
                     "url": "/api/v1/crm/bot-configurations/",
                     "description": "Crée ou remplace entièrement la configuration d'un shop. Le shop_id est dans le body, pas dans l'URL.",
                     "request_headers": {
-                        "Authorization": "Bearer <tiktak_api_token>",
+                        "Authorization": "Bearer <dashboard_token>",
                         "Content-Type": "application/json"
                     },
                     "request_body": {
@@ -122,7 +122,7 @@
                 "ai_agent_name": {
                     "type": "string",
                     "required": false,
-                    "default": "Tiktak AI",
+                    "default": "Rebbah AI",
                     "description": "Le nom affiché du bot dans les réponses (variable {ai_agent_name})"
                 }
             }
